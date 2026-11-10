@@ -14,71 +14,22 @@ try
 {
     if (options.ExportPath is not null)
     {
-        var exportPath = Path.GetFullPath(options.ExportPath);
-        if (exportPath == Path.GetFullPath(options.DatabasePath))
+        if (options.SnapshotPath is not null)
         {
-            throw new InvalidOperationException("Export target must differ from the source database.");
+            return ExportSnapshot(options);
         }
 
-        LegacyDatabaseIdentity sourceIdentity;
-        LegacyBinaryExportResult exportResult;
-        string sourcePath;
-        string sourceHash;
-        int loadVersion;
-        IReadOnlyList<ContentEntity> sourceEntities;
-
-        using (var exportSession = LegacyDatabaseSession.Open(options.DatabasePath))
+        if (options.PostgresSourceConnectionString is not null)
         {
-            var exportMapped = LegacyContentMapper.Map(exportSession.Envir, exportSession);
-            sourceEntities = exportMapped.Entities;
-            sourceIdentity = LegacyBinaryExporter.Capture(exportSession.Envir, exportMapped.Entities);
-            exportResult = LegacyBinaryExporter.Write(exportSession.Envir, exportPath, options.Force);
-            sourcePath = exportSession.SourcePath;
-            sourceHash = exportSession.SourceHash;
-            loadVersion = Envir.LoadVersion;
+            return await ExportPostgres(options);
         }
 
-        LegacyDatabaseIdentity? reloadedIdentity = null;
-        if (options.VerifyExport)
-        {
-            using var reloaded = LegacyDatabaseSession.Open(exportResult.Path);
-            var reloadedMapped = LegacyContentMapper.Map(reloaded.Envir, reloaded);
-            reloadedIdentity = LegacyBinaryExporter.Capture(reloaded.Envir, reloadedMapped.Entities);
-            if (!sourceIdentity.SemanticallyEquals(reloadedIdentity))
-            {
-                var entityDifference = LegacyBinaryExporter.FindFirstEntityDifference(
-                    sourceEntities,
-                    reloadedMapped.Entities);
-                throw new InvalidDataException(
-                    $"Exported database failed semantic reload validation: source={sourceIdentity.SemanticHash}, " +
-                    $"reloaded={reloadedIdentity.SemanticHash}, " +
-                    $"entityComparison={entityDifference ?? "none"}, " +
-                    $"sourceIndices={JsonSerializer.Serialize(sourceIdentity.Indices)}, " +
-                    $"reloadedIndices={JsonSerializer.Serialize(reloadedIdentity.Indices)}, " +
-                    $"sourceListCounts={JsonSerializer.Serialize(sourceIdentity.ListCounts)}, " +
-                    $"reloadedListCounts={JsonSerializer.Serialize(reloadedIdentity.ListCounts)}.");
-            }
-        }
+        return ExportDatabase(options);
+    }
 
-        var exportResultJson = new
-        {
-            mode = "export",
-            database = sourcePath,
-            databaseSha256 = sourceHash,
-            loadVersion,
-            output = exportResult.Path,
-            outputSha256 = exportResult.Sha256,
-            outputSizeBytes = exportResult.SizeBytes,
-            outputVersion = Envir.Version,
-            semanticHash = sourceIdentity.SemanticHash,
-            counts = sourceIdentity.Counts,
-            indices = sourceIdentity.Indices,
-            listCounts = sourceIdentity.ListCounts,
-            verified = options.VerifyExport ? true : (bool?)null,
-            reloadedSemanticHash = reloadedIdentity?.SemanticHash
-        };
-        Console.WriteLine(JsonSerializer.Serialize(exportResultJson, ContentJson.IndentedOptions));
-        return 0;
+    if (options.SnapshotPath is not null || options.PostgresSourceConnectionString is not null)
+    {
+        throw new ArgumentException("--snapshot and --from-postgres can only be used together with --export.");
     }
 
     var outputDirectory = Path.GetFullPath(options.OutputDirectory);
@@ -154,6 +105,118 @@ catch (Exception exception)
     return 1;
 }
 
+static int ExportDatabase(ImportOptions options)
+{
+    var exportPath = Path.GetFullPath(options.ExportPath!);
+    if (exportPath == Path.GetFullPath(options.DatabasePath))
+    {
+        throw new InvalidOperationException("Export target must differ from the source database.");
+    }
+
+    using var session = LegacyDatabaseSession.Open(options.DatabasePath);
+    var mapped = LegacyContentMapper.Map(session.Envir, session);
+    var verification = LegacyContentExportService.Export(
+        session.Envir,
+        mapped.Entities,
+        exportPath,
+        options.VerifyExport,
+        options.Force);
+
+    PrintExportReport(
+        "export-db",
+        options,
+        verification,
+        new Dictionary<string, object?>
+        {
+            ["database"] = session.SourcePath,
+            ["databaseSha256"] = session.SourceHash,
+            ["loadVersion"] = Envir.LoadVersion
+        });
+    return 0;
+}
+
+static int ExportSnapshot(ImportOptions options)
+{
+    var snapshotPath = Path.GetFullPath(options.SnapshotPath!);
+    var snapshot = ContentSnapshotReader.Read(snapshotPath);
+    using var environment = LegacyRebuildEnvironment.Open();
+    var envir = LegacyContentRebuilder.Build(snapshot);
+    var verification = LegacyContentExportService.Export(
+        envir,
+        snapshot.Entities,
+        Path.GetFullPath(options.ExportPath!),
+        options.VerifyExport,
+        options.Force);
+
+    PrintExportReport(
+        "export-snapshot",
+        options,
+        verification,
+        new Dictionary<string, object?>
+        {
+            ["snapshot"] = snapshotPath,
+            ["releaseVersion"] = snapshot.Manifest.ReleaseVersion,
+            ["contentHash"] = snapshot.Manifest.ContentHash,
+            ["loadVersion"] = Envir.LoadVersion
+        });
+    return 0;
+}
+
+static async Task<int> ExportPostgres(ImportOptions options)
+{
+    var source = await PostgresContentReader.ReadLatestImportedAsync(
+        options.PostgresSourceConnectionString!);
+    using var environment = LegacyRebuildEnvironment.Open();
+    var envir = LegacyContentRebuilder.Build(source.Snapshot);
+    var verification = LegacyContentExportService.Export(
+        envir,
+        source.Snapshot.Entities,
+        Path.GetFullPath(options.ExportPath!),
+        options.VerifyExport,
+        options.Force);
+
+    PrintExportReport(
+        "export-postgres",
+        options,
+        verification,
+        new Dictionary<string, object?>
+        {
+            ["postgresImportRunId"] = source.ImportRunId,
+            ["releaseVersion"] = source.Snapshot.Manifest.ReleaseVersion,
+            ["contentHash"] = source.Snapshot.Manifest.ContentHash,
+            ["loadVersion"] = Envir.LoadVersion
+        });
+    return 0;
+}
+
+static void PrintExportReport(
+    string mode,
+    ImportOptions options,
+    LegacyContentExportVerification verification,
+    IReadOnlyDictionary<string, object?> source)
+{
+    var report = new Dictionary<string, object?>(StringComparer.Ordinal)
+    {
+        ["mode"] = mode
+    };
+    foreach (var (key, value) in source)
+    {
+        report[key] = value;
+    }
+
+    report["output"] = verification.Output.Path;
+    report["outputSha256"] = verification.Output.Sha256;
+    report["outputSizeBytes"] = verification.Output.SizeBytes;
+    report["outputVersion"] = Envir.Version;
+    report["semanticHash"] = verification.Identity.SemanticHash;
+    report["counts"] = verification.Identity.Counts;
+    report["indices"] = verification.Identity.Indices;
+    report["listCounts"] = verification.Identity.ListCounts;
+    report["verified"] = options.VerifyExport ? true : null;
+    report["reloadedSemanticHash"] = verification.ReloadedIdentity?.SemanticHash;
+    Console.WriteLine(JsonSerializer.Serialize(report, ContentJson.IndentedOptions));
+}
+
 internal sealed class ImportOptions
 {
     public required string DatabasePath { get; init; }
@@ -169,6 +232,10 @@ internal sealed class ImportOptions
     public string? DatabaseConnectionString { get; init; }
 
     public string? ExportPath { get; init; }
+
+    public string? SnapshotPath { get; init; }
+
+    public string? PostgresSourceConnectionString { get; init; }
 
     public bool VerifyExport { get; init; } = true;
 
@@ -186,8 +253,11 @@ internal sealed class ImportOptions
           --source <text>      Override manifest source label
           --dsn <connection>   PostgreSQL connection string or postgres:// URI
           --schema <path>      Apply one migration SQL instead of db/migrations/*.sql
-          --export <path>      Export the loaded legacy database instead of writing a snapshot
-          --no-verify           Skip reloading and comparing an exported database
+          --export <path>      Export a legacy database instead of writing a snapshot
+          --snapshot <dir>     Rebuild and export from a JSONL content snapshot
+          --from-postgres <connection>
+                               Rebuild and export from the latest imported PostgreSQL snapshot
+          --no-verify          Skip reloading and comparing an exported database
           --force              Replace snapshot files in a non-empty output directory
                                or replace an existing export file
           --help               Show this help
@@ -202,6 +272,9 @@ internal sealed class ImportOptions
         string? dsn = null;
         string? schema = null;
         string? export = null;
+        string? snapshot = null;
+        string? postgresSource = null;
+        var databaseWasSpecified = false;
         var outputWasSpecified = false;
         var releaseWasSpecified = false;
         var verifyExport = true;
@@ -215,6 +288,7 @@ internal sealed class ImportOptions
             {
                 case "--db":
                     database = NextValue(args, ref index, argument);
+                    databaseWasSpecified = true;
                     break;
                 case "--out":
                     output = NextValue(args, ref index, argument);
@@ -235,6 +309,12 @@ internal sealed class ImportOptions
                     break;
                 case "--export":
                     export = NextValue(args, ref index, argument);
+                    break;
+                case "--snapshot":
+                    snapshot = NextValue(args, ref index, argument);
+                    break;
+                case "--from-postgres":
+                    postgresSource = NextValue(args, ref index, argument);
                     break;
                 case "--no-verify":
                     verifyExport = false;
@@ -258,6 +338,23 @@ internal sealed class ImportOptions
                 "--export cannot be combined with --out, --release, --source, --dsn, or --schema.");
         }
 
+        if (snapshot is not null && postgresSource is not null)
+        {
+            throw new ArgumentException("--snapshot and --from-postgres are mutually exclusive.");
+        }
+
+        if ((snapshot is not null || postgresSource is not null) && export is null)
+        {
+            throw new ArgumentException(
+                "--snapshot and --from-postgres require --export.");
+        }
+
+        if ((snapshot is not null || postgresSource is not null) && databaseWasSpecified)
+        {
+            throw new ArgumentException(
+                "--snapshot/--from-postgres cannot be combined with --db.");
+        }
+
         if (export is null && !verifyExport)
         {
             throw new ArgumentException("--no-verify can only be used with --export.");
@@ -277,6 +374,8 @@ internal sealed class ImportOptions
             SchemaPath = schema,
             DatabaseConnectionString = dsn,
             ExportPath = export,
+            SnapshotPath = snapshot,
+            PostgresSourceConnectionString = postgresSource,
             VerifyExport = verifyExport,
             Force = force,
             ShowHelp = help

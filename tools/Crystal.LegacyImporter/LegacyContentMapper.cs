@@ -57,20 +57,7 @@ public static class LegacyContentMapper
         sourceCounts[ContentEntityTypes.Respawn] = respawns.Count;
         foreach (var (map, respawn, ordinal) in respawns)
         {
-            // RespawnIndex is not globally unique in legacy databases; use map + ordinal as the stable local identity.
-            var localIndex = (long)map.Index * 1_000_000L + ordinal + 1L;
-            var payload = LegacyJsonSerializer.Serialize(respawn);
-            var node = JsonNode.Parse(payload.GetRawText())!.AsObject();
-            node["mapIndex"] = map.Index;
-            node["mapFileName"] = map.FileName;
-            node["legacyRespawnIndex"] = respawn.RespawnIndex;
-            entities.Add(new ContentEntity
-            {
-                EntityType = ContentEntityTypes.Respawn,
-                LocalIndex = localIndex,
-                ContentKey = $"respawn.map{map.Index}.{ordinal + 1}",
-                Data = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(node))
-            });
+            entities.Add(CreateRespawnEntity(map, respawn, ordinal));
         }
 
         var legacy = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(new
@@ -105,11 +92,43 @@ public static class LegacyContentMapper
                 conquests = envir.ConquestInfoList.Count,
                 respawns = respawns.Count
             },
+            order = new
+            {
+                maps = envir.MapInfoList.Select(map => map.Index).ToArray(),
+                items = envir.ItemInfoList.Select(item => item.Index).ToArray(),
+                monsters = envir.MonsterInfoList.Select(monster => monster.Index).ToArray(),
+                npcs = envir.NPCInfoList.Select(npc => npc.Index).ToArray(),
+                quests = envir.QuestInfoList.Select(quest => quest.Index).ToArray(),
+                magics = envir.MagicInfoList.Select(magic => (long)magic.Spell).ToArray(),
+                gameshop = envir.GameShopList.Select(item => item.GIndex).ToArray(),
+                conquests = envir.ConquestInfoList.Select(conquest => conquest.Index).ToArray()
+            },
+            respawnTick = new
+            {
+                baseSpawnRate = envir.RespawnTick.BaseSpawnRate,
+                currentTickCounter = envir.RespawnTick.CurrentTickcounter,
+                options = envir.RespawnTick.Respawn.Select(option => new
+                {
+                    userCount = option.UserCount,
+                    delayLoss = option.DelayLoss
+                }).ToArray()
+            },
+            gtMaps = envir.GTMapList.Select(gtMap => new
+            {
+                index = gtMap.Index,
+                key = gtMap.Key,
+                name = gtMap.Name,
+                owner = gtMap.Owner,
+                leader = gtMap.Leader,
+                leader2 = gtMap.Leader2,
+                price = gtMap.Price,
+                days = gtMap.Days,
+                begin = gtMap.Begin
+            }).ToArray(),
             notImported = new
             {
                 recipes = "loaded from Envir/Recipe, outside Server.MirDB",
-                buffs = "initialized during server startup, outside Server.MirDB",
-                gtMaps = "runtime/GT state, outside Server.MirDB"
+                buffs = "initialized during server startup, outside Server.MirDB"
             }
         }, ContentJson.CompactOptions));
 
@@ -118,6 +137,24 @@ public static class LegacyContentMapper
             Entities = entities,
             SourceCounts = sourceCounts,
             Legacy = legacy
+        };
+    }
+
+    public static ContentEntity CreateRespawnEntity(MapInfo map, RespawnInfo respawn, int ordinal)
+    {
+        // RespawnIndex is not globally unique in legacy databases; use map + ordinal as the stable local identity.
+        var localIndex = (long)map.Index * 1_000_000L + ordinal + 1L;
+        var payload = LegacyJsonSerializer.Serialize(respawn);
+        var node = JsonNode.Parse(payload.GetRawText())!.AsObject();
+        node["mapIndex"] = map.Index;
+        node["mapFileName"] = map.FileName;
+        node["legacyRespawnIndex"] = respawn.RespawnIndex;
+        return new ContentEntity
+        {
+            EntityType = ContentEntityTypes.Respawn,
+            LocalIndex = localIndex,
+            ContentKey = $"respawn.map{map.Index}.{ordinal + 1}",
+            Data = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(node))
         };
     }
 

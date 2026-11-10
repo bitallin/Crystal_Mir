@@ -44,6 +44,18 @@ cd "$ROOT"
   --release "api.$(date -u +%Y%m%d%H%M%S)" \
   --dsn "$DSN" >/dev/null
 
+"$DOTNET" run --project tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj \
+  -c "$CONFIGURATION" --no-build -- \
+  --db tests/fixtures/golden/Server.MirDB \
+  --export "$TMP/direct/Server.MirDB" >/dev/null
+
+"$DOTNET" run --project tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj \
+  -c "$CONFIGURATION" --no-build -- \
+  --from-postgres "$DSN" \
+  --export "$TMP/postgres-rebuild/Server.MirDB" >/dev/null
+
+cmp "$TMP/direct/Server.MirDB" "$TMP/postgres-rebuild/Server.MirDB" >/dev/null
+
 PORT="$(python3 - <<'PY'
 import socket
 s = socket.socket()

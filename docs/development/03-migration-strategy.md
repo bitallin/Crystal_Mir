@@ -24,7 +24,7 @@
 - 用现有二进制加载实现第一个 provider。
 - `Envir` 改为通过 provider 读取内容，行为不变。
 
-### 阶段 C：PostgreSQL 导入与二进制导出（初版已完成）
+### 阶段 C：PostgreSQL 导入与二进制导出（已完成初版）
 
 - 已实现 `tools/Crystal.LegacyImporter`，读取现有 `ItemInfo`、`MonsterInfo`、`MapInfo` 等构造器。
 - 已生成 JSONL 快照并写入 `content_entity`。
@@ -32,7 +32,8 @@
 - 已实现 `LegacyBinaryExporter` v1：按 `SaveDB()` 顺序写出 `Version=117` 数据库，使用临时文件
   和原子替换，并通过 `LoadDB()` 冷回读比较实体语义哈希。
 - 黄金样本导出两次字节一致；导出库重新生成的快照与源库实体文件逐字节一致。
-- 待完成：从快照/PostgreSQL 重建旧实体后导出、资源/脚本导入、PostgreSQL 16 staging 演练。
+- 已实现从 JSONL 快照和 PostgreSQL 最新导入批次重建旧实体后导出；黄金样本三条路径输出逐字节一致。
+- 待完成：资源/脚本导入、PostgreSQL 16 staging 演练。
 
 ### 阶段 D：双读验证
 
@@ -56,8 +57,8 @@
 
 - 保留 `Envir.Version=117`、`MinVersion=60` 的读取逻辑。
 - 新字段写入 `legacy` 扩展，不丢失旧数据。
-- `LegacyBinaryExporter` v1 能从加载后的旧数据库生成可被当前 `LoadDB()` 读取的数据库，作为
-  二进制写入和回读保障；从控制面快照生成回滚数据库仍待实现。
+- `LegacyBinaryExporter` 能从加载后的旧数据库、JSONL 快照或 PostgreSQL 活动批次生成可被当前
+  `LoadDB()` 读取的数据库，作为二进制写入、回读和纯控制面回滚保障。
 - 索引映射表记录 `local_index` 与 `content_key` 的对应关系。
 
 ## 4. 代码抽离顺序

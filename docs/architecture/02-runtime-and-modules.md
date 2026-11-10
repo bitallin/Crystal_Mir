@@ -36,7 +36,7 @@ Crystal.Cli                   运维与开发 CLI
 src/Crystal.Content           内容快照、哈希、校验（MIT）
 src/Crystal.Control.Api       内容、账号、RBAC 和审计 API，ASP.NET Core + Npgsql
 src/Crystal.ZoneServer        Linux 区服控制台宿主，加载旧数据库和内容并监听游戏端口（GPL 边界）
-tools/Crystal.LegacyImporter  二进制导入和 PostgreSQL 写入（GPL 边界工具）
+tools/Crystal.LegacyImporter  二进制导入、快照/PostgreSQL 重建和 PostgreSQL 写入（GPL 边界工具）
 db/migrations                 PostgreSQL schema
 ```
 

@@ -1,7 +1,7 @@
 # 项目进度台账
 
 > 最后更新：2026-11-10
-> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、二进制导出 round-trip、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
+> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
 
 ## 1. 当前状态
 
@@ -13,7 +13,7 @@
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
-| 数据迁移 | 进行中 | 二进制导入器、JSONL 快照、PostgreSQL schema 和旧二进制导出 round-trip 完成；快照/PostgreSQL 到二进制重建、资源/脚本导入待做 |
+| 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；资源/脚本导入待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,734 实体导入 + 哈希校验 + 回归测试 |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
@@ -28,7 +28,7 @@
 | 里程碑 | 状态 | 完成度 | 备注 |
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
-| M1 架构骨架与数据底座 | 进行中 | 85% | 数据链路、只读 API、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出 v1、Linux 区服宿主和 Ubuntu 部署完成；快照/PostgreSQL 到二进制重建、真实关系 API、内容写入/发布 API、资源/脚本管线和 PG16 staging 待做 |
+| M1 架构骨架与数据底座 | 进行中 | 90% | 数据链路、只读 API、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；真实关系 API、内容写入/发布 API、资源/脚本管线和 PG16 staging 待做 |
 | M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
@@ -233,6 +233,18 @@
 - 未验证：GitHub Actions 首次运行结果待推送后确认；外部资源仍按 `scripts/fetch-external.sh` 单独准备。
 - 决策：仅发布现有代码和方法，不改变架构、协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
 
+### 2026-11-10（M1 快照/PostgreSQL 旧库重建）
+
+- 范围：完成从活动 JSONL 快照或 PostgreSQL 最新 `imported` 批次重建旧实体，并导出可被当前 `LoadDB()` 读取的 `Server.MirDB`，覆盖纯控制面回滚路径。
+- 新增 `LegacyContentRebuilder`：通过反射恢复 `ItemInfo`、`MonsterInfo`、`MapInfo`、`NPCInfo`、`QuestInfo`、`MagicInfo`、`GameShopItem`、`ConquestInfo` 和 `DragonInfo`，解析 `$ref` 引用并校验 `respawn` 投影。
+- 快照元数据：`manifest.legacy` 增加实体列表顺序、全局索引、`RespawnTick` 和 `GTMap` 字段，保证重建结果不只语义一致，还能保持原始二进制顺序。
+- CLI：新增 `--snapshot <dir> --export <path>` 和 `--from-postgres <connection> --export <path>`；新增 `scripts/rebuild-db.sh`，支持快照和 PostgreSQL 两种来源。
+- PostgreSQL 读取：新增最新导入批次查询和 `content_entity` 读取，恢复完整 manifest、实体 JSON 和批次 ID；重建仍执行冷回读语义校验。
+- 测试：`scripts/verify-content.sh` 增加快照重建、重建库再导入和逐字节比较；`scripts/test-control-api.sh` 增加从 PostgreSQL 导入批次重建并直接导出比较。
+- 验证：黄金样本快照重建文件与直接导出文件逐字节一致，大小 548,567 字节，SHA256 均为 `3775771c893d95f490bbb54b868650c91f7200e8d268d356a9c22d0a7e11284a`；本地 PostgreSQL 12 的 `--from-postgres` 重建结果同样逐字节一致；`./scripts/verify-content.sh` 和 `./scripts/test-control-api.sh` 均通过。
+- 未验证：真实 Windows 旧服务端启动重建库、PostgreSQL 16 staging、资源/脚本导入、超大内容集性能和并发导出。
+- 决策：保持现有二进制格式、内容快照格式和发布模型，不新增 ADR。
+
 ## 4. 决策记录
 
 | 日期 | 决策 | ADR |
@@ -255,14 +267,13 @@
 
 ## 6. 下一步
 
-1. 实现从活动 JSONL 快照/PostgreSQL 重建旧实体并导出 `Server.MirDB`，覆盖纯控制面回滚。
-2. 把掉落文本、NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，为地图拓扑、刷新点、传送门和掉落关系补只读 API。
-3. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
-4. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
-5. 在 PostgreSQL 16 staging 演练 schema 和升级路径，确认 GitHub Actions PG16 job 稳定。
-6. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
-7. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
-8. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。
+1. 把掉落文本、NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，为地图拓扑、刷新点、传送门和掉落关系补只读 API。
+2. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
+3. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
+4. 在 PostgreSQL 16 staging 演练 schema 和升级路径，确认 GitHub Actions PG16 job 稳定。
+5. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
+6. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+7. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。
 
 ## 7. 更新规则
 

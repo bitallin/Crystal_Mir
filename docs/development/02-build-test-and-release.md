@@ -56,7 +56,7 @@ src/Crystal.Cli
 ```
 
 结果：旧服务端、客户端、内容库、Control API 和工具构建成功；`ItemSecurity` 通过 358 项检查；
-`ContentSnapshot` 通过 13 项检查；黄金数据库可加载；黄金内容导入和二进制导出 round-trip 通过；
+`ContentSnapshot` 通过 13 项检查；黄金数据库可加载；黄金内容导入、快照重建和二进制导出 round-trip 通过；
 Control.Web 全部 JavaScript 通过 `node --check`；Linux 区服加载 463 张地图并以 SIGTERM 正常退出。
 
 发布自包含 Linux 区服：
@@ -74,6 +74,15 @@ Control.Web 全部 JavaScript 通过 `node --check`；Linux 区服加载 463 张
 ```
 
 导出默认执行冷回读语义校验；已有目标文件必须显式使用 `--force` 覆盖。
+
+从快照或 PostgreSQL 活动批次重建旧二进制数据库：
+
+```bash
+./scripts/rebuild-db.sh artifacts/content/golden artifacts/legacy-rebuild/Server.MirDB
+./scripts/rebuild-db.sh --postgres "$CRYSTAL_DATABASE_URL" artifacts/legacy-rebuild/Server.MirDB
+```
+
+黄金样本的快照重建结果与直接导出文件逐字节一致；`test-control-api.sh` 也会验证 PostgreSQL 重建结果。
 
 浏览器联调需要真实 PostgreSQL 和 Python Playwright：
 
@@ -97,7 +106,7 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 `test-control-api.sh` 同时验证受控 CORS 预检；Control.Web 使用 `?api=` 指定 API 地址，
 API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 
-该脚本执行 schema 迁移、黄金导入、API 启动、认证/账号生命周期和只读接口验证。CI 使用 PostgreSQL 16 service container
+该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期和只读接口验证。CI 使用 PostgreSQL 16 service container
 运行同一脚本；本地已验证 PostgreSQL 12 兼容。本地设置 `CRYSTAL_DATABASE_URL` 或
 `CRYSTAL_DB_CONNECTION` 后，`./scripts/ci.sh` 也会自动运行该集成测试，否则明确跳过。
 
@@ -125,6 +134,7 @@ API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 - 旧实现加载后导出实体快照。
 - 新导入器加载后导出实体快照。
 - 旧二进制数据库导出后重新加载，并对比语义哈希和全部实体快照。
+- JSONL 快照和 PostgreSQL 活动批次分别重建二进制，并与直接导出逐字节比较。
 - 对比数量、索引、关键字段、掉落期望、脚本。
 
 ### 3.4 协议测试
@@ -159,7 +169,7 @@ restore -> build -> unit tests -> integration tests
 ./scripts/ci.sh
 ```
 
-它执行构建、回归测试、黄金数据库检查、黄金内容导入、旧二进制导出 round-trip，并在 Node
+它执行构建、回归测试、黄金数据库检查、黄金内容导入、快照重建、旧二进制导出 round-trip，并在 Node
 可用时检查 Control.Web JavaScript 语法。GitHub Actions 配置见
 `.github/workflows/ci.yml`；独立 `control-api-integration` job 使用 PostgreSQL 16 验证迁移、导入和 API。
 
