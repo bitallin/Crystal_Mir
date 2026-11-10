@@ -1,0 +1,274 @@
+# 项目进度台账
+
+> 最后更新：2026-11-10
+> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、二进制导出 round-trip、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
+
+## 1. 当前状态
+
+| 项目 | 状态 | 说明 |
+| --- | --- | --- |
+| 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
+| 架构决策 | 已完成初版 | ADR 0001～0004 |
+| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具构建成功；358 项回归检查通过 |
+| Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
+| Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
+| 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
+| 数据迁移 | 进行中 | 二进制导入器、JSONL 快照、PostgreSQL schema 和旧二进制导出 round-trip 完成；快照/PostgreSQL 到二进制重建、资源/脚本导入待做 |
+| 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,734 实体导入 + 哈希校验 + 回归测试 |
+| 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
+| CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
+| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口、账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、10 类内容分页检索、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API 与真实世界关系 API 待做 |
+| 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
+| 热更新 | 未开始 | 新 manifest/启动器/Agent 尚未实现 |
+| 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
+| 许可证清单 | 进行中 | 代码/外部资源清单已建立；MapEditor 和素材授权待确认 |
+
+## 2. 里程碑状态
+
+| 里程碑 | 状态 | 完成度 | 备注 |
+| --- | --- | --- | --- |
+| M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
+| M1 架构骨架与数据底座 | 进行中 | 85% | 数据链路、只读 API、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出 v1、Linux 区服宿主和 Ubuntu 部署完成；快照/PostgreSQL 到二进制重建、真实关系 API、内容写入/发布 API、资源/脚本管线和 PG16 staging 待做 |
+| M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
+| M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
+| M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
+| M5 生产加固 | 未开始 | 0% | 依赖 M4 |
+| M6 通用化与生态 | 未开始 | 0% | 长期 |
+
+## 3. 工作日志
+
+### 2026-11-09
+
+- 范围：建立完整技术文档体系和后续进度记录机制。
+- 改动：新增 `AGENTS.md`、`docs/README.md`、`docs/PROGRESS.md`、架构文档 7 篇、ADR 4 篇、开发文档 3 篇、需求能力矩阵、路线图与里程碑、参考手册索引、运行手册索引。
+- 关键结论：采用控制面/数据面分离；PostgreSQL + 不可变内容快照；保留现有客户端协议并引入边缘网关；控制面与 GPL 服务端代码隔离。
+- 验证：检查文档目录、内部链接和文件存在性；未执行代码构建（当前环境无 .NET SDK）。
+- 下一步：完成 M0 构建基线、外部资源清单和许可证/素材审查清单。
+
+### 2026-11-09（M0 构建与资源基线）
+
+- 范围：恢复构建、拉取外部资源、建立数据库检查和黄金样本。
+- 环境：Ubuntu 20.04，安装 .NET SDK 8.0.427 到 `~/.dotnet`。
+- 构建：`Shared`、`Server.Library`、`Server.MirForms`、`Client` 全部构建成功；Windows 项目使用 `-p:EnableWindowsTargeting=true` 交叉构建。
+- 测试：`Tests/ItemSecurity` 通过 358 项回归检查。
+- 工具：新增 `tools/Crystal.DbInspector`、`scripts/build.sh`、`scripts/test.sh`、`scripts/inspect-db.sh`、`scripts/inspect-all-db.sh`、`scripts/fetch-external.sh`、`scripts/ci.sh`、`.github/workflows/ci.yml`。
+- 资源：拉取 `Crystal.Database`（3.4 GB，Unlicense）和 `Crystal.MapEditor`（33 MB，未发现明确许可证），放在 `.external/` 并加入忽略。
+- 数据库：Jev v111、Daneo1989 v83、cjlaaa v105 可加载；NightWolf 头部版本 34，低于最低支持版本 60。
+- 黄金样本：`tests/fixtures/golden/Server.MirDB`，SHA256 `37358b0d95eafe458b060c1db2ebc0524757fe524fb93125ccb98d9b4a8ef78b`。
+- 文档：新增 `docs/reference/external-resources.md`、`db-inventory.md`、`license-inventory.md`、`tests/fixtures/README.md`，并更新本地环境和构建文档。
+- 验证：`./scripts/inspect-db.sh` 成功；检查器使用临时目录，不在仓库根目录生成 `Configs/` 或 `Envir/`。
+- 未验证：客户端和 WinForms 宿主的实际运行、登录和进服；当前环境是 Linux。
+- 下一步：Windows 冒烟测试，随后进入 M1 PostgreSQL schema 和二进制导入器。
+
+### 2026-11-09（M1 参考文档生成）
+
+- 范围：从现有代码生成内容字段、协议包和配置项清单。
+- 工具：新增 `tools/Crystal.FieldInventory` 和 `scripts/generate-reference.sh`。
+- 产物：`docs/reference/content-schema.md`（25 个实体）、`packet-catalog.md`（432 个包）、`config-keys.md`（274 项）。
+- 处理：区分公开字段、可写属性和只读计算属性；字段清单不包含继承成员。
+- 验证：生成命令可重复执行；生成过程在临时目录运行，不会在仓库根目录创建 `Configs/` 或 `Envir/`。
+- CI：`scripts/ci.sh` 端到端通过；测试和检查器均使用临时工作目录，工作区保持干净。
+- 下一步：基于字段清单设计 PostgreSQL schema，并实现 `LegacyBinaryImporter`。
+
+### 2026-11-09（M1 内容快照、二进制导入器与 PostgreSQL schema）
+
+- 范围：打通 `Server.MirDB -> JSONL 快照 -> PostgreSQL` 的数据底座。
+- 新增 `src/Crystal.Content`（MIT）：实体模型、canonical JSON、manifest、SHA256 文件校验、快照读写和计数校验。
+- 新增 `tools/Crystal.LegacyImporter`（链接 GPL `Server.Library`）：读取旧数据库，反射映射实体，处理循环引用和实体引用，生成快照，可选写入 PostgreSQL。
+- 新增 `db/migrations/0001_content_schema.sql`：`content_import_run`、`content_entity`、`content_release`、资源表和只读视图。
+- 新增 `scripts/import-db.sh`、`scripts/verify-content.sh`，并接入 `build.sh`、`test.sh`、`ci.sh` 和 GitHub Actions。
+- 映射：物品、怪物、地图、NPC、任务、技能、商城、攻城、龙、展平刷怪点；配方/Buff/掉落/脚本不在 `Server.MirDB`，已写入 manifest 限制说明。
+- 黄金样本：9,734 个实体（物品 1,628、怪物 555、地图 463、NPC 375、任务 154、技能 111、商城 105、攻城 1、龙 1、刷怪点 6,341），`contentHash` 为 `7e7a6dd14c091b63eed9bb271ae5bbb6ec080d081669048beeefb6c46a373825`。
+- 验证：`ContentSnapshot` 13 项检查通过；黄金导入两次输出逐字节一致；本地 PostgreSQL 12 上 schema 迁移、`COPY` 写入、重复导入和只读视图通过；`content_import_run` 记录完整。
+- 未验证：PostgreSQL 16 staging、Windows 运行、资源/脚本导入、`LegacyBinaryExporter`。
+- 下一步：搭建 `Crystal.Control.Api` 只读内容接口，再做 `LegacyBinaryExporter` 和资源/脚本导入。
+
+### 2026-11-10（M1 只读 Control API）
+
+- 范围：建立控制面只读 API 和真实 PostgreSQL 集成验证。
+- 新增 `src/Crystal.Control.Api`（ASP.NET Core Minimal API + Npgsql，不引用 GPL 代码）。
+- 接口：`/health/live`、`/health/ready`、导入批次、批次类型计数、内容分页查询、按旧索引/内容键查询。
+- 安全：API key（`X-Api-Key`/Bearer）、Production 缺密钥拒绝启动、240 次/分钟 IP 限流、`no-store`、ProblemDetails、隐藏 Kestrel Server 头。
+- 查询：1-based 分页、`pageSize` 1～200、`sort` 白名单、`q` 参数化模糊搜索并转义通配符、默认最新 `imported` 批次。
+- 新增 `scripts/test-control-api.sh`：真实 schema 迁移、黄金导入、启动 API、验证 401、健康检查、分页、详情、类型计数和非法参数。
+- CI：新增 PostgreSQL 16 service container job，运行完整 Control API 集成脚本。
+- 验证：本地 PostgreSQL 12 上 `test-control-api.sh` 通过；API 返回物品 1,628、怪物 555 等 10 类计数，详情和按内容键查询一致；带数据库运行 `./scripts/ci.sh` 时 API 集成也通过。
+- 未验证：GitHub Actions 实际运行、PostgreSQL 16 本地、管理员账号/RBAC/审计、浏览器 Web 后台。
+- 下一步：补齐账号/RBAC/审计 schema 与认证端点，再搭建 `Crystal.Control.Web` 只读内容浏览，随后实现 `LegacyBinaryExporter`。
+
+### 2026-11-10（M1 认证、RBAC 与审计）
+
+- 范围：为控制面补上管理端账号、会话、授权和审计骨架。
+- schema：新增 `db/migrations/0002_control_identity_audit_schema.sql`，包含 `control_account`、角色/权限、账号角色、会话和 `audit_event`；内置平台管理员、版本作者、发布审核、GM、财务和审计六类角色。
+- 密码与会话：密码使用 Argon2id；访问令牌为短时 JWT，刷新令牌随机生成、仅存 SHA-256 哈希，并在刷新时轮换；JWT 每次请求会检查数据库会话，登出后立即失效。
+- 授权：权限按 `resource:action` 校验，内容、账号、角色和审计接口分别要求对应权限；API key 保留为机器到机器/兼容凭证并拥有通配权限。
+- 接口：新增 `/api/v1/auth/login`、`/auth/refresh`、`/auth/logout`、`/auth/me`、`/accounts`、`/roles`、`/audit/events`。
+- 审计：登录成功/失败、刷新、登出、账号创建和授权拒绝写入 `audit_event`；数据库触发器禁止 UPDATE、DELETE 和 TRUNCATE。
+- 启动：支持通过 `CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD` 在空库创建初始管理员；Production 强制配置 `CRYSTAL_CONTROL_JWT_SIGNING_KEY`。
+- 迁移：`Crystal.LegacyImporter` 改为按文件名顺序应用 `db/migrations/*.sql`，不再硬编码单个 migration。
+- 验证：`./scripts/ci.sh` 通过；358 项回归、13 项内容快照检查、黄金导入和 PostgreSQL 12 Control API 集成通过；集成覆盖登录、JWT 访问、短时/刷新令牌轮换、旧刷新令牌重放拒绝、RBAC 403、登出即时撤销和审计查询；手工验证审计 UPDATE/DELETE 均被拒绝。
+- 未验证：MFA/OIDC、账号禁用/改密/重置/角色调整、日志归档、PostgreSQL 16 staging、GitHub Actions 实际运行和浏览器 Web 后台。
+- 下一步：搭建 `Crystal.Control.Web` 最小只读内容浏览器并接入账号登录，随后补齐账号生命周期与 `LegacyBinaryExporter`。
+
+### 2026-11-10（Crystal.Control.Web 高保真原型）
+
+- 范围：完成管理后台的完整信息架构、高保真版式和可点击交互原型，用于确认内容生产、发布、区服运营、玩家交易、权限安全和平台治理的页面边界。
+- 新增 `src/Crystal.Control.Web`：首版 36 个后台业务页面和 1 个登录页，共 37 个页面入口/43 个可访问路由；同日扩展为 38 个后台业务页面 + 登录页，共 39 个页面入口/45 个可访问路由（见下一条）；13 类内容域、全局搜索、内容详情抽屉、审批/高风险确认弹窗、登录模拟和移动端导航。
+- 新增 `docs/product/control-web-prototype.md`：记录一级/二级信息架构、页面职责、统一版式、首版 6 条关键业务闭环（同日扩展为 7 条，见下一条）、高风险交互和视觉规范。
+- 新增 `scripts/preview-control-web.sh`：无构建依赖的本地预览入口，默认监听 `127.0.0.1:4173`。
+- 首版验证：全部 JavaScript 通过 `node --check`；Playwright 逐页打开 43 个可访问路由（37 个页面入口 + 6 个区服详情）无控制台错误；桌面 1440×1000 和移动 390×844 无横向溢出；内容详情抽屉、全局搜索、审批弹窗和移动端侧栏交互通过；扩展后的复验见下一条。
+- 未验证：真实 Control API 接入、真实 JWT/RBAC、生产前端框架、构建链和浏览器兼容矩阵。
+- 下一步：将登录、导入批次、内容只读查询和审计接入 Control API，替换演示数据，再补齐账号生命周期与 `LegacyBinaryExporter`。
+
+### 2026-11-10（世界关系、刷怪掉落与地图坐标）
+
+- 范围：围绕热血传奇的运行时玩法，把地图层、入口/出口坐标、刷怪点、怪物、刷新时间、掉落组、装备产出、NPC 坐标和在线人物坐标组织成可校验关系。
+- 新增 `src/Crystal.Control.Web/assets/world-data.js`：15 个地图节点、20 个传送节点、10 个刷怪点、7 个 NPC 坐标、6 个掉落组、4 条典型玩法链和 5 个在线人物坐标。
+- 新增 `#/world-map` 地图拓扑与坐标页：地图组层级链路、0,0 到地图尺寸的坐标画布、安全区、刷怪点、Boss、NPC、传送门、在线人物、入口/出口坐标表和刷新时间表。
+- 新增 `#/content-relations` 世界关系图谱：地图 → 刷怪点 → 怪物 → 掉落组 → 装备正查，装备 → 来源怪物 → 地图坐标反查，并展示关系完整性检查和发布门禁。
+- 内容总览新增“世界关系工作台”快捷入口；新增本地 SVG favicon，消除资源 404。
+- 升级内容详情抽屉：物品显示来源怪物/地图坐标/爆率，怪物显示刷新点/刷新间隔/掉落组，地图显示入口出口、刷怪点和 NPC，NPC/掉落组/刷新点显示对应世界关系。
+- 补充演示内容：屠龙、骨玉权杖、龙纹剑、法神披风等装备，沃玛教主、祖玛卫士等怪物，祖玛一层/二层/教主大厅、沃玛二层、盟重省等地图；GM 工作台增加在线人物当前地图、坐标和朝向，并支持地图定位。
+- 文档：更新 `src/Crystal.Control.Web/README.md` 和 `docs/product/control-web-prototype.md`，补充世界关系模型、坐标字段、发布门禁、页面口径和验证方式。
+- 验证：全部 JavaScript 通过 `node --check`；Playwright 逐页打开 45 个可访问路由（39 个页面入口 + 6 个区服详情动态路由）无控制台错误；桌面 1440×1000 和移动 390×844 无横向溢出；地图切换、关系链切换、详情抽屉和内容总览快捷入口通过。
+- 未验证：真实 Control API、真实运行时坐标、真实 MirDB 掉落/NPC 脚本映射和关系 schema；当前世界关系仍为演示数据。
+- 下一步：把地图拓扑、刷新点、传送门和掉落组落成正式只读关系 API，再将原型校验替换为服务端结果。
+
+### 2026-11-10（地图级刷怪数量与怪物分布）
+
+- 范围：明确一张地图可以配置多个刷怪点、多种怪物，每个刷怪点有独立坐标、数量、半径和刷新时间；地图怪物总量按所有刷怪点数量加总。
+- 地图页新增“本图刷怪总览”：展示刷怪点数、怪物种类、怪物总量、Boss 点数，并按怪物种类汇总数量、占比、刷新点数和刷新间隔。
+- 地图页保留并强化“刷怪点明细”：逐点展示怪物、坐标、数量、固定延迟和随机延迟。
+- 地图选择器和同一地图组链路增加每张地图的怪物总量与种类数，例如祖玛寺庙三层显示 22 只 / 2 种。
+- 世界关系图谱的刷新点节点和刷怪链路表增加怪物数量，地图节点增加本图总量与种类数；地图和怪物详情抽屉增加汇总口径。
+- 文档：更新 `src/Crystal.Control.Web/README.md` 和 `docs/product/control-web-prototype.md`，补充地图刷怪汇总、容量门禁和验证口径。
+- 验证：全部 JavaScript 通过 `node --check`；Playwright 45 条可访问路由无失败，桌面和移动端无横向溢出，世界关系与地图页无控制台错误。
+- 未验证：真实 MirDB 刷怪点全量数据、地图容量/性能预算和真实运行时刷新状态；当前仍为演示样本。
+- 决策：本次只是原型派生视图，未修改正式 schema、协议或发布模型，因此不新增 ADR。
+
+### 2026-11-10（Control.Web 只读 API 接入）
+
+- 范围：把管理后台的登录、会话、导入批次、内容只读查询和审计从原型数据切到真实 Control API，同时保留 API 不可用时的演示回退。
+- 新增 `src/Crystal.Control.Web/assets/config.js` 和 `assets/api.js`：API 地址可通过 `?api=` 指定；JWT 保存在 `sessionStorage`；访问令牌到期前自动刷新并轮换刷新令牌；401 清理会话并回到登录页。
+- 登录页接入 `POST /api/v1/auth/login`、`/auth/refresh`、`/auth/logout` 和 `GET /auth/me`，展示真实用户名、角色、MFA 状态和会话模式；错误密码、限流和 API 不可达分别提示。
+- 导入批次接入 `GET /api/v1/import-runs` 和批次实体计数，支持切换批次摘要；内容库接入 `GET /api/v1/content/{entityType}`，物品、怪物、地图、NPC、任务、技能、商店、攻城、龙族和刷新点共 10 类使用真实分页、搜索和旧实体字段映射；审计接入 `GET /api/v1/audit/events` 并按 `audit:read` 控制。
+- 页面显示“实时 API/演示数据/API 降级”徽标；真实查询失败时回退样本并明确提示；内容搜索保留焦点；顶栏和侧栏显示真实账号。
+- 修复移动端 grid 子项最小内容宽度导致的横向溢出：内容库宽表格改为容器内横向滚动，单列布局使用 `minmax(0, 1fr)`。
+- Control API 新增 `ControlApi:CorsOrigins`/`CRYSTAL_CONTROL_CORS_ORIGINS` 受控 CORS，开发默认允许 `127.0.0.1:4173` 和 `localhost:4173`，Production 要求显式配置。
+- 测试：`scripts/test-control-api.sh` 增加 CORS 预检；新增 `scripts/test-control-web.sh`，用 Playwright 在真实 PostgreSQL 和 API 上验证错误/正确登录、导入批次、物品分页与搜索、搜索焦点、访问令牌刷新、审计查询、登出、CORS 和控制台错误。`scripts/ci.sh` 增加 Control.Web JavaScript 语法检查。
+- 验证：`test-control-api.sh` 在 `crystal_web_test` 通过（黄金导入 9,734 实体，10 类计数）；`test-control-web.sh` 通过真实 API 全链路；`./scripts/ci.sh` 通过；演示模式 35 条路由无控制台错误；桌面 1440×1000 正常；移动端 390×844 抽查内容库、导入批次、审计、地图拓扑和关系图谱无横向溢出。
+- 未验证：导航级 RBAC 与 403 空状态、账号/角色页面真实数据、内容总览 KPI 替换、掉落/配方/Buff 导入、真实地图关系 API、生产前端构建链、CSP、浏览器兼容矩阵和 PostgreSQL 16 staging。
+- 决策：CORS 仅增加受控来源配置，未改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（Control.Web 只读闭环与导航级 RBAC）
+
+- 范围：完成 Control.Web 剩余只读接入，并把权限判定覆盖到导航、直达路由和页面动作。
+- 内容总览：实时模式使用当前 `content_import_run` 的 `entityCount`、来源哈希、开始时间和 10 类实体计数；内容域卡片对 MirDB 域显示批次快照，对未导入域明确标注原型样本；草稿、校验问题和发布状态没有读 API，实时模式显示 `—` 而不伪造数据。
+- 账号页：接入 `GET /api/v1/accounts?limit=200`，展示真实显示名、用户名、邮箱、角色、状态、MFA、最近登录和账号 ID；接口未暴露 IP，实时模式不再展示伪造来源 IP；KPI 改为账号数、MFA 覆盖率、启用数和停用/锁定数。
+- 角色页：接入 `GET /api/v1/roles`，用真实 `resource:action` 权限点生成权限矩阵，支持选择角色查看权限；成员数没有聚合接口，KPI 改为可写角色数并明确标注。
+- 导航级 RBAC：新增路由权限映射，实时模式过滤侧栏、全局搜索和区服入口；直达无权限路由统一渲染 403 空状态，展示所需权限、当前角色和账号，不回退原型数据。登录后不再预先拉取 `content:read` 数据，避免财务等角色因无关权限缺失被误报。
+- 页面动作：账号创建按 `account:write`、角色保存按 `role:write`、权限审计入口按 `audit:read` 控制显隐；内容、账号、角色和审计的真实页面不再回退样本。
+- 审计导出：新增“导出当前查询结果”，在前端把已加载审计行导出为 UTF-8 BOM CSV；这不是服务端导出任务，范围仅限当前最多 100 条查询结果，并在界面文案中说明。
+- 测试：`scripts/test-control-web.sh` 增加实时内容总览、账号列表、角色矩阵、审计 CSV 下载，以及通过 API 新建财务账号后验证导航隐藏、`content:read`/`account:read` 直达 403、无越权内容/账号请求和浏览器控制台错误检查。
+- 验证：`test-control-web.sh` 通过真实 PostgreSQL + Control API + Chromium 全链路；`./scripts/ci.sh` 通过；桌面 1440×1000 检查账号、角色页面，移动端 390×844 检查角色矩阵无横向溢出（页面宽度 390，视口 390）。
+- 未验证：账号生命周期写接口、服务端审计导出任务、字段级权限、自定义角色 CRUD、内容写入/发布、掉落/配方/Buff 导入、真实地图关系 API、生产前端构建链、CSP、浏览器兼容矩阵和 PostgreSQL 16 staging。
+- 决策：仅完成前端只读接线和权限显隐，服务端仍以 JWT 权限策略为最终授权边界；未改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（M1 账号生命周期与限流配置）
+
+- 范围：补齐控制面账号生命周期，并把账号页从只读/模拟写操作接入真实 API。
+- API：新增 `POST /api/v1/auth/change-password`、`POST /api/v1/accounts/{id}/status`、`POST /api/v1/accounts/{id}/password-reset`、`PUT /api/v1/accounts/{id}/roles`。
+- 安全语义：停用、管理员重置密码和角色调整会撤销目标账号相关会话；自助改密保留当前会话并撤销其他会话；启用账号清除失败登录计数和锁定。
+- 保护规则：禁止停用当前请求账号；禁止停用或移除最后一个启用平台管理员的 `platform_admin` 角色；管理员重置自己的密码必须走自助改密接口。
+- 审计：新增 `account.status`、`account.password.reset`、`account.roles.update` 和 `auth.password.change`，元数据不记录密码或密码哈希。
+- Web：账号页接入真实创建、停用/启用、重置密码和角色调整；用户菜单接入自助改密；写操作继续受 `account:write` 控制。
+- 配置：新增 `ControlApi:ApiRateLimitPermitLimit`（默认 240）和 `ControlApi:AuthRateLimitPermitLimit`（默认 10），测试脚本按需放宽。
+- 测试：`scripts/test-control-api.sh` 覆盖停用/启用、会话撤销、管理员重置、自助改密、角色变更后权限生效、最后管理员保护和未知/非法参数；`scripts/test-control-web.sh` 覆盖账号创建、停用/启用、重置密码、角色调整和审计动作。
+- 验证：API 集成在全新 PostgreSQL 测试库通过；Control Web 在真实 PostgreSQL + Control API + Chromium 全链路通过；Node.js 语法检查通过。
+- 未验证：账号删除、管理员解锁、MFA/OIDC、字段级权限、服务端审计导出任务、自定义角色 CRUD、PostgreSQL 16 staging、生产前端构建链和 CSP。
+- 决策：未改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（M1 LegacyBinaryExporter v1）
+
+- 范围：实现旧 `Server.MirDB` 的确定性二进制导出，并验证重新加载和回滚制品路径。
+- 工具：新增 `tools/Crystal.LegacyImporter/LegacyBinaryExporter.cs` 和 `--export <path>`、`--no-verify`；新增 `scripts/export-db.sh`。
+- 写入：严格按 `Envir.SaveDB()` 顺序输出头部、8 个索引、地图/物品/怪物/NPC/任务/龙/技能/商城/攻城、刷新计时器和 GTMap 列表，版本为 117。
+- 安全性：默认拒绝覆盖；先写同目录临时文件，flush 后原子替换；默认通过 `LoadDB()` 冷回读并比较实体语义哈希、索引和集合计数。
+- 会话隔离：加载前清理旧 `Settings.RandomItemStatsList` 的进程内累加状态，避免同一验证进程第二次加载产生派生字段差异。
+- 验证：黄金库导出两次均为 548,567 字节且 SHA256 为 `3775771c893d95f490bbb54b868650c91f7200e8d268d356a9c22d0a7e11284a`；两次字节一致，冷回读语义哈希一致。
+- 内容等价：源库与导出库分别生成的实体快照逐字节一致，`contentHash` 均为 `7e7a6dd14c091b63eed9bb271ae5bbb6ec080d081669048beeefb6c46a373825`。
+- CI：`scripts/verify-content.sh` 增加导出、冷回读和源/导出实体快照逐字节比较。
+- 未验证：从 JSONL 快照或 PostgreSQL 对象图重建旧实体后导出；完整 Windows 旧服务端启动。
+- 决策：保持现有二进制格式和版本协商，不改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（Linux 服务端宿主可行性验证）
+
+- 范围：确认旧服务端是否必须运行在 Windows，并验证 `Server.Library` 在 Ubuntu 上的实际启动能力。
+- 环境：Ubuntu 20.04、.NET SDK 8.0.427、`linux-x64`；`Server.Library` Release 构建 0 警告、0 错误。
+- 验证：在临时目录用最小控制台宿主引用 `Server.Library`，加载 `Jev` 数据库副本并调用 `Envir.Start()`；运行 15 秒后服务端保持 `running=True`，加载 400 张地图和 57,584 个对象，游戏端口 7000 正常初始化。
+- 结论：当前可直接运行的旧服务端宿主 `Server.MirForms` 仍是 Windows/WinForms 专用；但 `Server/` 核心库是 `net8.0`，未发现 Win32、注册表、WinForms 或 `System.Drawing.Common` 依赖，可在 Linux 控制台宿主中运行。文档中的“Zone Server Linux 优先”目标与实测一致。
+- 兼容问题：Linux 启动日志出现部分地图和任务文件加载失败，原因是内容引用的大小写与磁盘文件名不一致（如 `D2001` 对 `d2001.map`）以及任务路径使用 Windows 反斜杠；属于内容路径规范化问题，不是 .NET 运行时平台限制。
+- 未验证：真实 Windows 客户端连接、登录/选角/进服和完整玩法链路；带 UI 的 `Server.MirForms` 在 Linux 运行；生产级 Linux 服务、进程守护和日志采集。
+- 下一步：实现正式的 `Crystal.ZoneServer` 控制台宿主，统一内容路径大小写与分隔符，并用黄金数据库和真实客户端完成 Linux 区服冒烟。
+- 决策：未改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（Crystal.ZoneServer 与 Ubuntu 部署）
+
+- 范围：把可行性验证落成正式 Linux 区服宿主，并补齐当前 Ubuntu 环境可直接部署的产物。
+- 新增 `src/Crystal.ZoneServer`：加载 `Settings` 和旧二进制数据库，启动 `Envir`，写控制台/滚动日志，支持 SIGTERM/SIGINT 优雅退出；提供 `--content-root`、`--check`、启动超时和环境变量覆盖。
+- 核心调整：`Envir` 增加 `Ready` 状态；状态端口改为 `Settings.StatusPort`，默认仍为 `3000`；新增 `ContentPath` 对内容路径做分隔符规范化和大小写无关解析，覆盖地图、路线、任务、配方、掉落、NPC 脚本/include、变量和名单文件。
+- 部署：新增 `scripts/publish-zone.sh`、`scripts/zone-smoke.sh`、`scripts/install-zone.sh`、`deploy/systemd/crystal-zone.service` 和 `zone.env.example`；自包含 `linux-x64` 产物约 74 MB。
+- 文档：新增 `docs/runbooks/zone-server-linux.md`，更新本地环境、构建发布、运行时模块、部署架构和文档索引。
+- 验证：`--check` 通过，463 张地图、375 个 NPC 脚本、154 个任务引用全部解析；完整启动加载 463 张地图、1,628 个物品、555 个怪物，`Zone ready` 后 SIGTERM 退出码为 0；`scripts/zone-smoke.sh` 通过；自包含发布产物独立启动并正常退出；`./scripts/ci.sh` 全部通过；shell 脚本通过 `bash -n`。
+- 未验证：systemd 实际安装和开机启动（当前容器未运行 systemd）；真实 Windows 客户端登录、选角、进服和完整玩法链路；长时间运行和压力测试。
+- 已知内容告警：Jev 内容的 `HiGreatGhoul` 掉落行无法解析，不影响区服启动，属于内容数据问题。
+- 决策：未改变协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+### 2026-11-10（GitHub 仓库初始化与首次发布）
+
+- 范围：将当前工作区纳入 Git，并发布到 `https://github.com/bitallin/Crystal_Mir`。
+- 改动：初始化 `main` 分支，配置 SSH 远程 `git@github.com:bitallin/Crystal_Mir.git`，首次提交当前源码、文档、脚本和必要资源文件。
+- 排除：`.external/`、`artifacts/`、`Build/`、各项目 `bin/`/`obj/` 与误生成的 `--help` 发布目录不纳入提交。
+- 验证：首次提交前检查待提交文件数量、体积、敏感信息和忽略规则；远程为空仓库，SSH 认证可用。
+- 未验证：GitHub Actions 首次运行结果待推送后确认；外部资源仍按 `scripts/fetch-external.sh` 单独准备。
+- 决策：仅发布现有代码和方法，不改变架构、协议、数据模型、发布模型或许可证边界，因此不新增 ADR。
+
+## 4. 决策记录
+
+| 日期 | 决策 | ADR |
+| --- | --- | --- |
+| 2026-11-09 | 控制面与数据面分离 | `docs/adr/0001-control-plane-data-plane.md` |
+| 2026-11-09 | PostgreSQL 与内容快照 | `docs/adr/0002-postgresql-and-content-snapshots.md` |
+| 2026-11-09 | 保留现有协议并引入边缘网关 | `docs/adr/0003-legacy-protocol-with-gateway.md` |
+| 2026-11-09 | GPL 边界与代码隔离 | `docs/adr/0004-gpl-boundary.md` |
+
+## 5. 阻塞与风险
+
+| 类型 | 内容 | 影响 | 处理 |
+| --- | --- | --- | --- |
+| 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
+| 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
+| 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
+| 许可 | `Crystal.MapEditor` 未发现明确许可证 | 不能随发布包分发 | 联系维护者、确认许可证或替换工具 |
+| 许可 | 服务端 GPL-3.0-only、素材版权 | 分发和商业化受限 | M0 完成合规审查并保留源码归档流程 |
+| 技术 | `Envir`/`Map` 耦合高 | 迁移和热重载风险 | 绞杀者模式 + 黄金样本测试 |
+
+## 6. 下一步
+
+1. 实现从活动 JSONL 快照/PostgreSQL 重建旧实体并导出 `Server.MirDB`，覆盖纯控制面回滚。
+2. 把掉落文本、NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，为地图拓扑、刷新点、传送门和掉落关系补只读 API。
+3. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
+4. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
+5. 在 PostgreSQL 16 staging 演练 schema 和升级路径，确认 GitHub Actions PG16 job 稳定。
+6. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
+7. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+8. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。
+
+## 7. 更新规则
+
+- 每次实质性工作结束，在“工作日志”追加一条记录。
+- 更新“当前状态”和“里程碑状态”，不要只写“进行中”。
+- 新决策写入“决策记录”并新增 ADR。
+- 阻塞项解决后移到历史记录或标注已解决。
+- 记录验证方式和未验证项，不能把“未测试”写成“已完成”。
+

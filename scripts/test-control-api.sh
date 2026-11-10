@@ -1,0 +1,498 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ulimit -c 0 2>/dev/null || true
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOTNET="${DOTNET:-$HOME/.dotnet/dotnet}"
+CONFIGURATION="${CONFIGURATION:-Release}"
+DSN="${1:-${CRYSTAL_DATABASE_URL:-${CRYSTAL_DB_CONNECTION:-}}}"
+
+if [ -z "$DSN" ]; then
+  echo "Set CRYSTAL_DATABASE_URL/CRYSTAL_DB_CONNECTION or pass a PostgreSQL connection string." >&2
+  exit 2
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required for Control API integration tests." >&2
+  exit 2
+fi
+
+TMP="$(mktemp -d)"
+API_PID=""
+cleanup() {
+  if [ -n "$API_PID" ]; then
+    kill "$API_PID" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "$API_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -9 "$API_PID" 2>/dev/null || true
+    wait "$API_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+cd "$ROOT"
+"$DOTNET" build tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj -c "$CONFIGURATION" --nologo >/dev/null
+"$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo >/dev/null
+
+"$DOTNET" run --project tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj \
+  -c "$CONFIGURATION" --no-build -- \
+  --db tests/fixtures/golden/Server.MirDB \
+  --out "$TMP/snapshot" \
+  --release "api.$(date -u +%Y%m%d%H%M%S)" \
+  --dsn "$DSN" >/dev/null
+
+PORT="$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+BASE="http://127.0.0.1:$PORT"
+API_KEY="control-api-test-key"
+JWT_SIGNING_KEY="control-api-test-signing-key-0123456789abcdef"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="ControlTest!Passw0rd2026"
+TEST_PASSWORD="Integration!Passw0rd2026"
+RESET_PASSWORD="ResetIntegration!Passw0rd2026"
+FINAL_PASSWORD="SelfChange!Passw0rd2026"
+WEB_ORIGIN="http://127.0.0.1:4173"
+
+ASPNETCORE_ENVIRONMENT=Production \
+ASPNETCORE_URLS="$BASE" \
+ControlApi__DatabaseConnectionString="$DSN" \
+ControlApi__ApiKey="$API_KEY" \
+ControlApi__JwtSigningKey="$JWT_SIGNING_KEY" \
+ControlApi__AuthRateLimitPermitLimit=1000 \
+ControlApi__ApiRateLimitPermitLimit=5000 \
+ControlApi__BootstrapAdminUsername="$ADMIN_USERNAME" \
+ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
+ControlApi__CorsOrigins="$WEB_ORIGIN" \
+"$DOTNET" "$ROOT/src/Crystal.Control.Api/bin/$CONFIGURATION/net8.0/Crystal.Control.Api.dll" \
+  >"$TMP/api.log" 2>&1 &
+API_PID=$!
+
+READY=0
+for _ in $(seq 1 80); do
+  if curl -fsS --max-time 2 "$BASE/health/ready" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  if ! kill -0 "$API_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+
+if [ "$READY" -ne 1 ]; then
+  echo "Control API did not become ready." >&2
+  cat "$TMP/api.log" >&2
+  exit 1
+fi
+
+UNAUTHORIZED_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$BASE/api/v1/import-runs")"
+if [ "$UNAUTHORIZED_STATUS" != "401" ]; then
+  echo "Expected unauthenticated request to return 401, got $UNAUTHORIZED_STATUS." >&2
+  exit 1
+fi
+
+CORS_HEADERS="$(curl -sS --max-time 10 -D - -o /dev/null -X OPTIONS   -H "Origin: $WEB_ORIGIN"   -H 'Access-Control-Request-Method: POST'   -H 'Access-Control-Request-Headers: content-type,authorization'   "$BASE/api/v1/auth/login")"
+if ! grep -qi "^Access-Control-Allow-Origin: $WEB_ORIGIN" <<<"$CORS_HEADERS"; then
+  echo "Expected Control API CORS preflight to allow $WEB_ORIGIN." >&2
+  echo "$CORS_HEADERS" >&2
+  exit 1
+fi
+
+AUTH=(-H "X-Api-Key: $API_KEY")
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/import-runs?limit=1" >"$TMP/runs.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item?page=1&pageSize=5" >"$TMP/items.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item/1" >"$TMP/item.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item/key/item.1" >"$TMP/item-key.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/monster?pageSize=1&sort=name&direction=asc" >"$TMP/monster.json"
+
+RUN_ID="$(python3 - "$TMP/runs.json" <<'PY'
+import json, sys
+runs = json.load(open(sys.argv[1]))
+assert runs, "no import runs returned"
+assert runs[0]["status"] == "imported", runs[0]
+assert runs[0]["entityCount"] == 9734, runs[0]
+print(runs[0]["id"])
+PY
+)"
+
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/import-runs/$RUN_ID/content-types" >"$TMP/counts.json"
+
+python3 - "$TMP" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+def load(name):
+    with open(os.path.join(root, name), encoding="utf-8") as f:
+        return json.load(f)
+
+items = load("items.json")
+assert items["entityType"] == "item", items
+assert items["page"] == 1 and items["pageSize"] == 5, items
+assert items["total"] == 1628, items["total"]
+assert len(items["items"]) == 5, len(items["items"])
+assert items["items"][0]["data"]["Index"] == 1, items["items"][0]
+
+item = load("item.json")
+assert item["contentKey"] == "item.1", item
+assert item["data"]["Name"] == "SpiritBlade", item
+assert item["data"]["Index"] == 1, item
+
+item_by_key = load("item-key.json")
+assert item_by_key["id"] == item["id"], (item_by_key, item)
+
+monster = load("monster.json")
+assert monster["entityType"] == "monster", monster
+assert monster["total"] == 555, monster["total"]
+assert len(monster["items"]) == 1, monster
+
+counts = load("counts.json")
+actual = {entry["entityType"]: entry["count"] for entry in counts["counts"]}
+expected = {
+    "item": 1628, "monster": 555, "map": 463, "npc": 375, "quest": 154,
+    "magic": 111, "gameshop": 105, "conquest": 1, "dragon": 1, "respawn": 6341,
+}
+assert actual == expected, (actual, expected)
+PY
+
+INVALID_PAGE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/api/v1/content/item?pageSize=201")"
+if [ "$INVALID_PAGE_STATUS" != "400" ]; then
+  echo "Expected invalid pageSize to return 400, got $INVALID_PAGE_STATUS." >&2
+  exit 1
+fi
+
+UNKNOWN_TYPE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/api/v1/content/not-a-type")"
+if [ "$UNKNOWN_TYPE_STATUS" != "400" ]; then
+  echo "Expected unknown entity type to return 400, got $UNKNOWN_TYPE_STATUS." >&2
+  exit 1
+fi
+
+json_tokens() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["tokenType"] == "Bearer", payload
+assert payload["accessToken"], payload
+assert payload["refreshToken"], payload
+open(sys.argv[2], "w", encoding="utf-8").write(payload["accessToken"])
+open(sys.argv[3], "w", encoding="utf-8").write(payload["refreshToken"])
+PY
+}
+
+LOGIN_BODY="$(printf '{"username":"%s","password":"%s"}' "$ADMIN_USERNAME" "$ADMIN_PASSWORD")"
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$LOGIN_BODY" "$BASE/api/v1/auth/login" >"$TMP/admin-login.json"
+json_tokens "$TMP/admin-login.json" "$TMP/admin.access" "$TMP/admin.refresh"
+ADMIN_ACCESS="$(cat "$TMP/admin.access")"
+
+curl -fsS --max-time 10 -H "Authorization: Bearer $ADMIN_ACCESS" "$BASE/api/v1/auth/me" >"$TMP/admin-me.json"
+curl -fsS --max-time 10 -H "Authorization: Bearer $ADMIN_ACCESS" "$BASE/api/v1/content/item?pageSize=1" >"$TMP/jwt-item.json"
+
+SUFFIX="$(date -u +%s)$$"
+FINANCE_USER="finance_${SUFFIX}"
+AUDITOR_USER="auditor_${SUFFIX}"
+
+create_account() {
+  local username="$1"
+  local role="$2"
+  local output="$3"
+  curl -fsS --max-time 15 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+    -H 'Content-Type: application/json' \
+    --data "$(printf '{"username":"%s","displayName":"%s","password":"%s","roles":["%s"]}' "$username" "$username" "$TEST_PASSWORD" "$role")" \
+    "$BASE/api/v1/accounts" >"$output"
+}
+
+create_account "$FINANCE_USER" "finance" "$TMP/finance-account.json"
+create_account "$AUDITOR_USER" "auditor" "$TMP/auditor-account.json"
+
+FINANCE_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$FINANCE_USER" "$TEST_PASSWORD")"
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$FINANCE_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-login.json"
+json_tokens "$TMP/finance-login.json" "$TMP/finance.access" "$TMP/finance.refresh"
+FINANCE_ACCESS="$(cat "$TMP/finance.access")"
+
+FINANCE_CONTENT_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $FINANCE_ACCESS" "$BASE/api/v1/content/item?pageSize=1")"
+if [ "$FINANCE_CONTENT_STATUS" != "403" ]; then
+  echo "Expected finance account content access to return 403, got $FINANCE_CONTENT_STATUS." >&2
+  exit 1
+fi
+
+FINANCE_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/finance-account.json")"
+ADMIN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/admin-me.json")"
+
+SELF_DISABLE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"status":"disabled"}' "$BASE/api/v1/accounts/$ADMIN_ID/status")"
+if [ "$SELF_DISABLE_STATUS" != "409" ]; then
+  echo "Expected self-disable to return 409, got $SELF_DISABLE_STATUS." >&2
+  exit 1
+fi
+
+SELF_ROLE_REMOVAL_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"roles":["auditor"]}' "$BASE/api/v1/accounts/$ADMIN_ID/roles")"
+if [ "$SELF_ROLE_REMOVAL_STATUS" != "409" ]; then
+  echo "Expected last-admin role removal to return 409, got $SELF_ROLE_REMOVAL_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 10 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' --data '{"status":"disabled"}' \
+  "$BASE/api/v1/accounts/$FINANCE_ID/status" >"$TMP/finance-disabled.json"
+python3 - "$TMP/finance-disabled.json" <<'PY'
+import json, sys
+account = json.load(open(sys.argv[1]))
+assert account["status"] == "disabled", account
+assert account["roles"] == ["finance"], account
+PY
+
+DISABLED_ACCESS_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $FINANCE_ACCESS" "$BASE/api/v1/auth/me")"
+if [ "$DISABLED_ACCESS_STATUS" != "401" ]; then
+  echo "Expected disabled account session to return 401, got $DISABLED_ACCESS_STATUS." >&2
+  exit 1
+fi
+
+DISABLED_LOGIN_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$FINANCE_LOGIN" "$BASE/api/v1/auth/login")"
+if [ "$DISABLED_LOGIN_STATUS" != "401" ]; then
+  echo "Expected disabled account login to return 401, got $DISABLED_LOGIN_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 10 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' --data '{"status":"active"}' \
+  "$BASE/api/v1/accounts/$FINANCE_ID/status" >"$TMP/finance-enabled.json"
+python3 - "$TMP/finance-enabled.json" <<'PY'
+import json, sys
+account = json.load(open(sys.argv[1]))
+assert account["status"] == "active", account
+PY
+
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$FINANCE_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-login-2.json"
+json_tokens "$TMP/finance-login-2.json" "$TMP/finance-2.access" "$TMP/finance-2.refresh"
+FINANCE_ACCESS_2="$(cat "$TMP/finance-2.access")"
+
+RESET_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"newPassword":"%s"}' "$RESET_PASSWORD")" \
+  "$BASE/api/v1/accounts/$FINANCE_ID/password-reset")"
+if [ "$RESET_STATUS" != "204" ]; then
+  echo "Expected admin password reset to return 204, got $RESET_STATUS." >&2
+  exit 1
+fi
+
+RESET_SESSION_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $FINANCE_ACCESS_2" "$BASE/api/v1/auth/me")"
+if [ "$RESET_SESSION_STATUS" != "401" ]; then
+  echo "Expected password reset to revoke the existing session, got $RESET_SESSION_STATUS." >&2
+  exit 1
+fi
+
+OLD_PASSWORD_LOGIN_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$FINANCE_LOGIN" "$BASE/api/v1/auth/login")"
+if [ "$OLD_PASSWORD_LOGIN_STATUS" != "401" ]; then
+  echo "Expected old password login after reset to return 401, got $OLD_PASSWORD_LOGIN_STATUS." >&2
+  exit 1
+fi
+
+RESET_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$FINANCE_USER" "$RESET_PASSWORD")"
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$RESET_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-reset-login.json"
+json_tokens "$TMP/finance-reset-login.json" "$TMP/finance-reset.access" "$TMP/finance-reset.refresh"
+FINANCE_RESET_ACCESS="$(cat "$TMP/finance-reset.access")"
+
+WRONG_CURRENT_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $FINANCE_RESET_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"currentPassword":"wrong-password","newPassword":"%s"}' "$FINAL_PASSWORD")" \
+  "$BASE/api/v1/auth/change-password")"
+if [ "$WRONG_CURRENT_STATUS" != "400" ]; then
+  echo "Expected wrong current password to return 400, got $WRONG_CURRENT_STATUS." >&2
+  exit 1
+fi
+
+SELF_CHANGE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $FINANCE_RESET_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"currentPassword":"%s","newPassword":"%s"}' "$RESET_PASSWORD" "$FINAL_PASSWORD")" \
+  "$BASE/api/v1/auth/change-password")"
+if [ "$SELF_CHANGE_STATUS" != "204" ]; then
+  echo "Expected self password change to return 204, got $SELF_CHANGE_STATUS." >&2
+  exit 1
+fi
+
+KEPT_SESSION_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $FINANCE_RESET_ACCESS" "$BASE/api/v1/auth/me")"
+if [ "$KEPT_SESSION_STATUS" != "200" ]; then
+  echo "Expected current session to remain active after password change, got $KEPT_SESSION_STATUS." >&2
+  exit 1
+fi
+
+PRE_CHANGE_LOGIN_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$RESET_LOGIN" "$BASE/api/v1/auth/login")"
+if [ "$PRE_CHANGE_LOGIN_STATUS" != "401" ]; then
+  echo "Expected pre-change password login to return 401, got $PRE_CHANGE_LOGIN_STATUS." >&2
+  exit 1
+fi
+
+FINAL_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$FINANCE_USER" "$FINAL_PASSWORD")"
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$FINAL_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-final-login.json"
+json_tokens "$TMP/finance-final-login.json" "$TMP/finance-final.access" "$TMP/finance-final.refresh"
+FINANCE_FINAL_ACCESS="$(cat "$TMP/finance-final.access")"
+
+curl -fsS --max-time 10 -X PUT -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' --data '{"roles":["auditor"]}' \
+  "$BASE/api/v1/accounts/$FINANCE_ID/roles" >"$TMP/finance-roles.json"
+python3 - "$TMP/finance-roles.json" <<'PY'
+import json, sys
+account = json.load(open(sys.argv[1]))
+assert account["roles"] == ["auditor"], account
+PY
+
+ROLE_CHANGED_SESSION_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $FINANCE_FINAL_ACCESS" "$BASE/api/v1/auth/me")"
+if [ "$ROLE_CHANGED_SESSION_STATUS" != "401" ]; then
+  echo "Expected role change to revoke the existing session, got $ROLE_CHANGED_SESSION_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$FINAL_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-auditor-login.json"
+json_tokens "$TMP/finance-auditor-login.json" "$TMP/finance-auditor.access" "$TMP/finance-auditor.refresh"
+FINANCE_AUDITOR_ACCESS="$(cat "$TMP/finance-auditor.access")"
+
+curl -fsS --max-time 10 -H "Authorization: Bearer $FINANCE_AUDITOR_ACCESS" \
+  "$BASE/api/v1/content/item?pageSize=1" >"$TMP/finance-auditor-content.json"
+
+AUDITOR_WRITE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $FINANCE_AUDITOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"status":"disabled"}' "$BASE/api/v1/accounts/$ADMIN_ID/status")"
+if [ "$AUDITOR_WRITE_STATUS" != "403" ]; then
+  echo "Expected auditor account write to return 403, got $AUDITOR_WRITE_STATUS." >&2
+  exit 1
+fi
+
+UNKNOWN_ACCOUNT_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"status":"active"}' "$BASE/api/v1/accounts/999999999/status")"
+if [ "$UNKNOWN_ACCOUNT_STATUS" != "404" ]; then
+  echo "Expected unknown account status update to return 404, got $UNKNOWN_ACCOUNT_STATUS." >&2
+  exit 1
+fi
+
+SHORT_PASSWORD_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"newPassword":"short"}' "$BASE/api/v1/accounts/$FINANCE_ID/password-reset")"
+if [ "$SHORT_PASSWORD_STATUS" != "400" ]; then
+  echo "Expected short reset password to return 400, got $SHORT_PASSWORD_STATUS." >&2
+  exit 1
+fi
+
+AUDITOR_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$AUDITOR_USER" "$TEST_PASSWORD")"
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$AUDITOR_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/auditor-login.json"
+json_tokens "$TMP/auditor-login.json" "$TMP/auditor.access" "$TMP/auditor.refresh"
+AUDITOR_ACCESS="$(cat "$TMP/auditor.access")"
+AUDITOR_REFRESH="$(cat "$TMP/auditor.refresh")"
+
+curl -fsS --max-time 10 -H "Authorization: Bearer $AUDITOR_ACCESS" "$BASE/api/v1/audit/events?limit=20" >"$TMP/auditor-audit.json"
+
+curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  --data "$(printf '{"refreshToken":"%s"}' "$AUDITOR_REFRESH")" \
+  "$BASE/api/v1/auth/refresh" >"$TMP/auditor-refresh.json"
+json_tokens "$TMP/auditor-refresh.json" "$TMP/auditor-rotated.access" "$TMP/auditor-rotated.refresh"
+AUDITOR_ROTATED_ACCESS="$(cat "$TMP/auditor-rotated.access")"
+AUDITOR_ROTATED_REFRESH="$(cat "$TMP/auditor-rotated.refresh")"
+
+OLD_REFRESH_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$(printf '{"refreshToken":"%s"}' "$AUDITOR_REFRESH")" \
+  "$BASE/api/v1/auth/refresh")"
+if [ "$OLD_REFRESH_STATUS" != "401" ]; then
+  echo "Expected rotated refresh token reuse to return 401, got $OLD_REFRESH_STATUS." >&2
+  exit 1
+fi
+
+LOGOUT_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUDITOR_ROTATED_ACCESS" "$BASE/api/v1/auth/logout")"
+if [ "$LOGOUT_STATUS" != "204" ]; then
+  echo "Expected logout to return 204, got $LOGOUT_STATUS." >&2
+  exit 1
+fi
+
+REVOKED_ACCESS_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $AUDITOR_ROTATED_ACCESS" "$BASE/api/v1/auth/me")"
+if [ "$REVOKED_ACCESS_STATUS" != "401" ]; then
+  echo "Expected logged-out access token to return 401, got $REVOKED_ACCESS_STATUS." >&2
+  exit 1
+fi
+
+REVOKED_REFRESH_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$(printf '{"refreshToken":"%s"}' "$AUDITOR_ROTATED_REFRESH")" \
+  "$BASE/api/v1/auth/refresh")"
+if [ "$REVOKED_REFRESH_STATUS" != "401" ]; then
+  echo "Expected logged-out refresh token to return 401, got $REVOKED_REFRESH_STATUS." >&2
+  exit 1
+fi
+
+INVALID_LOGIN_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$(printf '{"username":"%s","password":"wrong-password"}' "$ADMIN_USERNAME")" \
+  "$BASE/api/v1/auth/login")"
+if [ "$INVALID_LOGIN_STATUS" != "401" ]; then
+  echo "Expected invalid login to return 401, got $INVALID_LOGIN_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 10 -H "Authorization: Bearer $ADMIN_ACCESS" "$BASE/api/v1/audit/events?limit=200" >"$TMP/audit-events.json"
+
+python3 - "$TMP" <<'PY'
+import json
+import os
+import sys
+
+root = sys.argv[1]
+
+def load(name):
+    with open(os.path.join(root, name), encoding="utf-8") as f:
+        return json.load(f)
+
+me = load("admin-me.json")
+assert me["principalType"] == "account", me
+assert me["username"] == "admin", me
+assert "platform_admin" in me["roles"], me
+assert "content:read" in me["permissions"], me
+assert "audit:read" in me["permissions"], me
+
+assert load("jwt-item.json")["total"] == 1628
+assert load("finance-account.json")["roles"] == ["finance"]
+assert load("auditor-account.json")["roles"] == ["auditor"]
+assert load("finance-auditor-content.json")["total"] == 1628
+
+raw_audit = load("audit-events.json")
+events = raw_audit["items"]
+assert any(e["action"] == "account.create" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "auth.login" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "auth.login" and e["result"] == "failure" for e in events), events
+assert any(e["action"] == "auth.refresh" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "auth.logout" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "authz.denied" and e["result"] == "denied" for e in events), events
+assert any(e["action"] == "account.status" and e["metadata"].get("afterStatus") == "disabled" for e in events), events
+assert any(e["action"] == "account.password.reset" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "auth.password.change" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "account.roles.update" and e["metadata"].get("afterRoles") == ["auditor"] for e in events), events
+audit_text = json.dumps(raw_audit, ensure_ascii=False)
+assert "password_hash" not in audit_text, audit_text[:1000]
+for secret in ("Integration!Passw0rd2026", "ResetIntegration!Passw0rd2026", "SelfChange!Passw0rd2026"):
+    assert secret not in audit_text, secret
+PY
+
+echo "Control API integration verified (run $RUN_ID, 10 entity types, auth/RBAC/audit)."

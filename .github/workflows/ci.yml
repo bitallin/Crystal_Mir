@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET: dotnet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and build
+        run: ./scripts/build.sh
+
+      - name: Regression tests
+        run: ./scripts/test.sh
+
+      - name: Inspect golden database
+        run: ./scripts/inspect-db.sh
+
+      - name: Verify golden content import
+        run: ./scripts/verify-content.sh
+
+      - name: Check Control Web JavaScript
+        run: |
+          for script in src/Crystal.Control.Web/assets/*.js; do
+            node --check "$script"
+          done
+
+  control-api-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: crystal
+          POSTGRES_PASSWORD: crystal
+          POSTGRES_DB: crystal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crystal -d crystal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET: dotnet
+      CRYSTAL_DATABASE_URL: "Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal;Password=crystal"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Control API integration on PostgreSQL 16
+        run: ./scripts/test-control-api.sh

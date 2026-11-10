@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MIR Control">
+  <rect width="64" height="64" rx="13" fill="#101b24"/>
+  <path d="M15 47V17h7l10 12 10-12h7v30h-7V28L32 40 22 28v19z" fill="#d8a846"/>
+  <path d="M13 53h38" stroke="#6f5323" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="32" cy="51" r="2" fill="#f1d48c"/>
+</svg>

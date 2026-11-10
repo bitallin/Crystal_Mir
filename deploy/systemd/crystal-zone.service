@@ -1,0 +1,26 @@
+[Unit]
+Description=Crystal Zone Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=crystal
+Group=crystal
+WorkingDirectory=/var/lib/crystal/zone
+EnvironmentFile=-/etc/crystal/zone.env
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+ExecStart=/opt/crystal/zone/Crystal.ZoneServer --content-root /var/lib/crystal/zone
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=45
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/crystal/zone
+
+[Install]
+WantedBy=multi-user.target
