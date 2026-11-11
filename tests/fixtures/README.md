@@ -17,3 +17,10 @@
 ./scripts/inspect-db.sh
 ```
 
+## content/Envir/Drops
+
+- 内容根最小样本，用于验证 `--content-root` 掉落导入。
+- `Envir/Drops/Misc/ArcherGuard.txt` 对应黄金库怪物 1 的 `DropPath`。
+- 条目 `1/1 GreenPoison` 解析为物品 710，用于快照和 Control API 关系测试。
+- 来源同 `Crystal.Database/Jev`，许可证 Unlicense。
+

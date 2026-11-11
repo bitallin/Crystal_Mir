@@ -41,6 +41,7 @@ cd "$ROOT"
   -c "$CONFIGURATION" --no-build -- \
   --db tests/fixtures/golden/Server.MirDB \
   --out "$TMP/snapshot" \
+  --content-root tests/fixtures/content \
   --release "api.$(date -u +%Y%m%d%H%M%S)" \
   --dsn "$DSN" >/dev/null
 
@@ -125,13 +126,17 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item?page=1&pageSize=
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item/1" >"$TMP/item.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/item/key/item.1" >"$TMP/item-key.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/monster?pageSize=1&sort=name&direction=asc" >"$TMP/monster.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/catalog" >"$TMP/map-catalog.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/catalog?q=map.1&pageSize=5" >"$TMP/map-catalog-search.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/1/relations?respawnPage=2&respawnPageSize=5" >"$TMP/map-relations.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/monster/1/drops" >"$TMP/monster-drops.json"
 
 RUN_ID="$(python3 - "$TMP/runs.json" <<'PY'
 import json, sys
 runs = json.load(open(sys.argv[1]))
 assert runs, "no import runs returned"
 assert runs[0]["status"] == "imported", runs[0]
-assert runs[0]["entityCount"] == 9734, runs[0]
+assert runs[0]["entityCount"] == 9735, runs[0]
 print(runs[0]["id"])
 PY
 )"
@@ -165,11 +170,58 @@ assert monster["entityType"] == "monster", monster
 assert monster["total"] == 555, monster["total"]
 assert len(monster["items"]) == 1, monster
 
+map_catalog = load("map-catalog.json")
+assert map_catalog["entityType"] == "map", map_catalog
+assert map_catalog["page"] == 1 and map_catalog["pageSize"] == 500, map_catalog
+assert map_catalog["total"] == 463, map_catalog["total"]
+assert len(map_catalog["items"]) == 463, len(map_catalog["items"])
+assert map_catalog["items"][0] == {
+    "localIndex": 1,
+    "contentKey": "map.1",
+    "index": 1,
+    "fileName": "0",
+    "title": "BichonProvince",
+}, map_catalog["items"][0]
+
+map_catalog_search = load("map-catalog-search.json")
+assert map_catalog_search["total"] >= 1, map_catalog_search
+assert any(item["contentKey"] == "map.1" for item in map_catalog_search["items"]), map_catalog_search
+
+relations = load("map-relations.json")
+assert relations["map"]["contentKey"] == "map.1", relations["map"]
+assert relations["map"]["fileName"] == "0", relations["map"]
+assert relations["map"]["title"] == "BichonProvince", relations["map"]
+assert len(relations["movements"]) == 72, len(relations["movements"])
+assert relations["movements"][0]["targetMapIndex"] == 2, relations["movements"][0]
+assert relations["movements"][0]["targetMap"]["contentKey"] == "map.2", relations["movements"][0]
+assert relations["movements"][0]["source"] == {"x": 347, "y": 188}, relations["movements"][0]
+assert len(relations["safeZones"]) == 6, relations["safeZones"]
+assert relations["safeZones"][0]["startPoint"] is True, relations["safeZones"][0]
+assert len(relations["npcs"]) == 46, len(relations["npcs"])
+assert relations["npcs"][0]["name"] == "Teleport_Gilbert", relations["npcs"][0]
+assert relations["respawns"]["page"] == 2, relations["respawns"]
+assert relations["respawns"]["pageSize"] == 5, relations["respawns"]
+assert relations["respawns"]["total"] == 360, relations["respawns"]
+assert len(relations["respawns"]["items"]) == 5, relations["respawns"]
+assert relations["respawns"]["items"][0]["contentKey"] == "respawn.map1.6", relations["respawns"]
+assert relations["respawns"]["items"][0]["monsterName"] == "HookingCat", relations["respawns"]
+
+drops = load("monster-drops.json")
+assert drops["contentKey"] == "monster.1", drops
+assert drops["name"] == "ArcherGuard", drops
+assert drops["dropPath"] == "Misc\\ArcherGuard", drops
+assert drops["dropContentKey"] == "drop.monster.1", drops
+assert len(drops["drops"]) == 1, drops
+assert drops["drops"][0]["chance"] == 1, drops
+assert drops["drops"][0]["item"]["contentKey"] == "item.710", drops
+assert drops["drops"][0]["item"]["name"] == "GreenPoison", drops
+
 counts = load("counts.json")
 actual = {entry["entityType"]: entry["count"] for entry in counts["counts"]}
 expected = {
     "item": 1628, "monster": 555, "map": 463, "npc": 375, "quest": 154,
     "magic": 111, "gameshop": 105, "conquest": 1, "dragon": 1, "respawn": 6341,
+    "drop": 1,
 }
 assert actual == expected, (actual, expected)
 PY
@@ -180,9 +232,23 @@ if [ "$INVALID_PAGE_STATUS" != "400" ]; then
   exit 1
 fi
 
+INVALID_MAP_CATALOG_PAGE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  "${AUTH[@]}" "$BASE/api/v1/content/map/catalog?pageSize=501")"
+if [ "$INVALID_MAP_CATALOG_PAGE_STATUS" != "400" ]; then
+  echo "Expected invalid map catalog pageSize to return 400, got $INVALID_MAP_CATALOG_PAGE_STATUS." >&2
+  exit 1
+fi
+
 UNKNOWN_TYPE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/api/v1/content/not-a-type")"
 if [ "$UNKNOWN_TYPE_STATUS" != "400" ]; then
   echo "Expected unknown entity type to return 400, got $UNKNOWN_TYPE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_RESPAWN_PAGE_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+  "${AUTH[@]}" "$BASE/api/v1/content/map/1/relations?respawnPageSize=501")"
+if [ "$INVALID_RESPAWN_PAGE_STATUS" != "400" ]; then
+  echo "Expected invalid respawnPageSize to return 400, got $INVALID_RESPAWN_PAGE_STATUS." >&2
   exit 1
 fi
 
@@ -507,4 +573,4 @@ for secret in ("Integration!Passw0rd2026", "ResetIntegration!Passw0rd2026", "Sel
     assert secret not in audit_text, secret
 PY
 
-echo "Control API integration verified (run $RUN_ID, 10 entity types, auth/RBAC/audit)."
+echo "Control API integration verified (run $RUN_ID, 11 entity types, auth/RBAC/audit/relations)."

@@ -23,6 +23,12 @@ public static class ContentEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}/key/{contentKey}", GetContentByKeyAsync)
             .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/map/catalog", GetMapCatalogAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/map/{localIndex:long}/relations", GetMapRelationsAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/monster/{localIndex:long}/drops", GetMonsterDropsAsync)
+            .RequireAuthorization(Permissions.ContentRead);
         return api;
     }
 
@@ -154,6 +160,64 @@ public static class ContentEndpoints
             result.Items));
     }
 
+    private static async Task<IResult> GetMapCatalogAsync(
+        ContentQueryStore store,
+        long? importRunId,
+        int? page,
+        int? pageSize,
+        string? q,
+        CancellationToken cancellationToken)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var pageNumber = page ?? 1;
+        var size = pageSize ?? 500;
+        if (pageNumber < 1)
+        {
+            errors["page"] = ["page must be at least 1."];
+        }
+
+        if (size is < 1 or > 500)
+        {
+            errors["pageSize"] = ["pageSize must be between 1 and 500."];
+        }
+
+        var query = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+        if (query is { Length: > 100 })
+        {
+            errors["q"] = ["q must be 100 characters or less."];
+        }
+
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var (items, total) = await store.QueryMapCatalogAsync(
+            runId.Value,
+            pageNumber,
+            size,
+            query,
+            cancellationToken);
+        return Results.Ok(new PagedResult<MapSummaryDto>(
+            runId.Value,
+            ContentEntityTypes.Map,
+            pageNumber,
+            size,
+            total,
+            items));
+    }
+
     private static async Task<IResult> GetContentByIndexAsync(
         string entityType,
         long localIndex,
@@ -220,5 +284,84 @@ public static class ContentEndpoints
                 title: "Content entity not found",
                 detail: $"{contentKey} was not found in import run {runId.Value}.")
             : Results.Ok(entity);
+    }
+
+    private static async Task<IResult> GetMapRelationsAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentRelationStore relationStore,
+        long? importRunId,
+        int? respawnPage,
+        int? respawnPageSize,
+        CancellationToken cancellationToken)
+    {
+        var page = respawnPage ?? 1;
+        var size = respawnPageSize ?? 200;
+        var errors = new Dictionary<string, string[]>();
+        if (page < 1)
+        {
+            errors["respawnPage"] = ["respawnPage must be at least 1."];
+        }
+
+        if (size is < 1 or > 500)
+        {
+            errors["respawnPageSize"] = ["respawnPageSize must be between 1 and 500."];
+        }
+
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var relations = await relationStore.GetMapRelationsAsync(
+            runId.Value,
+            localIndex,
+            page,
+            size,
+            cancellationToken);
+        return relations is null
+            ? Results.Problem(
+                statusCode: 404,
+                title: "Map not found",
+                detail: $"map/{localIndex} was not found in import run {runId.Value}.")
+            : Results.Ok(relations);
+    }
+
+    private static async Task<IResult> GetMonsterDropsAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentRelationStore relationStore,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var drops = await relationStore.GetMonsterDropsAsync(runId.Value, localIndex, cancellationToken);
+        return drops is null
+            ? Results.Problem(
+                statusCode: 404,
+                title: "Monster not found",
+                detail: $"monster/{localIndex} was not found in import run {runId.Value}.")
+            : Results.Ok(drops);
     }
 }

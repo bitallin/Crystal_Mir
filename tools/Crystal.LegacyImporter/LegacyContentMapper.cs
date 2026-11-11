@@ -17,7 +17,10 @@ public sealed class LegacyContentMappingResult
 
 public static class LegacyContentMapper
 {
-    public static LegacyContentMappingResult Map(Envir envir, LegacyDatabaseSession session)
+    public static LegacyContentMappingResult Map(
+        Envir envir,
+        LegacyDatabaseSession session,
+        string? contentRoot = null)
     {
         var entities = new List<ContentEntity>();
         var sourceCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
@@ -60,6 +63,14 @@ public static class LegacyContentMapper
             entities.Add(CreateRespawnEntity(map, respawn, ordinal));
         }
 
+        DropContentImportResult? drops = null;
+        if (contentRoot is not null)
+        {
+            drops = DropContentImporter.Map(envir, contentRoot);
+            sourceCounts[ContentEntityTypes.Drop] = drops.Entities.Count;
+            entities.AddRange(drops.Entities);
+        }
+
         var legacy = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(new
         {
             source = session.SourcePath,
@@ -92,6 +103,15 @@ public static class LegacyContentMapper
                 conquests = envir.ConquestInfoList.Count,
                 respawns = respawns.Count
             },
+            contentRoot,
+            drops = drops is null
+                ? null
+                : new
+                {
+                    files = drops.FileCount,
+                    entries = drops.DropCount,
+                    entities = drops.Entities.Count
+                },
             order = new
             {
                 maps = envir.MapInfoList.Select(map => map.Index).ToArray(),
@@ -128,7 +148,10 @@ public static class LegacyContentMapper
             notImported = new
             {
                 recipes = "loaded from Envir/Recipe, outside Server.MirDB",
-                buffs = "initialized during server startup, outside Server.MirDB"
+                buffs = "initialized during server startup, outside Server.MirDB",
+                drops = drops is null
+                    ? "not loaded; pass --content-root to import Envir/Drops"
+                    : null
             }
         }, ContentJson.CompactOptions));
 

@@ -28,15 +28,7 @@
     apiStatus: "demo",
     apiError: "",
     user: null,
-    live: {
-      runs: null,
-      run: null,
-      counts: null,
-      content: Object.create(null),
-      audit: null,
-      accounts: null,
-      roles: null
-    },
+    live: emptyLiveState(),
     contentPages: Object.create(null),
     contentQueries: Object.create(null),
     focusContentSearch: null,
@@ -45,7 +37,33 @@
     failed: new Set()
   };
 
-  const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn"]);
+  function emptyLiveState() {
+    return {
+      runs: null,
+      run: null,
+      counts: null,
+      content: Object.create(null),
+      audit: null,
+      accounts: null,
+      roles: null,
+      relations: {
+        catalog: null,
+        catalogTotal: 0,
+        catalogQuery: "",
+        catalogLoading: false,
+        catalogPromise: null,
+        selectedMapIndex: null,
+        response: null,
+        loadedKey: null,
+        inflightKey: null,
+        error: null,
+        loading: false,
+        drops: Object.create(null)
+      }
+    };
+  }
+
+  const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop"]);
 
   const ROUTE_PERMISSIONS = Object.freeze({
     "content-overview": "content:read",
@@ -764,6 +782,7 @@
           ${kpi({ label: "刷怪点样本", value: String(W.SPAWNS.length), icon: "spawn", tone: "gold", meta: `全库合计 ${worldMonsterTotal} 只 · 坐标 / 数量 / 半径 / 延迟` })}
           ${kpi({ label: "NPC 坐标样本", value: String(W.NPC_POINTS.length), icon: "message", tone: "violet", meta: "主城功能与传送节点" })}
         </section>
+        ${liveRelationPanel()}
         <section class="map-selector mt-16">
           ${W.MAPS.map(map => { const summary = spawnSummaryForMap(map.key); return `<button class="content-type ${map.key === selected.key ? "active" : ""}" data-action="select-world-map" data-map-key="${esc(map.key)}"><span class="content-type-icon">${I(map.tone === "red" ? "crown" : map.tone === "gold" ? "crown" : map.tone === "blue" ? "compass" : "map", 14)}</span><span><strong>${esc(map.name)}</strong><span>${esc(map.layer)} · ${map.size[0]}×${map.size[1]} · ${summary.totalMonsters} 只</span></span></button>`; }).join("")}
         </section>
@@ -879,6 +898,7 @@
           ${kpi({ label: "装备产出", value: String(reverseRows.length), icon: "sword", tone: "gold", meta: "武器 / 衣服 / 首饰可反查" })}
           ${kpi({ label: "待处理引用", value: "3", icon: "alert", tone: "red", meta: "未签名地图 / 失效物品 / 阻挡哈希" })}
         </section>
+        ${liveRelationPanel()}
         <section class="card mt-16">
           <div class="card-head"><div><h2 class="card-title">选择一条典型玩法链</h2><p class="card-subtitle">切换 Boss / 普通怪 / 任务道具，观察关联页面如何联动</p></div><span class="tag gold">可点击关系节点</span></div>
           <div class="card-body">
@@ -1127,6 +1147,19 @@
         ["坐标", pointText(data.Location)], ["数量", data.Count], ["半径", data.Spread],
         ["固定延迟", data.Delay], ["随机延迟", data.RandomDelay], ["内容键", entity.contentKey]
       ]);
+    } else if (type.entity === "drop") {
+      const dropCount = arrayCount(data.drops);
+      row.name = `${textValue(data.monsterName, `怪物 ${data.monsterIndex}`)} · 掉落`;
+      row.subtitle = textValue(data.dropPath || data.fileName, entity.contentKey);
+      row.category = textValue(data.monsterName || data.monsterIndex);
+      row.level = dropCount;
+      row.metric = `${dropCount} 条`;
+      row.icon = "drop";
+      row.tags = ["掉落", "文件内容"];
+      row.attributes = attributesOf([
+        ["旧索引", entity.localIndex], ["怪物索引", data.monsterIndex], ["怪物", data.monsterName],
+        ["掉落路径", data.dropPath], ["文件", data.fileName], ["条目", dropCount], ["内容键", entity.contentKey]
+      ]);
     }
 
     return row;
@@ -1182,12 +1215,253 @@
     return state.contextPromise;
   }
 
+  function liveRelations() {
+    return state.live.relations;
+  }
+
+  function liveDropKey(monsterIndex) {
+    return `${state.live.run?.id || "latest"}:${monsterIndex}`;
+  }
+
+  function liveMapLabel(entity) {
+    const data = entity?.data || {};
+    const fileName = entity?.fileName ?? data.FileName;
+    const title = entity?.title ?? data.Title;
+    return `#${entity?.localIndex ?? "—"} · ${textValue(fileName, "unknown")} · ${textValue(title, "未命名")}`;
+  }
+
+  function filteredLiveMapCatalog() {
+    const catalog = liveRelations().catalog || [];
+    const query = liveRelations().catalogQuery.trim().toLowerCase();
+    if (!query) return catalog;
+    return catalog.filter(item => liveMapLabel(item).toLowerCase().includes(query));
+  }
+
+  function liveMapOptions(catalog, selectedMapIndex) {
+    if (!catalog.length) return `<option value="" selected disabled>没有匹配的地图</option>`;
+    return catalog.map(item => {
+      const selected = Number(item.localIndex) === Number(selectedMapIndex) ? " selected" : "";
+      return `<option value="${esc(item.localIndex)}"${selected}>${esc(liveMapLabel(item))}</option>`;
+    }).join("");
+  }
+
+  async function ensureLiveMapCatalog() {
+    const relations = liveRelations();
+    if (relations.catalog) return relations.catalog;
+    if (!relations.catalogPromise) {
+      relations.catalogLoading = true;
+      relations.error = null;
+      relations.catalogPromise = (async () => {
+        const items = [];
+        let page = 1;
+        let total = 0;
+        while (true) {
+          const payload = await API.listMapCatalog({
+            importRunId: state.live.run?.id,
+            page,
+            pageSize: 500
+          });
+          const batch = Array.isArray(payload?.items) ? payload.items : [];
+          total = Number(payload?.total) || 0;
+          items.push(...batch);
+          if (!batch.length || items.length >= total || page >= 100) break;
+          page += 1;
+        }
+
+        relations.catalogTotal = total;
+        relations.catalog = items;
+        const selectedExists = items.some(item => Number(item.localIndex) === Number(relations.selectedMapIndex));
+        if (!selectedExists) {
+          const preferred = items.find(item => Number(item.localIndex) === 1) || items[0];
+          relations.selectedMapIndex = preferred ? Number(preferred.localIndex) : null;
+        }
+        return items;
+      })().catch(error => {
+        relations.error = error;
+        throw error;
+      }).finally(() => {
+        relations.catalogLoading = false;
+        relations.catalogPromise = null;
+      });
+    }
+    return relations.catalogPromise;
+  }
+
+  async function ensureMapRelations(page = 1) {
+    const relations = liveRelations();
+    if (relations.selectedMapIndex === null || relations.selectedMapIndex === undefined) {
+      await ensureLiveMapCatalog();
+    }
+    if (relations.selectedMapIndex === null || relations.selectedMapIndex === undefined) return null;
+
+    const mapIndex = Number(relations.selectedMapIndex);
+    const key = `${state.live.run?.id || "latest"}:${mapIndex}:${page}`;
+    if (relations.loadedKey === key) return relations.response;
+    if (relations.inflightKey === key) return null;
+
+    const runId = state.live.run?.id;
+    relations.inflightKey = key;
+    relations.loading = true;
+    relations.error = null;
+    if (state.route === "world-map" || state.route === "content-relations") render();
+
+    try {
+      const response = await API.getMapRelations(mapIndex, {
+        importRunId: runId,
+        respawnPage: page,
+        respawnPageSize: 50
+      });
+      if (relations.inflightKey !== key || Number(relations.selectedMapIndex) !== mapIndex) {
+        return null;
+      }
+      relations.response = response;
+      relations.loadedKey = key;
+      return response;
+    } catch (error) {
+      if (error?.status === 401) throw error;
+      if (relations.inflightKey !== key || Number(relations.selectedMapIndex) !== mapIndex) {
+        return null;
+      }
+      relations.response = null;
+      relations.loadedKey = key;
+      relations.error = error;
+      return null;
+    } finally {
+      if (relations.inflightKey === key) relations.inflightKey = null;
+      if (Number(relations.selectedMapIndex) === mapIndex) {
+        relations.loading = false;
+        if (state.route === "world-map" || state.route === "content-relations") render();
+      }
+    }
+  }
+
+  function selectLiveMap(mapIndex) {
+    const relations = liveRelations();
+    relations.selectedMapIndex = Number(mapIndex);
+    relations.response = null;
+    relations.loadedKey = null;
+    relations.error = null;
+    relations.drops = Object.create(null);
+    void ensureMapRelations(1).catch(handleApiFailure);
+  }
+
+  function dropChanceText(chance) {
+    const value = Number(chance) || 0;
+    return value > 0 ? `1 / ${formatNumber(value)}` : "—";
+  }
+
+  function flattenDropRows(drops, depth = 0) {
+    const rows = [];
+    (Array.isArray(drops) ? drops : []).forEach(drop => {
+      const isGroup = Boolean(drop.group);
+      rows.push({
+        depth,
+        name: isGroup
+          ? `分组${drop.group.random ? " · 随机" : ""}${drop.group.first ? " · 优先" : ""}`
+          : drop.item?.name || (Number(drop.gold) > 0 ? `金币 ${formatNumber(drop.gold)}` : "未解析物品"),
+        contentKey: drop.item?.contentKey || "",
+        chance: dropChanceText(drop.chance),
+        gold: Number(drop.gold) > 0 ? formatNumber(drop.gold) : "—",
+        quest: drop.questRequired ? "任务物品" : "—",
+        group: isGroup ? `${arrayCount(drop.group.items)} 项` : "—"
+      });
+      if (isGroup) rows.push(...flattenDropRows(drop.group.items, depth + 1));
+    });
+    return rows;
+  }
+
+  function dropTableHtml(drops) {
+    const rows = flattenDropRows(drops);
+    if (!rows.length) return `<div class="empty-inline">该怪物没有已导入的掉落文本。</div>`;
+    return `<div class="table-wrap"><table><thead><tr><th>物品 / 分组</th><th>概率</th><th>金币</th><th>分组</th><th>约束</th></tr></thead><tbody>${rows.map(row => `<tr><td style="padding-left:${8 + row.depth * 14}px">${row.depth ? `<span class="muted">↳ </span>` : ""}${esc(row.name)}${row.contentKey ? `<div class="cell-sub mono">${esc(row.contentKey)}</div>` : ""}</td><td class="mono">${esc(row.chance)}</td><td class="mono">${esc(row.gold)}</td><td>${esc(row.group)}</td><td>${esc(row.quest)}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+
+  function renderLiveDropModal(payload, error) {
+    const body = document.getElementById("live-drop-body");
+    if (!body) return;
+    if (error) {
+      body.innerHTML = `<div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>掉落读取失败</strong><span>${esc(error.message || "Control API 请求失败")}</span></div></div>`;
+      return;
+    }
+    body.innerHTML = `<div class="data-list"><div class="data-row"><span>怪物</span><strong>${esc(payload.name || payload.contentKey)}</strong></div><div class="data-row"><span>掉落路径</span><strong class="mono">${esc(payload.dropPath || "—")}</strong></div><div class="data-row"><span>掉落内容键</span><strong class="mono">${esc(payload.dropContentKey || "—")}</strong></div></div><div class="divider"></div>${dropTableHtml(payload.drops)}`;
+  }
+
+  async function openLiveDrops(monsterIndex, monsterName) {
+    const relations = liveRelations();
+    const key = liveDropKey(monsterIndex);
+    const cached = relations.drops[key];
+    if (cached) {
+      modalShell({ title: `${textValue(monsterName, `怪物 ${monsterIndex}`)} · 掉落`, desc: `真实批次 #${state.live.run?.id ?? "—"} · monster/${monsterIndex}`, iconName: "drop", body: `<div id="live-drop-body"></div>`, foot: `${btn("打开怪物内容", "skull", "btn-secondary", `data-action="open-content" data-type="monsters" data-key="${esc(cached.contentKey)}"`)}${btn("关闭", "", "btn-primary", 'data-action="close-modal"')}` });
+      renderLiveDropModal(cached);
+      return;
+    }
+
+    modalShell({ title: `${textValue(monsterName, `怪物 ${monsterIndex}`)} · 掉落`, desc: `正在读取真实批次 #${state.live.run?.id ?? "—"} 的掉落文件`, iconName: "drop", body: `<div id="live-drop-body"><div class="empty-inline">${I("refresh", 14)} 正在读取掉落关系...</div></div>`, foot: `${btn("关闭", "", "btn-primary", 'data-action="close-modal"')}` });
+    try {
+      const payload = await API.getMonsterDrops(monsterIndex, state.live.run?.id);
+      relations.drops[key] = payload;
+      renderLiveDropModal(payload);
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      renderLiveDropModal(null, error);
+    }
+  }
+
+  function liveRelationPanel() {
+    if (!isLive()) return "";
+    const relations = liveRelations();
+    const runId = state.live.run?.id;
+    const catalog = relations.catalog || [];
+    const visibleCatalog = filteredLiveMapCatalog();
+    const response = relations.response;
+    const map = response?.map;
+
+    if (!catalog.length && (relations.catalogLoading || !relations.error)) {
+      return `<section class="card mt-16"><div class="card-body"><div class="empty-inline">${I("refresh", 14)} 正在读取批次 #${esc(runId ?? "—")} 的地图关系...</div></div></section>`;
+    }
+    if (relations.error && !response) {
+      return `<section class="card mt-16"><div class="card-body"><div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>真实关系读取失败</strong><span>${esc(relations.error.message || "Control API 请求失败")}</span></div><button class="btn btn-secondary btn-sm" data-action="reload-live-map">${I("refresh", 11)}重试</button></div></div></section>`;
+    }
+    if (!catalog.length) {
+      return `<section class="card mt-16"><div class="card-body"><div class="empty-inline">当前批次没有地图实体。</div></div></section>`;
+    }
+
+    const respawns = response?.respawns;
+    const pageSize = respawns?.pageSize || 50;
+    const total = respawns?.total || 0;
+    const page = respawns?.page || 1;
+    const pages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
+    const movements = response?.movements || [];
+    const npcs = response?.npcs || [];
+    const safeZones = response?.safeZones || [];
+    const respawnRows = respawns?.items || [];
+
+    return `
+      <section class="card mt-16" id="live-relation-panel">
+        <div class="card-head"><div><h2 class="card-title">真实批次关系</h2><p class="card-subtitle">来自 Control API 的地图、传送、安全区、NPC、刷新点和掉落文件，不混用演示数据。</p></div><div class="flex gap-6"><span class="status success">批次 #${esc(runId ?? "—")}</span>${relations.loading ? `<span class="status info">读取中</span>` : ""}</div></div>
+        <div class="card-body">
+          <div class="grid grid-2">
+            <div class="field" style="margin:0"><label>检索地图</label><label class="search-field">${I("search", 13)}<input id="live-map-search" data-live-map-filter value="${esc(relations.catalogQuery)}" placeholder="名称、文件名、内容键或索引"></label></div>
+            <div class="field" style="margin:0"><label>选择导入地图（${formatNumber(catalog.length)} / ${formatNumber(relations.catalogTotal)}）</label><select id="live-map-select" data-live-map-select>${liveMapOptions(visibleCatalog, relations.selectedMapIndex)}</select></div>
+          </div>
+          ${map ? `<div class="data-list mt-12"><div class="data-row"><span>地图</span><strong>${esc(map.title || map.fileName || map.contentKey)}</strong></div><div class="data-row"><span>内容键 / 本地索引</span><strong class="mono">${esc(map.contentKey)} · ${esc(map.localIndex)}</strong></div><div class="data-row"><span>文件名</span><strong class="mono">${esc(map.fileName || "—")}</strong></div><div class="data-row"><span>传送 / 安全区 / NPC / 刷新点</span><strong>${movements.length} / ${safeZones.length} / ${npcs.length} / ${formatNumber(total)}</strong></div></div>` : `<div class="empty-inline">正在读取地图 ${esc(relations.selectedMapIndex ?? "—")} 的关系...</div>`}
+        </div>
+      </section>
+      ${map ? `<section class="grid grid-2 mt-16" id="live-relation-data">
+        <article class="card"><div class="card-head"><div><h2 class="card-title">入口、出口与 NPC</h2><p class="card-subtitle">按地图本地索引关联 MovementInfo 和 NPCInfo.MapIndex</p></div><span class="tag blue">${movements.length} 传送 · ${npcs.length} NPC</span></div><div class="table-wrap"><table><thead><tr><th>目标地图</th><th>源坐标</th><th>目标坐标</th><th>规则</th></tr></thead><tbody>${movements.map(move => `<tr><td><span class="cell-main">${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</span><div class="cell-sub mono">${esc(move.targetMap?.contentKey || `map.${move.targetMapIndex}`)}</div></td><td class="mono">${esc(pointText(move.source))}</td><td class="mono">${esc(pointText(move.destination))}</td><td>${move.needHole ? `<span class="tag">洞口</span>` : ""}${move.needMove ? `<span class="tag">踩点</span>` : ""}${move.showOnBigMap ? `<span class="tag">大地图</span>` : ""}${!move.needHole && !move.needMove && !move.showOnBigMap ? "—" : ""}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有传送关系。</div></td></tr>`}</tbody></table></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>NPC</th><th>脚本</th><th>坐标</th><th>图像</th></tr></thead><tbody>${npcs.map(npc => `<tr><td><button class="row-link" data-action="open-content" data-type="npcs" data-key="${esc(npc.contentKey)}">${esc(npc.name || npc.contentKey)}</button><div class="cell-sub mono">${esc(npc.contentKey)}</div></td><td class="mono">${esc(npc.fileName || "—")}</td><td class="mono">${esc(pointText(npc.location))}</td><td>${esc(npc.image ?? "—")}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有 NPC 实体。</div></td></tr>`}</tbody></table></div></div></article>
+        <article class="card"><div class="card-head"><div><h2 class="card-title">刷新点与掉落</h2><p class="card-subtitle">刷新点按 mapIndex 分页；怪物掉落按 monster localIndex 单独查询</p></div><span class="tag gold">${formatNumber(total)} 个刷新点</span></div><div class="table-wrap"><table><thead><tr><th>怪物</th><th>坐标</th><th>数量 / 半径</th><th>刷新</th><th>掉落</th></tr></thead><tbody>${respawnRows.map(respawn => `<tr><td><span class="cell-main">${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</span><div class="cell-sub mono">${esc(respawn.monsterContentKey || `monster.${respawn.monsterIndex}`)}</div></td><td class="mono">${esc(pointText(respawn.location))}</td><td>${esc(respawn.count)} 只<div class="cell-sub">半径 ${esc(respawn.spread)}</div></td><td>${esc(respawn.delay)} 分钟<div class="cell-sub">±${esc(respawn.randomDelay)}</div></td><td><button class="row-link" data-action="open-live-drops" data-index="${esc(respawn.monsterIndex)}" data-name="${esc(respawn.monsterName || "")}">查看掉落</button></td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-inline">该地图没有刷新点。</div></td></tr>`}</tbody></table></div><div class="card-foot"><span class="muted">第 ${page} / ${pages} 页</span><div class="page-buttons"><button class="page-btn" data-action="live-respawn-page" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>${I("chevronLeft", 11)}</button><button class="page-btn" data-action="live-respawn-page" data-page="${page + 1}" ${page >= pages ? "disabled" : ""}>${I("chevronRight", 11)}</button></div></div></article>
+      </section>` : ""}`;
+  }
+
   function handleApiFailure(error) {
     if (error?.status === 401) {
       API.clearSession();
       state.user = null;
       state.apiStatus = "demo";
-      state.live = { runs: null, run: null, counts: null, content: Object.create(null), audit: null, accounts: null, roles: null };
+      state.live = emptyLiveState();
       state.failed.clear();
       showToast("登录会话已失效，请重新登录。", "danger");
       if (state.route !== "login") navigate("login");
@@ -1230,6 +1504,21 @@
           if (state.route === route) render();
         } finally {
           state.inflight.delete(key);
+        }
+        return;
+      }
+
+      if (route === "world-map" || route === "content-relations") {
+        await ensureLiveContext();
+        if (!state.live.run) return;
+        if (state.live.relations.error && !state.live.relations.response) return;
+        try {
+          await ensureLiveMapCatalog();
+          await ensureMapRelations(1);
+        } catch (error) {
+          if (error?.status === 401) throw error;
+          state.live.relations.error = error;
+          if (state.route === route) render();
         }
         return;
       }
@@ -2586,6 +2875,42 @@
     return `<div class="detail-section"><div class="detail-section-title"><span>世界关系</span><span class="tag gold">${esc(caption)}</span></div>${body}</div>`;
   }
 
+  async function hydrateLiveDrawerRelations(entityType, row) {
+    const host = document.getElementById("live-drawer-relations");
+    if (!host) return;
+    const runId = state.live.run?.id;
+    try {
+      if (entityType === "map") {
+        const cached = liveRelations().response;
+        const payload = cached?.map && Number(cached.map.localIndex) === Number(row.index)
+          ? cached
+          : await API.getMapRelations(row.index, { importRunId: runId, respawnPage: 1, respawnPageSize: 10 });
+        if (!document.getElementById("live-drawer-relations")) return;
+        const movements = payload.movements || [];
+        const npcs = payload.npcs || [];
+        const respawns = payload.respawns?.items || [];
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实世界关系</span><span class="tag gold">批次 #${esc(runId ?? "—")}</span></div><div class="data-list"><div class="data-row"><span>内容键 / 本地索引</span><strong class="mono">${esc(payload.map.contentKey)} · ${esc(payload.map.localIndex)}</strong></div><div class="data-row"><span>传送 / 安全区 / NPC</span><strong>${movements.length} / ${(payload.safeZones || []).length} / ${npcs.length}</strong></div><div class="data-row"><span>刷新点</span><strong>${formatNumber(payload.respawns?.total || 0)} 个</strong></div></div><div class="divider"></div><div class="relation-mini-list">${movements.slice(0, 3).map(move => `<div class="relation-mini"><span class="relation-mini-icon">${I("teleport", 13)}</span><span><strong>${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</strong><small>${esc(pointText(move.source))} → ${esc(pointText(move.destination))}</small></span></div>`).join("")}${npcs.slice(0, 2).map(npc => `<div class="relation-mini"><span class="relation-mini-icon">${I("message", 13)}</span><span><strong>${esc(npc.name || npc.contentKey)}</strong><small>${esc(npc.fileName || "无脚本")} · ${esc(pointText(npc.location))}</small></span></div>`).join("")}${respawns.slice(0, 2).map(respawn => `<div class="relation-mini"><span class="relation-mini-icon">${I("spawn", 13)}</span><span><strong>${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</strong><small>${esc(pointText(respawn.location))} · ${esc(respawn.count)} 只 · ${esc(respawn.delay)} 分钟</small></span></div>`).join("")}</div></div>`;
+        return;
+      }
+
+      if (entityType === "monster") {
+        const key = liveDropKey(row.index);
+        const payload = liveRelations().drops[key] || await API.getMonsterDrops(row.index, runId);
+        liveRelations().drops[key] = payload;
+        if (!document.getElementById("live-drawer-relations")) return;
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实掉落关系</span><span class="tag gold">${esc(payload.dropContentKey || "无掉落文件")}</span></div><div class="data-list"><div class="data-row"><span>掉落路径</span><strong class="mono">${esc(payload.dropPath || "—")}</strong></div><div class="data-row"><span>顶层条目</span><strong>${arrayCount(payload.drops)}</strong></div></div><div class="divider"></div>${dropTableHtml(payload.drops)}</div>`;
+      }
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      if (document.getElementById("live-drawer-relations")) {
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实世界关系</span></div><div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>关系读取失败</strong><span>${esc(error?.message || "Control API 请求失败")}</span></div></div></div>`;
+      }
+    }
+  }
+
   function openContentDrawer(typeId, key) {
     const type = CONTENT_BY_ID[typeId];
     if (!type) return;
@@ -2599,7 +2924,9 @@
           <div class="drawer-body">
             <div class="detail-section"><div class="flex gap-8 items-center">${status(row.status)}${row.tags.map(tag => `<span class="tag gold">${esc(tag)}</span>`).join("")}</div></div>
             <div class="detail-section"><div class="detail-section-title"><span>基础字段</span><button class="btn btn-ghost btn-sm" data-action="toast" data-message="已切换到字段编辑模式">${I("edit", 11)}编辑</button></div><div class="data-list">${row.attributes.map(([label, value]) => `<div class="data-row"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div></div>
-            ${drawerRelations(typeId, row)}
+            ${isLive() && LIVE_ENTITY_TYPES.has(type.entity)
+              ? (type.entity === "map" || type.entity === "monster" ? `<div id="live-drawer-relations"><div class="detail-section"><div class="empty-inline">${I("refresh", 14)} 正在读取真实关系...</div></div></div>` : "")
+              : drawerRelations(typeId, row)}
             <div class="detail-section"><div class="detail-section-title"><span>校验与引用</span><span class="success-text">通过</span></div><div class="validation-list" style="padding:0"><div class="validation-item ok">${I("checkCircle", 12)}<span>Schema 校验通过</span></div><div class="validation-item ok">${I("checkCircle", 12)}<span>资源引用存在且哈希一致</span></div><div class="validation-item ${type.issues ? "warn" : "ok"}">${I(type.issues ? "warning" : "checkCircle", 12)}<span>${type.issues} 个内容域级提示</span></div><div class="validation-item ok">${I("checkCircle", 12)}<span>协议本地索引 ${esc(row.index || row.key)} 在允许范围内</span></div></div></div>
             <div class="detail-section"><div class="detail-section-title"><span>发布影响</span></div><div class="grid grid-2"><div class="metric-mini"><span>影响区服</span><strong style="font-size:11px">5 个</strong></div><div class="metric-mini"><span>引用内容</span><strong style="font-size:11px">${row.tags.length + 2} 处</strong></div><div class="metric-mini"><span>热重载</span><strong style="font-size:11px">支持</strong></div><div class="metric-mini"><span>回滚</span><strong style="font-size:11px">支持</strong></div></div></div>
             <div class="detail-section"><div class="detail-section-title"><span>最近变更</span></div><div class="timeline"><div class="timeline-item"><span class="timeline-dot gold">${I("edit", 10)}</span><div class="timeline-copy"><strong>周遥更新内容</strong><span>字段与资源引用变更</span><time>今天 17:58 · 请求 4c1e…</time></div></div><div class="timeline-item"><span class="timeline-dot">${I("checkCircle", 10)}</span><div class="timeline-copy"><strong>自动校验通过</strong><span>0 error · 1 warning</span><time>今天 17:59</time></div></div></div></div>
@@ -2607,6 +2934,9 @@
           <div class="drawer-foot"><button class="btn btn-secondary" data-action="toast" data-message="内容键已复制">${I("copy", 13)}复制内容键</button><button class="btn btn-secondary" data-action="toast" data-message="变更历史已打开">${I("clock", 13)}变更历史</button><button class="btn btn-primary" data-action="toast" data-message="已进入内容编辑草稿">${I("edit", 13)}编辑内容</button></div>
         </aside>
       </div>`;
+    if (isLive() && (type.entity === "map" || type.entity === "monster")) {
+      void hydrateLiveDrawerRelations(type.entity, row);
+    }
   }
 
   function modalShell({ title, desc, iconName = "info", body, foot }) {
@@ -2707,6 +3037,11 @@
   }
 
   window.addEventListener("hashchange", () => { closeOverlays(); render(); });
+  document.addEventListener("change", event => {
+    if (event.target.matches("[data-live-map-select]")) {
+      selectLiveMap(event.target.value);
+    }
+  });
   document.addEventListener("click", event => {
     const routeEl = event.target.closest("[data-route]");
     if (routeEl && !event.target.closest("[data-action]")) {
@@ -2733,6 +3068,31 @@
       if (action === "open-spotlight") { openSpotlight(); return; }
       if (action === "select-world-map") { state.selectedWorldMap = actionEl.dataset.mapKey; render(); return; }
       if (action === "open-world-map") { state.selectedWorldMap = actionEl.dataset.mapKey; navigate("world-map"); return; }
+      if (action === "live-respawn-page") {
+        const page = Number(actionEl.dataset.page);
+        if (Number.isFinite(page) && page > 0) void ensureMapRelations(page).catch(handleApiFailure);
+        return;
+      }
+      if (action === "reload-live-map") {
+        const relations = liveRelations();
+        relations.catalog = null;
+        relations.catalogTotal = 0;
+        relations.catalogQuery = "";
+        relations.catalogPromise = null;
+        relations.selectedMapIndex = null;
+        relations.response = null;
+        relations.loadedKey = null;
+        relations.inflightKey = null;
+        relations.error = null;
+        void ensureLiveMapCatalog()
+          .then(() => ensureMapRelations(1))
+          .catch(handleApiFailure);
+        return;
+      }
+      if (action === "open-live-drops") {
+        void openLiveDrops(Number(actionEl.dataset.index), actionEl.dataset.name || "");
+        return;
+      }
       if (action === "select-relation") { state.relationScenario = actionEl.dataset.scenario; render(); return; }
       if (action === "open-content") { openContentDrawer(actionEl.dataset.type, actionEl.dataset.key); return; }
       if (action === "open-audit") {
@@ -2749,6 +3109,7 @@
         if (!run) return;
         state.live.run = run;
         state.live.counts = null;
+        state.live.relations = emptyLiveState().relations;
         render();
         API.getContentTypes(id).then(counts => {
           state.live.counts = counts;
@@ -2798,7 +3159,7 @@
         state.user = null;
         state.apiStatus = "demo";
         state.selectedRoleCode = null;
-        state.live = { runs: null, run: null, counts: null, content: Object.create(null), audit: null, accounts: null, roles: null };
+        state.live = emptyLiveState();
         state.failed.clear();
         closeOverlays();
         navigate("login");
@@ -2849,6 +3210,18 @@
         state.focusContentSearch = `content-search-${type.id}`;
         render();
       }, 300);
+      return;
+    }
+    if (event.target.matches("[data-live-map-filter]") && isLive()) {
+      const relations = liveRelations();
+      relations.catalogQuery = event.target.value;
+      const select = document.getElementById("live-map-select");
+      if (select) {
+        const visible = filteredLiveMapCatalog();
+        select.innerHTML = liveMapOptions(visible, relations.selectedMapIndex);
+        const selectedVisible = visible.some(item => Number(item.localIndex) === Number(relations.selectedMapIndex));
+        select.value = selectedVisible ? String(relations.selectedMapIndex) : "";
+      }
       return;
     }
     if (event.target.matches("[data-table-filter]")) {

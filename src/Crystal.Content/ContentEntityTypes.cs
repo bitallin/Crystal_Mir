@@ -14,6 +14,7 @@ public static class ContentEntityTypes
     public const string Conquest = "conquest";
     public const string Dragon = "dragon";
     public const string Respawn = "respawn";
+    public const string Drop = "drop";
     public const string Script = "script";
     public const string Asset = "asset";
 
@@ -31,6 +32,7 @@ public static class ContentEntityTypes
         Conquest,
         Dragon,
         Respawn,
+        Drop,
         Script,
         Asset
     };

@@ -1,6 +1,6 @@
 # Control API 参考
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-11
 > 状态：生效（M1 认证、账号生命周期与只读初版）
 
 ## 1. 位置与边界
@@ -13,11 +13,12 @@
 - 健康检查。
 - 导入批次查询。
 - 内容实体分页查询、按旧索引查询、按内容键查询。
+- 地图目录、地图拓扑、安全区、NPC、刷新点、传送门和怪物掉落关系查询。
 - Argon2id 密码、短时 JWT、刷新令牌轮换和会话撤销。
 - RBAC 权限校验、账号创建/停用/启用、密码修改/重置、角色调整和只读审计查询。
 - API key 机器到机器认证、登录限流和全局限流。
 
-尚未实现：MFA/OIDC、账号删除、解锁接口、写入/发布 API、内容编辑和真实世界关系 API。
+尚未实现：MFA/OIDC、账号删除、解锁接口、写入/发布 API、内容编辑和 NPC 脚本/配方关系。
 
 ## 2. 配置
 
@@ -112,11 +113,13 @@ GET /api/v1/import-runs/{id}/content-types
   "legacyVersion": 111,
   "schemaVersion": 1,
   "status": "imported",
-  "entityCount": 9734,
+  "entityCount": 9735,
   "startedAt": "2026-11-10T02:45:18Z",
   "finishedAt": "2026-11-10T02:45:18Z"
 }
 ```
+
+黄金库核心实体为 9,734 个；使用 `--content-root` 导入掉落文本后，测试批次为 9,735 个实体。
 
 ### 3.4 内容查询
 
@@ -134,7 +137,7 @@ GET /api/v1/content/{entityType}/key/{contentKey}
 ```
 
 - `importRunId` 省略时使用最新 `imported` 批次。
-- `entityType`：`item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn` 等。
+- `entityType`：`item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn`、`drop` 等。
 - `localIndex` 是旧数据库 `Index`，`contentKey` 例如 `item.1`。
 - `q` 对 `data.Name`、`data.Title`、`data.FileName` 和内容键做模糊匹配。
 
@@ -163,7 +166,56 @@ GET /api/v1/content/{entityType}/key/{contentKey}
 }
 ```
 
-### 3.5 账号、角色与审计
+### 3.5 地图目录与内容关系
+
+```text
+GET /api/v1/content/map/catalog?importRunId=&page=1&pageSize=500&q=
+GET /api/v1/content/map/{localIndex}/relations?importRunId=&respawnPage=1&respawnPageSize=200
+GET /api/v1/content/monster/{localIndex}/drops?importRunId=
+```
+
+地图目录只返回 `MapSummaryDto`，不携带完整地图 JSON，供 Web 全量地图选择器使用。
+`pageSize` 范围 1～500，默认 500；`q` 对内容键、`Title`、`FileName` 做模糊匹配，并对完整
+本地索引做精确匹配。黄金样本 `/content/map/catalog` 返回 463 张地图。
+
+地图关系接口返回地图摘要、`Movements` 传送/入口出口、目标地图摘要、`SafeZones`、按
+`NPCInfo.MapIndex` 关联的 NPC，以及分页刷新点。刷新点会解析 `MonsterIndex` 并补上怪物内容键和名称。
+`respawnPageSize` 范围 1～500，默认 200。
+
+掉落接口返回怪物摘要、`DropPath`、`drop.monster.<Index>` 内容键和已解析掉落条目。普通物品掉落和嵌套
+分组掉落都会补上 `item.<Index>` 内容键与物品名称；没有导入掉落文本时返回空数组，而不是 404。
+
+示例（节选）：
+
+```json
+{
+  "importRunId": 1,
+  "map": {
+    "localIndex": 1,
+    "contentKey": "map.1",
+    "index": 1,
+    "fileName": "0",
+    "title": "BichonProvince"
+  },
+  "movements": [
+    {
+      "targetMapIndex": 2,
+      "targetMap": {"localIndex": 2, "contentKey": "map.2", "fileName": "1"},
+      "source": {"x": 347, "y": 188},
+      "destination": {"x": 13, "y": 40}
+    }
+  ],
+  "npcs": [{"localIndex": 1, "contentKey": "npc.1", "name": "Teleport_Gilbert"}],
+  "respawns": {
+    "page": 1,
+    "pageSize": 200,
+    "total": 360,
+    "items": [{"contentKey": "respawn.map1.1", "monsterName": "Hen", "count": 5}]
+  }
+}
+```
+
+### 3.6 账号、角色与审计
 
 ```text
 GET  /api/v1/accounts?limit=50
@@ -207,9 +259,9 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
   ./scripts/test-control-api.sh
 ```
 
-脚本会执行真实 PostgreSQL 导入、启动 API，验证登录、JWT、刷新令牌轮换、RBAC 403、登出撤销、
+脚本会执行真实 PostgreSQL 导入（含掉落文本）、启动 API，验证登录、JWT、刷新令牌轮换、RBAC 403、登出撤销、
 账号创建、停用/启用、管理员重置密码、自助改密、角色调整、最后管理员保护、审计查询、健康检查、
-分页、详情、类型计数和非法参数，并在 CI 中通过 PostgreSQL 16 service container 运行。测试库应为
+分页、详情、类型计数、地图关系、怪物掉落和非法参数，并在 CI 中通过 PostgreSQL 16 service container 运行。测试库应为
 独立数据库；已有账号时不会再执行 bootstrap。
 
 ## 5. 当前限制
@@ -219,4 +271,5 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 - 角色变更通过撤销会话使权限立即生效；后续引入 OIDC 时需要同步定义 token 失效策略。
 - 计数和列表跨全部历史批次；调用方必须使用 `importRunId` 或未来活动发布限定数据。
 - JSON 字段名保留旧实体命名，前端需要 schema 或字段映射层。
+- 关系查询直接解析 `data jsonb`，尚未建立规范化外键；大规模关系检索前需要评估专用索引或投影表。
 - 分页使用 offset，内容规模很大时需要评估 keyset pagination。

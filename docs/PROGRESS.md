@@ -1,7 +1,7 @@
 # 项目进度台账
 
-> 最后更新：2026-11-10
-> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
+> 最后更新：2026-11-11
+> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 全量地图目录与地图/掉落真实关系接入、地图关系/掉落只读 API 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
 
 ## 1. 当前状态
 
@@ -13,11 +13,11 @@
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
-| 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；资源/脚本导入待做 |
-| 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,734 实体导入 + 哈希校验 + 回归测试 |
+| 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；怪物掉落文本已可通过 `--content-root` 导入；NPC 脚本/配方/资源导入待做 |
+| 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,734 个核心实体导入 + 可选 `drop` 实体 + 哈希校验 + 回归测试 |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
-| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口、账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、10 类内容分页检索、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API 与真实世界关系 API 待做 |
+| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口、全量地图目录、地图拓扑/刷新点/传送门/NPC/怪物掉落关系接口、账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、11 类内容分页检索、全量地图目录与检索、地图/掉落真实关系面板与详情抽屉、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API、NPC 脚本/配方/资源管线和地图尺寸/阻挡资源待做 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 未开始 | 新 manifest/启动器/Agent 尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
@@ -28,7 +28,7 @@
 | 里程碑 | 状态 | 完成度 | 备注 |
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
-| M1 架构骨架与数据底座 | 进行中 | 90% | 数据链路、只读 API、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；真实关系 API、内容写入/发布 API、资源/脚本管线和 PG16 staging 待做 |
+| M1 架构骨架与数据底座 | 进行中 | 95% | 数据链路、只读 API、地图目录与关系/掉落 API、Web 全量地图检索、真实关系面板与抽屉、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；内容写入/发布 API、NPC 脚本/配方/资源管线、地图尺寸/阻挡资源和 PG16 staging 待做 |
 | M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
@@ -245,6 +245,40 @@
 - 未验证：真实 Windows 旧服务端启动重建库、PostgreSQL 16 staging、资源/脚本导入、超大内容集性能和并发导出。
 - 决策：保持现有二进制格式、内容快照格式和发布模型，不新增 ADR。
 
+### 2026-11-10（M1 地图关系与掉落只读 API）
+
+- 范围：把 `Envir/Drops` 文本接入内容快照，并为地图拓扑、刷新点、传送门、NPC 和怪物掉落建立只读关系 API。
+- 导入器：新增 `--content-root <dir>`，按怪物 `DropPath`（为空时使用怪物名称）读取 `Envir/Drops/*.txt`；新增 `drop` 实体，内容键为 `drop.monster.<Index>`，保存怪物摘要、文件路径和解析后的 `DropInfo`，物品引用继续使用 `$ref`。
+- 兼容性：`drop` 不写回旧二进制数据库；快照重建和导出验证会过滤掉 `drop` 等文件型内容，黄金库三条重建路径仍逐字节一致。
+- Control API：新增 `GET /api/v1/content/map/{localIndex}/relations`，返回地图摘要、传送/入口出口、目标地图、安全区、NPC 和分页刷新点；新增 `GET /api/v1/content/monster/{localIndex}/drops`，返回掉落路径、掉落内容键、物品引用和物品名称。
+- 查询边界：地图关系按 `data->>'mapIndex'` 读取刷新点、按 `data->>'MapIndex'` 读取 NPC，分页参数 `respawnPage`/`respawnPageSize` 校验为 1～500；关系查询仍直接解析 `jsonb`，尚未建立规范化投影表。
+- 测试：新增 `tests/fixtures/content/Envir/Drops/Misc/ArcherGuard.txt`；`scripts/verify-content.sh` 覆盖掉落导入、含掉落快照重建和二进制一致性；`scripts/test-control-api.sh` 覆盖地图 1 的 72 条传送、6 个安全区、46 个 NPC、360 个刷新点分页、怪物 1 的 GreenPoison 掉落和非法分页参数。
+- 验证：`./scripts/verify-content.sh` 通过；Control API 在临时 PostgreSQL 12 数据库上完整集成通过（run 1，11 类内容，含 `drop`）；API 与导入器 Release 构建通过。
+- 未验证：全量 Jev 掉落导入的条目性能、分组掉落样本、NPC 脚本/配方关系、PostgreSQL 16 staging；Control.Web 真实关系页接入已在 2026-11-11 完成。
+- 决策：复用现有不可变快照、通用 `content_entity` 和只读 API 模型，未改变数据库 schema、协议或发布边界，因此不新增 ADR。
+
+### 2026-11-11（M1 Control.Web 真实地图/掉落关系接入）
+
+- 范围：把现有地图关系和怪物掉落只读 API 接入 `Crystal.Control.Web`，并在实时模式中抑制按旧索引猜测的演示关系。
+- API 客户端：新增 `getMapRelations` 和 `getMonsterDrops`，支持指定批次、刷新点页码和页大小；关系数据按批次与地图索引缓存，切换批次或地图时失效。
+- 地图拓扑/世界关系：新增“真实批次关系”区，加载当前批次前 200 张地图，支持按地图本地索引切换；展示地图摘要、传送/入口出口、安全区、NPC、分页刷新点和怪物名称，点击刷新点可按需读取 `monster/{localIndex}/drops` 并打开掉落明细。
+- 内容详情：实时模式下地图和怪物抽屉分别读取真实关系与掉落；地图抽屉展示传送、安全区、NPC、刷新点摘要，怪物抽屉展示掉落路径、顶层条目和分组/物品明细，不再展示演示关系。
+- 查询边界：刷新点按 50 条分页；地图关系页未做全量地图搜索，坐标画布和运行时在线人物仍使用原型数据；关系响应仍直接消费 `jsonb` 查询结果，没有新增投影表。
+- 测试：`scripts/test-control-web.sh` 增加地图 1 关系抽屉（360 个刷新点）、怪物 1 的 `GreenPoison` 掉落、世界地图真实关系的 72 条传送 / 6 个安全区 / 46 个 NPC / 360 个刷新点，以及按需掉落弹窗断言。
+- 验证：带临时 PostgreSQL 12 库运行 `./scripts/ci.sh` 通过（全量构建、358 项旧服务端回归、内容快照/二进制往返、区服冒烟、Control API）；`./scripts/test-control-web.sh` 最终版本通过完整 API + Playwright 集成；全部 JavaScript 通过 `node --check`，`git diff --check` 通过。
+- 未验证：全量 463 张地图选择、地图尺寸/阻挡资源接入、分组掉落和大批量掉落的性能、PostgreSQL 16 staging。
+- 决策：仅消费已有只读契约并补充前端状态与测试，未改变数据库 schema、协议或发布模型，因此不新增 ADR。
+
+### 2026-11-11（M1 全量地图目录与检索）
+
+- 范围：补齐 Control.Web 只能选择前 200 张地图的缺口，让实时地图关系区覆盖当前批次全部 463 张地图。
+- Control API：新增 `GET /api/v1/content/map/catalog?importRunId=&page=1&pageSize=500&q=`，只返回地图摘要，不携带完整地图 JSON；`pageSize` 范围 1～500，`q` 支持内容键、`Title`、`FileName` 模糊匹配和本地索引精确匹配。
+- Control.Web：关系区改为通过地图目录加载全部摘要，支持名称、文件名、内容键和索引检索；选择 200 号以后地图可正常加载关系。切换地图时会丢弃过期请求结果，目录读取失败时提供重试入口。
+- 测试：`scripts/test-control-api.sh` 校验目录总数 463、首项为 `map.1`、搜索命中 `map.1` 和非法 `pageSize=501` 返回 400；`scripts/test-control-web.sh` 校验 463 个选项、选择 `map.300`、按 `BichonProvince` 过滤地图以及原有关系/掉落面板。
+- 验证：Control API 集成测试在临时 PostgreSQL 12 库通过；Control Web Playwright 集成通过；JavaScript `node --check`、相关 Shell `bash -n` 和 `git diff --check` 通过。
+- 未验证：地图尺寸、阻挡资源和真实坐标画布；大于 500 张地图时前端顺序分页加载的延迟；PostgreSQL 16 staging。
+- 决策：新增只读目录端点，不改变 `content_entity` schema、协议或发布模型，因此不新增 ADR。
+
 ## 4. 决策记录
 
 | 日期 | 决策 | ADR |
@@ -267,7 +301,7 @@
 
 ## 6. 下一步
 
-1. 把掉落文本、NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，为地图拓扑、刷新点、传送门和掉落关系补只读 API。
+1. 把 NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，补齐脚本/配方关系 API，并评估全量掉落导入。
 2. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
 3. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
 4. 在 PostgreSQL 16 staging 演练 schema 和升级路径，确认 GitHub Actions PG16 job 稳定。

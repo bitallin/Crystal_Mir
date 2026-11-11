@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Crystal.Content;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -174,6 +175,61 @@ public sealed class ContentQueryStore
         return (items, total);
     }
 
+    public async Task<(IReadOnlyList<MapSummaryDto> Items, long Total)> QueryMapCatalogAsync(
+        long importRunId,
+        int page,
+        int pageSize,
+        string? query,
+        CancellationToken cancellationToken)
+    {
+        var where = "import_run_id = @runId AND entity_type = @entityType";
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            where += """
+                 AND (
+                     lower(content_key) LIKE lower(@pattern) ESCAPE E'\\'
+                     OR lower(coalesce(data->>'Title', '')) LIKE lower(@pattern) ESCAPE E'\\'
+                     OR lower(coalesce(data->>'FileName', '')) LIKE lower(@pattern) ESCAPE E'\\'
+                     OR local_index::text = @exactQuery
+                 )
+                """;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        var total = await CountAsync(
+            connection,
+            where,
+            importRunId,
+            ContentEntityTypes.Map,
+            query,
+            cancellationToken,
+            addExactQuery: true);
+
+        await using var command = new NpgsqlCommand(
+            $"""
+             SELECT id, import_run_id, content_key, local_index, schema_version, data::text
+             FROM content_entity
+             WHERE {where}
+             ORDER BY local_index ASC
+             LIMIT @limit OFFSET @offset;
+             """,
+            connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("entityType", ContentEntityTypes.Map);
+        command.Parameters.AddWithValue("limit", pageSize);
+        command.Parameters.AddWithValue("offset", (long)(page - 1) * pageSize);
+        AddQueryParameter(command, query, addExactQuery: true);
+
+        var items = new List<MapSummaryDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(ReadMapSummary(ReadEntity(reader)));
+        }
+
+        return (items, total);
+    }
+
     public async Task<ContentEntityDto?> GetByLocalIndexAsync(
         long importRunId,
         string entityType,
@@ -227,18 +283,22 @@ public sealed class ContentQueryStore
         long importRunId,
         string entityType,
         string? query,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool addExactQuery = false)
     {
         await using var command = new NpgsqlCommand(
             $"SELECT count(*)::bigint FROM content_entity WHERE {where};",
             connection);
         command.Parameters.AddWithValue("runId", importRunId);
         command.Parameters.AddWithValue("entityType", entityType);
-        AddQueryParameter(command, query);
+        AddQueryParameter(command, query, addExactQuery);
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static void AddQueryParameter(NpgsqlCommand command, string? query)
+    private static void AddQueryParameter(
+        NpgsqlCommand command,
+        string? query,
+        bool addExactQuery = false)
     {
         if (string.IsNullOrWhiteSpace(query)) return;
         var escaped = query
@@ -246,6 +306,38 @@ public sealed class ContentQueryStore
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
         command.Parameters.AddWithValue("pattern", $"%{escaped}%");
+        if (addExactQuery)
+        {
+            command.Parameters.AddWithValue("exactQuery", query);
+        }
+    }
+
+    private static MapSummaryDto ReadMapSummary(ContentEntityDto entity)
+    {
+        var data = entity.Data;
+        return new MapSummaryDto(
+            entity.LocalIndex,
+            entity.ContentKey,
+            ReadInt(data, "Index") ?? checked((int)entity.LocalIndex),
+            ReadString(data, "FileName"),
+            ReadString(data, "Title"));
+    }
+
+    private static int? ReadInt(JsonElement data, string property)
+    {
+        if (!data.TryGetProperty(property, out var value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        return value.ValueKind == JsonValueKind.String &&
+               int.TryParse(value.GetString(), System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture, out number)
+            ? number
+            : null;
+    }
+
+    private static string? ReadString(JsonElement data, string property)
+    {
+        if (!data.TryGetProperty(property, out var value)) return null;
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
 
     private static ImportRunDto ReadImportRun(NpgsqlDataReader reader)

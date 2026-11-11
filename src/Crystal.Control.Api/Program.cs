@@ -18,6 +18,7 @@ builder.WebHost.ConfigureKestrel(serverOptions => serverOptions.AddServerHeader 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(options.DatabaseConnectionString));
 builder.Services.AddSingleton<ContentQueryStore>();
+builder.Services.AddSingleton<ContentRelationStore>();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<AuthStore>();

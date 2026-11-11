@@ -33,8 +33,9 @@ try
     }
 
     var outputDirectory = Path.GetFullPath(options.OutputDirectory);
+    var contentRoot = options.ContentRoot is null ? null : Path.GetFullPath(options.ContentRoot);
     using var session = LegacyDatabaseSession.Open(options.DatabasePath);
-    var mapped = LegacyContentMapper.Map(session.Envir, session);
+    var mapped = LegacyContentMapper.Map(session.Envir, session, contentRoot);
 
     var actualCounts = mapped.Entities
         .GroupBy(entity => entity.EntityType, StringComparer.Ordinal)
@@ -89,6 +90,7 @@ try
         headerVersion = session.HeaderVersion,
         loadVersion = Envir.LoadVersion,
         output = outputDirectory,
+        contentRoot,
         releaseVersion = manifest.ReleaseVersion,
         contentHash = manifest.ContentHash,
         counts = manifest.Counts,
@@ -227,6 +229,8 @@ internal sealed class ImportOptions
 
     public string? Source { get; init; }
 
+    public string? ContentRoot { get; init; }
+
     public string? SchemaPath { get; init; }
 
     public string? DatabaseConnectionString { get; init; }
@@ -251,6 +255,7 @@ internal sealed class ImportOptions
           --out <dir>          Snapshot output directory (default: artifacts/content/<UTC timestamp>)
           --release <version>  Content release version (default: UTC timestamp)
           --source <text>      Override manifest source label
+          --content-root <dir> Import Envir/Drops from a legacy content root
           --dsn <connection>   PostgreSQL connection string or postgres:// URI
           --schema <path>      Apply one migration SQL instead of db/migrations/*.sql
           --export <path>      Export a legacy database instead of writing a snapshot
@@ -269,6 +274,7 @@ internal sealed class ImportOptions
         string? output = null;
         string? release = null;
         string? source = null;
+        string? contentRoot = null;
         string? dsn = null;
         string? schema = null;
         string? export = null;
@@ -301,6 +307,9 @@ internal sealed class ImportOptions
                 case "--source":
                     source = NextValue(args, ref index, argument);
                     break;
+                case "--content-root":
+                    contentRoot = NextValue(args, ref index, argument);
+                    break;
                 case "--dsn":
                     dsn = NextValue(args, ref index, argument);
                     break;
@@ -332,10 +341,11 @@ internal sealed class ImportOptions
         }
 
         if (export is not null &&
-            (outputWasSpecified || releaseWasSpecified || source is not null || dsn is not null || schema is not null))
+            (outputWasSpecified || releaseWasSpecified || source is not null || contentRoot is not null ||
+             dsn is not null || schema is not null))
         {
             throw new ArgumentException(
-                "--export cannot be combined with --out, --release, --source, --dsn, or --schema.");
+                "--export cannot be combined with --out, --release, --source, --content-root, --dsn, or --schema.");
         }
 
         if (snapshot is not null && postgresSource is not null)
@@ -371,6 +381,7 @@ internal sealed class ImportOptions
             OutputDirectory = output ?? Path.Combine("artifacts", "content", timestamp),
             ReleaseVersion = release ?? timestamp,
             Source = source,
+            ContentRoot = contentRoot,
             SchemaPath = schema,
             DatabaseConnectionString = dsn,
             ExportPath = export,

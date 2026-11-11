@@ -83,7 +83,7 @@
 
   types.push({
     id: "drops", entity: "drop", icon: "drop", label: "掉落与爆率", singular: "掉落组",
-    total: 141, draft: 28, issues: 5, source: "外部掉落文本（待导入）", tone: "orange",
+    total: 141, draft: 28, issues: 5, source: "外部掉落文本（M1 导入）", tone: "orange",
     description: "按怪物、地图和活动组合的掉落组，支持概率模拟、期望产出与冲突检查。",
     columns: ["key", "name", "category", "metric", "level", "status", "updated"],
     columnLabels: { key: "内容键", name: "掉落组", category: "关联怪物", metric: "期望产出", level: "物品数", status: "状态", updated: "最近更新" },

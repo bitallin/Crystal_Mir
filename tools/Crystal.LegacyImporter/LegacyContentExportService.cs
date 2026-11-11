@@ -21,7 +21,10 @@ public static class LegacyContentExportService
         ArgumentNullException.ThrowIfNull(envir);
         ArgumentNullException.ThrowIfNull(expectedEntities);
 
-        var identity = LegacyBinaryExporter.Capture(envir, expectedEntities);
+        var databaseEntities = expectedEntities
+            .Where(entity => IsLegacyDatabaseEntity(entity.EntityType))
+            .ToArray();
+        var identity = LegacyBinaryExporter.Capture(envir, databaseEntities);
         var output = LegacyBinaryExporter.Write(envir, outputPath, force);
 
         LegacyDatabaseIdentity? reloadedIdentity = null;
@@ -33,7 +36,7 @@ public static class LegacyContentExportService
             if (!identity.SemanticallyEquals(reloadedIdentity))
             {
                 var entityDifference = LegacyBinaryExporter.FindFirstEntityDifference(
-                    expectedEntities,
+                    databaseEntities,
                     reloadedMapped.Entities);
                 throw new InvalidDataException(
                     $"Exported database failed semantic reload validation: source={identity.SemanticHash}, " +
@@ -47,5 +50,15 @@ public static class LegacyContentExportService
         }
 
         return new LegacyContentExportVerification(output, identity, reloadedIdentity);
+    }
+
+    private static bool IsLegacyDatabaseEntity(string entityType)
+    {
+        return entityType is not (
+            ContentEntityTypes.Drop or
+            ContentEntityTypes.Recipe or
+            ContentEntityTypes.Buff or
+            ContentEntityTypes.Script or
+            ContentEntityTypes.Asset);
     }
 }

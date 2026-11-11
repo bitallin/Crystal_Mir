@@ -198,6 +198,28 @@
     return request(`/api/v1/content/${encodeURIComponent(entityType)}/key/${encodeURIComponent(contentKey)}${params}`);
   }
 
+  function getMapRelations(localIndex, options = {}) {
+    const params = new URLSearchParams();
+    if (options.importRunId) params.set("importRunId", options.importRunId);
+    params.set("respawnPage", options.respawnPage || 1);
+    params.set("respawnPageSize", options.respawnPageSize || 50);
+    return request(`/api/v1/content/map/${encodeURIComponent(localIndex)}/relations?${params}`);
+  }
+
+  function listMapCatalog(options = {}) {
+    const params = new URLSearchParams();
+    if (options.importRunId) params.set("importRunId", options.importRunId);
+    if (options.q) params.set("q", options.q);
+    params.set("page", options.page || 1);
+    params.set("pageSize", options.pageSize || 500);
+    return request(`/api/v1/content/map/catalog?${params}`);
+  }
+
+  function getMonsterDrops(localIndex, importRunId) {
+    const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
+    return request(`/api/v1/content/monster/${encodeURIComponent(localIndex)}/drops${params}`);
+  }
+
   function listAuditEvents(limit = 100, filters = {}) {
     const params = new URLSearchParams({ limit });
     if (filters.action) params.set("action", filters.action);
@@ -259,11 +281,14 @@
     getContentByKey,
     getContentTypes,
     getImportRun,
+    getMapRelations,
+    getMonsterDrops,
     getUser,
     isAuthenticated,
     listAccounts,
     listAuditEvents,
     listImportRuns,
+    listMapCatalog,
     listRoles,
     login,
     logout,

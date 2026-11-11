@@ -22,6 +22,16 @@
 ./scripts/import-db.sh tests/fixtures/golden/Server.MirDB artifacts/content/golden
 ```
 
+同时导入 `Envir/Drops` 文本：
+
+```bash
+./scripts/import-db.sh tests/fixtures/golden/Server.MirDB artifacts/content/golden \
+  --content-root .external/Crystal.Database/Jev
+```
+
+`--content-root` 指向包含 `Envir/Drops` 的旧内容根目录。掉落文件按怪物的 `DropPath`
+解析；`DropPath` 为空时使用怪物名称。未找到文件不会创建占位文件。
+
 同时写入 PostgreSQL：
 
 ```bash
@@ -81,7 +91,8 @@ snapshot/
     ├── gameshop.jsonl
     ├── conquest.jsonl
     ├── dragon.jsonl
-    └── respawn.jsonl
+    ├── respawn.jsonl
+    └── drop.jsonl          # 仅使用 --content-root 且找到掉落文件时生成
 ```
 
 - 每个实体一行，按 `localIndex` 排序。
@@ -128,22 +139,28 @@ snapshot/
 | `conquest` | `Envir.ConquestInfoList` | `Index` | `conquest.<Index>` |
 | `dragon` | `Envir.DragonInfo` | `1` | `dragon.default` |
 | `respawn` | `MapInfo.Respawns` 展平 | `mapIndex * 1000000 + ordinal + 1` | `respawn.map<mapIndex>.<ordinal>` |
+| `drop` | `Envir/Drops` 文本 | 怪物 `Index` | `drop.monster.<Index>` |
 
 `RespawnIndex` 在旧数据库中不保证全局唯一，因此展平实体使用地图和序号定位；原始值保留在
 `legacyRespawnIndex` 字段。
 
+掉落实体保存怪物索引、名称、配置路径、相对文件名和已解析的 `DropInfo` 列表。物品引用继续使用
+`{"$ref":"item","index":...,"key":...}`；分组掉落保留在 `GroupedDrop` 中。`drop` 不写回旧二进制
+数据库，快照重建时会被忽略，因此二进制回滚仍只依赖 `Server.MirDB` 中的实体。
+
 ## 5. 当前边界
 
-`Server.MirDB` 只包含核心实体。以下内容不在本次导入范围，后续由文件/资源管线处理：
+`Server.MirDB` 只包含核心实体。掉落文本可通过 `--content-root` 导入，但以下内容仍不在本次导入范围，
+后续由文件/资源管线处理：
 
-- 怪物掉落：`Envir/Drop` 文本。
 - NPC 脚本：`Envir/NPC` DSL。
 - 配方：`Envir/Recipe`。
 - Buff 定义：服务端启动时初始化。
 - GT 地图运行时状态（仅保存可重建的 `legacy.gtMaps` 元数据）。
 - 图库、地图文件、音效和特效资源。
 
-这些限制写入 manifest 的 `legacy.notImported`，避免把“未导入”误判为“数据为空”。
+未提供 `--content-root` 时，掉落限制仍写入 manifest 的 `legacy.notImported`，避免把“未导入”误判为
+“数据为空”；提供后写入实际文件数、解析条目数和实体数。
 
 `LegacyBinaryExporter` 现在支持三种输入：已加载的旧二进制数据库、JSONL 快照、PostgreSQL 最新
 `imported` 批次。输出为当前 `Envir.Version=117` 格式。重建器通过反射恢复旧实体，解析内容引用，

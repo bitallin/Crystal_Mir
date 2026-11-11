@@ -1,0 +1,2 @@
+; Minimal drop fixture for the golden database. Source: Crystal.Database/Jev under Unlicense.
+1/1 GreenPoison

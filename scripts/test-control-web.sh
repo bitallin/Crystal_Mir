@@ -128,7 +128,7 @@ with sync_playwright() as playwright:
     assert page.locator(".api-badge.success").count() >= 1
 
     page.goto(f"{web}/?api={api}#/content-overview", wait_until="networkidle")
-    page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,734')", timeout=15000)
+    page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,735')", timeout=15000)
     overview_text = page.locator(".main-content").inner_text()
     assert "1,628" in overview_text, overview_text[:900]
     assert "批次 #" in overview_text, overview_text[:900]
@@ -166,6 +166,39 @@ with sync_playwright() as playwright:
     assert "555" in page.locator(".paginator").inner_text()
     new_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
     assert new_token and new_token != old_token
+
+    page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实世界关系')", timeout=15000)
+    map_drawer_text = page.locator("#live-drawer-relations").inner_text()
+    assert "360" in map_drawer_text and "map.1" in map_drawer_text, map_drawer_text[:1200]
+    page.click('[data-action="close-drawer"]')
+
+    page.goto(f"{web}/?api={api}#/content/monsters", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实掉落关系')", timeout=15000)
+    monster_drawer_text = page.locator("#live-drawer-relations").inner_text()
+    assert "GreenPoison" in monster_drawer_text and "drop.monster.1" in monster_drawer_text.lower(), monster_drawer_text[:1200]
+    page.click('[data-action="close-drawer"]')
+
+    page.goto(f"{web}/?api={api}#/world-map", wait_until="networkidle")
+    page.wait_for_selector("#live-relation-panel", timeout=15000)
+    page.wait_for_function("document.querySelectorAll('#live-map-select option').length === 463", timeout=15000)
+    page.wait_for_function("document.querySelector('#live-relation-panel').innerText.includes('72 / 6 / 46 / 360')", timeout=15000)
+    relation_text = page.locator("#live-relation-panel").inner_text()
+    assert "463 / 463" in relation_text, relation_text[:1200]
+    assert "BichonProvince" in relation_text, relation_text[:1200]
+    assert "72 / 6 / 46 / 360" in relation_text, relation_text[:1200]
+    page.locator('#live-relation-data [data-action="open-live-drops"]').first.click()
+    page.wait_for_function("document.getElementById('live-drop-body')?.innerText.includes('掉落路径')", timeout=15000)
+    page.click('[data-action="close-modal"]')
+    page.select_option("#live-map-select", "300")
+    page.wait_for_function("document.querySelector('#live-relation-panel').innerText.includes('map.300')", timeout=15000)
+    page.fill("#live-map-search", "BichonProvince")
+    page.wait_for_function("document.querySelectorAll('#live-map-select option').length > 0 && document.querySelectorAll('#live-map-select option').length < 463", timeout=15000)
+    assert page.locator('#live-map-select option[value="1"]').count() == 1
 
     page.goto(f"{web}/?api={api}#/accounts", wait_until="networkidle")
     page.wait_for_selector("#account-table tbody tr", timeout=15000)
@@ -273,6 +306,6 @@ with sync_playwright() as playwright:
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
-    print("Control Web integration verified: login, live overview, import runs, content query/search, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, content query/search, live relations, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY
