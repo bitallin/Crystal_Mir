@@ -1,6 +1,6 @@
 # 运行时与模块边界
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-11
 > 状态：生效
 
 ## 1. 当前运行时事实
@@ -34,6 +34,7 @@ Crystal.Cli                   运维与开发 CLI
 
 ```text
 src/Crystal.Content           内容快照、哈希、校验（MIT）
+tools/Crystal.ContentTool     内容快照签名与验证 CLI，仅依赖 Crystal.Content（MIT）
 src/Crystal.Control.Api       内容、账号、RBAC 和审计 API，ASP.NET Core + Npgsql
 src/Crystal.ZoneServer        Linux 区服控制台宿主，加载旧数据库和内容并监听游戏端口（GPL 边界）
 tools/Crystal.LegacyImporter  二进制导入、快照/PostgreSQL 重建和 PostgreSQL 写入（GPL 边界工具）
@@ -42,10 +43,13 @@ db/migrations                 PostgreSQL schema
 
 `Crystal.Control.Api` 只依赖 `Crystal.Content`、Npgsql 和 ASP.NET Core，不引用 GPL 游戏代码。
 当前提供健康检查、导入批次、内容只读查询、账号登录、短时 JWT、刷新会话、RBAC、只追加审计和账号
-生命周期（停用/启用、重置/自助改密、角色调整）；`Crystal.Control.Web` 已通过受控 CORS 接入登录、
-内容总览、导入批次、11 类内容查询（含掉落文件）、全量地图目录、地图/怪物关系与掉落查询、账号管理、
-角色和审计，并按 JWT 权限点过滤导航与直达路由。内容写入/发布 API 尚未实现；地图关系页已可检索
-当前批次全部地图，但坐标画布仍使用原型尺寸，尚未读取地图尺寸和阻挡资源。
+生命周期（停用/启用、重置/自助改密、角色调整）。内容接口暴露 15 类实体（含掉落、配方、Buff、脚本和资源元数据）；
+`Crystal.Control.Web` 已通过受控 CORS 接入登录、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次）、
+全量地图目录、地图/NPC 脚本/怪物掉落/配方/资源关系、账号管理、角色和审计，并按 JWT 权限点过滤导航与直达路由。
+内容写入/发布 API 尚未实现；地图关系页已可检索当前批次全部地图，配方、Buff 和脚本已读取真实批次，
+脚本抽屉已读取 AST/编译校验，资源域已展示地图格式、尺寸、可走/阻挡/门格，并可通过受权限保护的文件端点下载
+经路径、大小和 SHA256 校验的资源；内容快照支持 ECDSA P-256 签名与验证，坐标画布仍使用原型尺寸，
+其他资源二进制和内容写入/发布 API 尚未接入。
 
 ## 3. 依赖规则
 

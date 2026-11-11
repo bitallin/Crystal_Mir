@@ -370,3 +370,11 @@ FodyWeavers.xsd
 
 # Generated content snapshots and local import output
 /artifacts/
+
+# Content signing private keys and local secret stores
+*-private.pem
+*.private.pem
+*.pfx
+*.p12
+*.key
+/.secrets/

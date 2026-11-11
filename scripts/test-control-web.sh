@@ -61,6 +61,7 @@ ControlApi__AuthRateLimitPermitLimit=1000 \
 ControlApi__ApiRateLimitPermitLimit=5000 \
 ControlApi__CorsOrigins="$WEB" \
 ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
+ControlApi__AssetRoot="$ROOT/tests/fixtures/content" \
 "$DOTNET" "$ROOT/src/Crystal.Control.Api/bin/$CONFIGURATION/net8.0/Crystal.Control.Api.dll" \
   >"$ROOT/artifacts/control-web-api.log" 2>&1 &
 API_PID=$!
@@ -97,6 +98,7 @@ ADMIN_ACCESS="$(curl -fsS --max-time 15 -X POST -H 'Content-Type: application/js
 curl -fsS --max-time 15 -X POST -H "Authorization: Bearer $ADMIN_ACCESS"   -H 'Content-Type: application/json'   --data "$(printf '{"username":"%s","displayName":"Web Finance","password":"%s","roles":["finance"]}' "$FINANCE_USER" "$FINANCE_PASSWORD")"   "$BASE/api/v1/accounts" >/dev/null
 
 python3 - "$WEB" "$BASE" "$ADMIN_PASSWORD" "$FINANCE_USER" "$FINANCE_PASSWORD" "$UI_USER" "$UI_PASSWORD" <<'PY'
+import hashlib
 import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -128,7 +130,7 @@ with sync_playwright() as playwright:
     assert page.locator(".api-badge.success").count() >= 1
 
     page.goto(f"{web}/?api={api}#/content-overview", wait_until="networkidle")
-    page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,735')", timeout=15000)
+    page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,797')", timeout=15000)
     overview_text = page.locator(".main-content").inner_text()
     assert "1,628" in overview_text, overview_text[:900]
     assert "批次 #" in overview_text, overview_text[:900]
@@ -173,6 +175,8 @@ with sync_playwright() as playwright:
     page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实世界关系')", timeout=15000)
     map_drawer_text = page.locator("#live-drawer-relations").inner_text()
     assert "360" in map_drawer_text and "map.1" in map_drawer_text, map_drawer_text[:1200]
+    assert "script.BichonProvince.BorderVillage.Transport" in map_drawer_text, map_drawer_text[:1200]
+    assert "Maps/0.map" in map_drawer_text and "10 × 10 · 1 · 1" in map_drawer_text, map_drawer_text[:1200]
     page.click('[data-action="close-drawer"]')
 
     page.goto(f"{web}/?api={api}#/content/monsters", wait_until="networkidle")
@@ -183,6 +187,51 @@ with sync_playwright() as playwright:
     assert "GreenPoison" in monster_drawer_text and "drop.monster.1" in monster_drawer_text.lower(), monster_drawer_text[:1200]
     page.click('[data-action="close-drawer"]')
 
+    page.goto(f"{web}/?api={api}#/content/recipes", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    recipe_table_text = page.locator("#content-table tbody").inner_text()
+    assert "GreenPoison" in recipe_table_text, recipe_table_text[:1200]
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('配方产出与材料')", timeout=15000)
+    recipe_drawer_text = page.locator("#live-drawer-relations").inner_text()
+    assert "item.710" in recipe_drawer_text and "Taoist" in recipe_drawer_text, recipe_drawer_text[:1200]
+    page.click('[data-action="close-drawer"]')
+
+    page.goto(f"{web}/?api={api}#/content/buffs", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    buff_table_text = page.locator("#content-table tbody").inner_text()
+    assert "TemporalFlux" in buff_table_text and "ResetDuration" in buff_table_text, buff_table_text[:1200]
+
+    page.goto(f"{web}/?api={api}#/content/npc-scripts", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    script_table_text = page.locator("#content-table tbody").inner_text()
+    assert "BorderVillage/Transport" in script_table_text, script_table_text[:1200]
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('AST 与编译校验')", timeout=15000)
+    script_drawer_text = page.locator(".drawer").inner_text()
+    assert "script.BichonProvince.BorderVillage.Transport" in script_drawer_text and "@tele" in script_drawer_text, script_drawer_text[:1200]
+    assert "11 / 26" in script_drawer_text and "0 / 1" in script_drawer_text, script_drawer_text[:1200]
+    assert "c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff" in script_drawer_text, script_drawer_text[:1200]
+    page.click('[data-action="close-drawer"]')
+
+    page.goto(f"{web}/?api={api}#/content/resources", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    asset_table_text = page.locator("#content-table tbody").inner_text()
+    assert "Maps/0.map" in asset_table_text and "10 × 10" in asset_table_text, asset_table_text[:1200]
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('下载并校验资源')", timeout=15000)
+    asset_drawer_text = page.locator(".drawer").inner_text()
+    assert "10 × 10 / 99 / 1" in asset_drawer_text, asset_drawer_text[:1200]
+    assert "3ab00f38634c7c9c839a3085819a1807b14d0e00841a833a36e147c97aff237f" in asset_drawer_text, asset_drawer_text[:1200]
+    with page.expect_download(timeout=10000) as download_info:
+        page.click('#live-drawer-relations [data-action="download-asset"]')
+    download = download_info.value
+    assert download.suggested_filename == "0.map", download.suggested_filename
+    asset_bytes = Path(download.path()).read_bytes()
+    assert len(asset_bytes) == 1252, len(asset_bytes)
+    assert hashlib.sha256(asset_bytes).hexdigest() == "3ab00f38634c7c9c839a3085819a1807b14d0e00841a833a36e147c97aff237f"
+    page.click('[data-action="close-drawer"]')
+
     page.goto(f"{web}/?api={api}#/world-map", wait_until="networkidle")
     page.wait_for_selector("#live-relation-panel", timeout=15000)
     page.wait_for_function("document.querySelectorAll('#live-map-select option').length === 463", timeout=15000)
@@ -191,6 +240,8 @@ with sync_playwright() as playwright:
     assert "463 / 463" in relation_text, relation_text[:1200]
     assert "BichonProvince" in relation_text, relation_text[:1200]
     assert "72 / 6 / 46 / 360" in relation_text, relation_text[:1200]
+    relation_data_text = page.locator("#live-relation-data").inner_text()
+    assert "script.BichonProvince.BorderVillage.Transport" in relation_data_text, relation_data_text[:1200]
     page.locator('#live-relation-data [data-action="open-live-drops"]').first.click()
     page.wait_for_function("document.getElementById('live-drop-body')?.innerText.includes('掉落路径')", timeout=15000)
     page.click('[data-action="close-modal"]')
@@ -306,6 +357,6 @@ with sync_playwright() as playwright:
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
-    print("Control Web integration verified: login, live overview, import runs, content query/search, live relations, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY

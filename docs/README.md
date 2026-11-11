@@ -47,7 +47,8 @@ docs/
 │   ├── 0001-control-plane-data-plane.md
 │   ├── 0002-postgresql-and-content-snapshots.md
 │   ├── 0003-legacy-protocol-with-gateway.md
-│   └── 0004-gpl-boundary.md
+│   ├── 0004-gpl-boundary.md
+│   └── 0005-content-signature-format.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源

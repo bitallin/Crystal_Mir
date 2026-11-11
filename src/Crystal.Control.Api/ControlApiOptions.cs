@@ -33,6 +33,8 @@ public sealed class ControlApiOptions
 
     public required IReadOnlyList<string> CorsOrigins { get; init; }
 
+    public string? AssetRoot { get; init; }
+
     public static ControlApiOptions Load(IConfiguration configuration, IWebHostEnvironment environment)
     {
         var connectionString = FirstNonEmpty(
@@ -115,7 +117,10 @@ public sealed class ControlApiOptions
             BootstrapAdminPassword = FirstNonEmpty(
                 configuration["ControlApi:BootstrapAdminPassword"],
                 Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD")),
-            CorsOrigins = corsOrigins
+            CorsOrigins = corsOrigins,
+            AssetRoot = FirstNonEmpty(
+                configuration["ControlApi:AssetRoot"],
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_ASSET_ROOT"))
         };
     }
 

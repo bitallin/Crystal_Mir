@@ -1,13 +1,14 @@
 # 内容快照、二进制导入与导出
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-11
 > 状态：生效（M1 初版）
 
 ## 1. 组成
 
 | 组件 | 位置 | 许可证边界 | 作用 |
 | --- | --- | --- | --- |
-| `Crystal.Content` | `src/Crystal.Content/` | MIT | 快照模型、canonical JSON、manifest、哈希、读取和校验 |
+| `Crystal.Content` | `src/Crystal.Content/` | MIT | 快照模型、canonical JSON、manifest、哈希、读取、校验、签名和验签 |
+| `Crystal.ContentTool` | `tools/Crystal.ContentTool/` | MIT | 对内容快照进行 ECDSA P-256 签名和验证，只依赖 `Crystal.Content` |
 | `Crystal.LegacyImporter` | `tools/Crystal.LegacyImporter/` | 链接 GPL `Server.Library` | 读取旧 `Server.MirDB`、映射实体、写快照、可选写 PostgreSQL、从快照/PostgreSQL 重建并导出旧二进制格式 |
 | PostgreSQL schema | `db/migrations/*.sql` | 控制面 | 内容表、控制面身份/RBAC/会话和审计表 |
 
@@ -22,15 +23,19 @@
 ./scripts/import-db.sh tests/fixtures/golden/Server.MirDB artifacts/content/golden
 ```
 
-同时导入 `Envir/Drops` 文本：
+同时导入 `Envir/Drops`、`Envir/Recipe`、`Envir/NPCs` 脚本和资源元数据：
 
 ```bash
 ./scripts/import-db.sh tests/fixtures/golden/Server.MirDB artifacts/content/golden \
   --content-root .external/Crystal.Database/Jev
 ```
 
-`--content-root` 指向包含 `Envir/Drops` 的旧内容根目录。掉落文件按怪物的 `DropPath`
-解析；`DropPath` 为空时使用怪物名称。未找到文件不会创建占位文件。
+`--content-root` 指向旧内容根目录。掉落文件按怪物的 `DropPath` 解析；`DropPath` 为空时使用
+怪物名称。未找到掉落文件不会创建占位文件。存在 `Envir/Recipe/*.txt` 时，配方按文件名顺序导入，
+产出、材料、工具、成功率、金币和解锁条件均写入快照。`Envir/NPCs/**/*.txt` 按相对路径排序导入，
+保留脚本文本、哈希、页面、`#INCLUDE`、`#INSERT`、`CALL` 和对应 NPC 索引，并生成页面/块/命令/按钮/跳转
+AST、校验问题和稳定编译哈希；`Maps/**/*.map` 与 `Envir/Previews` 下的图片导入路径、类型、大小和 SHA256
+元数据，地图还会解析格式、尺寸、可走、阻挡和门格，但不复制二进制资源。缺失目录会跳过，不阻断其他内容。
 
 同时写入 PostgreSQL：
 
@@ -75,6 +80,35 @@ $HOME/.dotnet/dotnet run --project tools/Crystal.LegacyImporter/Crystal.LegacyIm
 对应 CLI 为 `--snapshot <dir> --export <path>` 和 `--from-postgres <connection> --export <path>`。
 重建会解析 `$ref`、恢复实体列表顺序、全局索引、`RespawnTick` 和 `GTMap` 元数据，然后执行与直接导出相同的冷回读校验。
 
+### 2.1 内容签名
+
+生成 ECDSA P-256 私钥和公钥：
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out release-private.pem
+openssl pkey -in release-private.pem -pubout -out release-public.pem
+```
+
+签名快照并验证：
+
+```bash
+$HOME/.dotnet/dotnet run --project tools/Crystal.ContentTool/Crystal.ContentTool.csproj \
+  -c Release -- sign \
+  --snapshot artifacts/content/golden \
+  --key release-private.pem \
+  --key-id content-release-2026-01
+
+$HOME/.dotnet/dotnet run --project tools/Crystal.ContentTool/Crystal.ContentTool.csproj \
+  -c Release -- verify \
+  --snapshot artifacts/content/golden \
+  --public-key release-public.pem \
+  --key-id content-release-2026-01
+```
+
+签名写入 `manifest.json` 的可选 `signature` 对象，覆盖 canonical manifest 和签名元数据；实体文件 SHA256、
+`contentHash` 和旧二进制重建结果不受影响。私钥不得进入仓库、数据库、日志或内容包，生产发布应使用
+KMS/Vault 或硬件签名服务。算法、密钥轮换和重新评估条件见 `adr/0005-content-signature-format.md`。
+
 ## 3. 快照格式
 
 ```text
@@ -92,7 +126,11 @@ snapshot/
     ├── conquest.jsonl
     ├── dragon.jsonl
     ├── respawn.jsonl
-    └── drop.jsonl          # 仅使用 --content-root 且找到掉落文件时生成
+    ├── buff.jsonl          # 启动时 BuffInfo.Load() 生成的内建定义
+    ├── drop.jsonl          # 仅使用 --content-root 且找到掉落文件时生成
+    ├── recipe.jsonl        # 仅使用 --content-root 且存在 Envir/Recipe 文件时生成
+    ├── script.jsonl        # 仅使用 --content-root 且存在 Envir/NPCs 脚本时生成
+    └── asset.jsonl         # 仅使用 --content-root 且存在 Maps/Envir/Previews 资源时生成
 ```
 
 - 每个实体一行，按 `localIndex` 排序。
@@ -139,7 +177,11 @@ snapshot/
 | `conquest` | `Envir.ConquestInfoList` | `Index` | `conquest.<Index>` |
 | `dragon` | `Envir.DragonInfo` | `1` | `dragon.default` |
 | `respawn` | `MapInfo.Respawns` 展平 | `mapIndex * 1000000 + ordinal + 1` | `respawn.map<mapIndex>.<ordinal>` |
+| `buff` | `BuffInfo.Load()` | `BuffType` 枚举值 | `buff.<Type>` |
 | `drop` | `Envir/Drops` 文本 | 怪物 `Index` | `drop.monster.<Index>` |
+| `recipe` | `Envir/Recipe/*.txt` | 文件名排序序号 | `recipe.<文件名>` |
+| `script` | `Envir/NPCs/**/*.txt` | 相对路径排序序号 | `script.<规范化路径>` |
+| `asset` | `Maps/**/*.map`、`Envir/Previews` 图片 | 相对路径排序序号 | `asset.<规范化路径>` |
 
 `RespawnIndex` 在旧数据库中不保证全局唯一，因此展平实体使用地图和序号定位；原始值保留在
 `legacyRespawnIndex` 字段。
@@ -148,19 +190,35 @@ snapshot/
 `{"$ref":"item","index":...,"key":...}`；分组掉落保留在 `GroupedDrop` 中。`drop` 不写回旧二进制
 数据库，快照重建时会被忽略，因此二进制回滚仍只依赖 `Server.MirDB` 中的实体。
 
+配方实体保存文件名、产出、材料、工具、成功率、金币、职业/性别/等级/Flag/Quest 条件。物品引用使用
+`itemIndex` 和物品名称；Control API 会再解析为 `item.<Index>` 内容键。配方同样不属于
+`Server.MirDB`，二进制重建时忽略。
+
+Buff 实体来自服务端启动时的 `BuffInfo.Load()`，保存类型、叠加方式、属性、图标和可见性。它们不由旧
+数据库保存，也不参与旧二进制重建，但作为运行时内容进入快照、PostgreSQL 和控制面只读查询。
+
+脚本实体按文件去重，保存规范化路径、UTF-8 文本（换行统一为 LF）、SHA256、大小、行数、页面列表、
+包含/插入/调用关系、引用该文件的 NPC 索引、解析 AST 和校验结果。校验覆盖重复页面、缺失跳转目标、未知
+指令和空页面；`compiledSha256` 对 AST 做稳定摘要。文件名按大小写不敏感匹配旧 `NPCInfo.FileName`，
+Control API 通过 `fileNameKey` 建立 NPC→脚本关系。脚本和资源均不参与旧二进制重建。
+
+资源实体是元数据而不是二进制内容：每条记录保存相对路径、文件名、扩展名、资源类型、大小和 SHA256。
+当前覆盖 `Maps` 下 `.map` 文件与 `Envir/Previews` 下的图片。地图额外保存格式编号/名称、宽高、格子数、
+可走格、阻挡格和门格；支持旧地图格式 0/1/2/3/4/5/6/7/100。Control API 可通过资源文件端点下载原始文件，
+下载前校验配置根目录、路径穿越、大小和 SHA256；图库、音效、特效和客户端补丁仍需后续资源服务接入。
+
 ## 5. 当前边界
 
-`Server.MirDB` 只包含核心实体。掉落文本可通过 `--content-root` 导入，但以下内容仍不在本次导入范围，
-后续由文件/资源管线处理：
+`Server.MirDB` 只包含核心实体。掉落、配方、NPC 脚本和资源元数据可通过 `--content-root` 导入，
+Buff 由启动代码生成并始终导入。以下内容仍不在本次导入范围，后续由文件/资源管线处理：
 
-- NPC 脚本：`Envir/NPC` DSL。
-- 配方：`Envir/Recipe`。
-- Buff 定义：服务端启动时初始化。
+- 图库、音效、特效、客户端补丁等未位于 `Maps`/`Envir/Previews` 的资源二进制。
 - GT 地图运行时状态（仅保存可重建的 `legacy.gtMaps` 元数据）。
-- 图库、地图文件、音效和特效资源。
+- NPC 脚本 DSL 在旧运行时中的端到端执行结果；M1 已保存 AST、编译哈希和静态校验，但不执行脚本。
 
-未提供 `--content-root` 时，掉落限制仍写入 manifest 的 `legacy.notImported`，避免把“未导入”误判为
-“数据为空”；提供后写入实际文件数、解析条目数和实体数。
+未提供 `--content-root` 时，限制仍写入 manifest 的 `legacy.notImported`，避免把“未导入”误判为
+“数据为空”；提供后写入掉落/配方/脚本/资源的实际文件数、解析条目数和实体数。Buff 来源和实体数始终
+写入 `legacy.buffs`。
 
 `LegacyBinaryExporter` 现在支持三种输入：已加载的旧二进制数据库、JSONL 快照、PostgreSQL 最新
 `imported` 批次。输出为当前 `Envir.Version=117` 格式。重建器通过反射恢复旧实体，解析内容引用，
@@ -172,7 +230,7 @@ snapshot/
 
 ## 6. 黄金样本结果
 
-截至 2026-11-09，对 `tests/fixtures/golden/Server.MirDB`（版本 111）的导入结果：
+截至 2026-11-11，对 `tests/fixtures/golden/Server.MirDB`（版本 111）的导入结果：
 
 | 实体 | 数量 |
 | --- | ---: |
@@ -186,16 +244,25 @@ snapshot/
 | conquest | 1 |
 | dragon | 1 |
 | respawn | 6,341 |
-| **合计** | **9,734** |
+| buff | 59 |
+| **合计** | **9,793** |
 
 - 数据库 SHA256：`37358b0d95eafe458b060c1db2ebc0524757fe524fb93125ccb98d9b4a8ef78b`
-- `contentHash`：`7e7a6dd14c091b63eed9bb271ae5bbb6ec080d081669048beeefb6c46a373825`
+- `contentHash`：`1c6b6134ebc293e67e22710e8d45130d5e900ff2b5f3b5f07012835ee3e49e1c`
+- 使用 `tests/fixtures/content` 作为 `--content-root` 时额外导入 1 个掉落、1 个配方、
+  1 个 NPC 脚本和 1 个资源元数据，测试批次合计 9,797 个实体，`contentHash` 为
+  `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291`。
+- 测试脚本编译为 11 个页面、26 条命令、0 error、1 warning，`compiledSha256` 为
+  `c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff`。
+- 测试地图资源 `Maps/0.map` 为 10×10 v0、1,252 字节、99 个可走格、1 个阻挡格、1 个门格，
+  SHA256 为 `3ab00f38634c7c9c839a3085819a1807b14d0e00841a833a36e147c97aff237f`。
+- Jev 全量 1,698 张地图解析成功，`bad=0`；格式分布为 `0:237`、`1:1441`、`3:1`、`5:6`、`100:13`。
 - 两次独立导入的实体文件逐字节一致。
 - 导出文件版本 117，大小 548,567 字节，SHA256
   `3775771c893d95f490bbb54b868650c91f7200e8d268d356a9c22d0a7e11284a`。
 - 两次独立导出的文件逐字节一致；导出文件重新加载后的语义哈希与源库一致。
 - 从导出文件重新生成的快照与源库快照实体文件逐字节一致，`contentHash` 仍为
-  `7e7a6dd14c091b63eed9bb271ae5bbb6ec080d081669048beeefb6c46a373825`。
+  `1c6b6134ebc293e67e22710e8d45130d5e900ff2b5f3b5f07012835ee3e49e1c`。
 - 从 JSONL 快照重建并导出的文件与直接导出文件逐字节一致，SHA256 同为
   `3775771c893d95f490bbb54b868650c91f7200e8d268d356a9c22d0a7e11284a`。
 - 从 PostgreSQL 最新导入批次重建并导出的文件与直接导出文件逐字节一致。
@@ -207,5 +274,6 @@ snapshot/
 
 - 快照和导入批次都是不可变的；回滚通过切换活动批次或恢复数据库备份完成。
 - `LegacyBinaryExporter` 已提供旧二进制格式的确定性写入、冷回读验证和快照/PostgreSQL 重建。
-- 纯控制面回滚已具备数据导出路径；后续仍需补齐资源/脚本导入、内容发布 API 和 staging 演练。
+- 纯控制面回滚已具备数据导出路径；脚本 AST/校验、资源完整性下载已进入只读 API；后续仍需补齐
+  内容发布 API、其余资源二进制和 staging 演练。
 - 控制面 API 按 `import_run_id` 或未来活动发布读取实体。

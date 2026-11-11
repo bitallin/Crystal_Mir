@@ -1,6 +1,6 @@
 # 数据与内容架构
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-11
 > 状态：生效
 
 ## 1. 数据域
@@ -125,9 +125,15 @@ content_entity(
 
 专用表用于需要索引、关联约束和后台筛选的字段；`data jsonb` 保存完整实体。
 
-文件型内容也进入同一实体模型：M1 已支持把 `Envir/Drops` 导入为 `drop` 实体，内容键为
-`drop.monster.<Index>`，保留掉落路径、相对文件名和解析后的条目。`drop` 不参与旧二进制重建；
-Control API 直接按 `jsonb` 关系提供地图拓扑、刷新点、传送门、NPC 和怪物掉落只读查询。
+文件型、启动生成和资源元数据也进入同一实体模型：M1 已支持把 `Envir/Drops` 导入为 `drop` 实体，内容键为
+`drop.monster.<Index>`，保留掉落路径、相对文件名和解析后的条目；`Envir/Recipe` 导入为 `recipe` 实体，
+保留产出、材料、工具、成功率、金币和解锁条件；启动时生成的 `BuffInfo` 导入为 `buff` 实体；`Envir/NPCs`
+文本导入为 `script` 实体，保留规范化原文、页面、包含/插入/调用关系和 NPC 索引；`Maps` 与 `Envir/Previews`
+文件导入为 `asset` 元数据，只保存路径、类型、大小和 SHA256，不复制二进制内容。这些实体都不参与旧二进制重建；
+Control API 直接按 `jsonb` 关系提供地图拓扑、刷新点、传送门、NPC、NPC 脚本、怪物掉落和配方引用只读查询，
+并通过通用内容接口查询资源元数据。脚本实体同时保存由 `NpcScriptParser` 生成的 AST、校验问题和稳定编译哈希；
+地图资源由 `MapAssetParser` 解析格式、尺寸、可走/阻挡/门格。资源文件由配置的 `ControlApi:AssetRoot` 提供，
+下载前校验路径不越界、文件大小和 SHA256，但二进制仍不进入快照或 PostgreSQL。图库/音效等其他资源服务仍需后续管线。
 
 ### 4.3 发布与资源
 
@@ -250,9 +256,16 @@ draft -> validating -> compiled -> signed -> published -> active -> archived
     { "path": "Data/Items.lib", "sha256": "...", "size": 123456 }
   ],
   "min_client_version": "0.1.0",
-  "signature": "ed25519:..."
+  "signature": {
+    "algorithm": "ecdsa-p256-sha256",
+    "keyId": "content-release-2026-01",
+    "signedAt": "2026-11-11T00:00:00Z",
+    "value": "base64-encoded-p1363-signature"
+  }
 }
 ```
+
+当前签名实现使用 ECDSA P-256 + SHA-256；签名载荷是包含完整无签名 manifest 和签名元数据的 canonical JSON envelope。`contentHash` 不包含签名，签名失败或缺失时由发布/区服策略决定拒绝加载还是告警。详见 `adr/0005-content-signature-format.md`。
 
 初期使用 JSON + zstd 压缩；实体数量变大后再评估 MessagePack。资源文件独立存放，manifest 只引用哈希。
 

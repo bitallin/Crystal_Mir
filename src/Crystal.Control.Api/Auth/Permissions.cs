@@ -11,6 +11,7 @@ public static class Permissions
     public const string RoleWrite = "role:write";
     public const string AuditRead = "audit:read";
     public const string ContentRead = "content:read";
+    public const string AssetRead = "asset:read";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -25,7 +26,7 @@ public static class Permissions
         "release:write",
         "release:publish",
         "release:rollback",
-        "asset:read",
+        AssetRead,
         "asset:write",
         "zone:read",
         "zone:write",

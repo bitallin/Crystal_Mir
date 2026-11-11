@@ -1,7 +1,7 @@
 # 项目进度台账
 
 > 最后更新：2026-11-11
-> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、Control API、账号/JWT/RBAC/审计、Control.Web 全量地图目录与地图/掉落真实关系接入、地图关系/掉落只读 API 和 Linux 区服宿主已完成初版；Ubuntu 自包含发布、systemd 部署和内容路径跨平台兼容已完成）
+> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、内容快照签名、Control API、账号/JWT/RBAC/审计、NPC 脚本 AST/编译校验、地图格式解析与资源文件校验下载、Control.Web 全量地图目录与地图/NPC 脚本/怪物/配方/Buff/资源真实关系接入、Linux 区服宿主和 Ubuntu 部署已完成初版；内容写入/发布 API 与 PG16 staging 待做）
 
 ## 1. 当前状态
 
@@ -13,11 +13,11 @@
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
-| 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；怪物掉落文本已可通过 `--content-root` 导入；NPC 脚本/配方/资源导入待做 |
-| 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,734 个核心实体导入 + 可选 `drop` 实体 + 哈希校验 + 回归测试 |
+| 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
+| 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
-| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口、全量地图目录、地图拓扑/刷新点/传送门/NPC/怪物掉落关系接口、账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、11 类内容分页检索、全量地图目录与检索、地图/掉落真实关系面板与详情抽屉、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API、NPC 脚本/配方/资源管线和地图尺寸/阻挡资源待做 |
+| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口暴露 15 类实体，含全量地图目录、地图拓扑/刷新点/传送门/NPC/NPC 脚本/怪物掉落/配方引用关系、NPC 脚本 AST/校验、地图资源元数据和经完整性校验的文件下载，账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次）、全量地图目录与检索、地图/NPC 脚本/怪物/配方/资源真实关系面板与详情抽屉、脚本 AST 与编译校验、资源下载与浏览器端 SHA256 复核、Buff 列表、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API 待做 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 未开始 | 新 manifest/启动器/Agent 尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
@@ -28,7 +28,7 @@
 | 里程碑 | 状态 | 完成度 | 备注 |
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
-| M1 架构骨架与数据底座 | 进行中 | 95% | 数据链路、只读 API、地图目录与关系/掉落 API、Web 全量地图检索、真实关系面板与抽屉、账号/JWT/RBAC/审计、账号生命周期、Web 账号管理闭环、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；内容写入/发布 API、NPC 脚本/配方/资源管线、地图尺寸/阻挡资源和 PG16 staging 待做 |
+| M1 架构骨架与数据底座 | 进行中 | 97% | 数据链路、只读 API、地图目录与关系/掉落/配方/NPC 脚本 API、脚本 AST/编译校验、地图尺寸/阻挡解析、资源完整性下载、内容快照签名、Web 全量地图检索、真实关系面板与抽屉、配方/Buff/脚本/资源批次、账号/JWT/RBAC/审计、账号生命周期、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；内容写入/发布 API 和 PG16 staging 待做 |
 | M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
@@ -279,6 +279,64 @@
 - 未验证：地图尺寸、阻挡资源和真实坐标画布；大于 500 张地图时前端顺序分页加载的延迟；PostgreSQL 16 staging。
 - 决策：新增只读目录端点，不改变 `content_entity` schema、协议或发布模型，因此不新增 ADR。
 
+### 2026-11-11（M1 配方与 Buff 内容链路）
+
+- 范围：补齐 M1 中配方文本和启动时 Buff 定义未进入快照/PostgreSQL 的缺口，并打通控制面只读关系。
+- 导入器：新增 `RecipeContentImporter` 和 `BuffContentImporter`；`--content-root` 在导入 `Envir/Drops` 后按文件名顺序导入 `Envir/Recipe/*.txt`，Buff 从 `BuffInfo.Load()` 始终导入。配方保存产出、材料、工具、成功率、金币和等级/职业/性别/Flag/Quest 条件。
+- 快照：黄金样本新增 59 个 Buff；使用测试内容根时新增 1 个掉落和 1 个配方，测试批次从 9,735 增至 9,795 个实体。配方和 Buff 不参与旧二进制重建，导出与冷回读语义校验仍保持逐字节一致。
+- Control API：新增 `GET /api/v1/content/recipe/{localIndex}/relations`，解析产出、材料、工具到 `item.<Index>` 内容键和名称；通用内容接口现可直接查询 `recipe` 和 `buff`。
+- Control.Web：配方与 Buff 页面切换到当前真实批次；配方详情抽屉读取真实产出/材料/工具和条件，Buff 展示类型、叠加、属性、图标与可见性。
+- 测试：`verify-content.sh` 校验 Buff/配方计数和字段；`test-control-api.sh` 校验 9,795 实体、13 类内容、Buff 列表和配方关系；`test-control-web.sh` 校验真实配方/Buff 页面及配方抽屉。
+- 验证：`CRYSTAL_DATABASE_URL=... ./scripts/ci.sh` 通过（全量构建、358 项旧服务端回归、内容快照/二进制往返、区服冒烟、Control API）；`test-control-web.sh` Playwright 集成通过；收尾阶段再次确认 Control.Web README、Control API 未实现项和文档日期一致，并重跑 `verify-content.sh`、`test-control-web.sh`（含 Control API 13 类内容）、JavaScript `node --check`、Shell `bash -n` 和 `git diff --check`，全部通过。
+- 未验证：全量 Jev 79 个配方在 PostgreSQL 16 staging 的导入性能；配方条件与运行时 `CanCraft` 的端到端行为；NPC 脚本和资源导入。
+- 决策：复用现有 `content_entity` 和只读契约，仅新增关系端点，未改变数据库 schema、协议或发布模型，因此不新增 ADR。
+
+### 2026-11-11（M1 NPC 脚本与资源元数据导入）
+
+- 范围：补齐 M1 中 NPC 脚本和地图/预览资源未进入快照/PostgreSQL 的缺口，并打通 NPC→脚本只读关系。
+- 导入器：新增 `ScriptContentImporter` 和 `AssetContentImporter`。`Envir/NPCs/**/*.txt` 按相对路径排序导入，文本换行统一为 LF，保存 SHA256、大小、行数、页面、`#INCLUDE`/`#INSERT`/`CALL` 和匹配的 NPC 索引；`Maps/**/*.map` 与 `Envir/Previews` 图片只保存路径、类型、大小和 SHA256 元数据，不复制二进制资源。
+- 快照：测试内容根新增 1 个脚本和 1 个资源元数据，批次从 9,795 增至 9,797 个实体，`contentHash` 为 `e3542007913c96e04bd0a238e13f9f0484519fa9b51f27ae5643001ba4e3404e`；黄金样本仍为 9,793 个实体和 `1c6b6134...`。脚本、资源、掉落、配方和 Buff 均不参与旧二进制重建，导出与冷回读仍逐字节一致。
+- Control API：通用内容接口现暴露 15 类实体；地图 NPC 关系增加可选 `script` 引用，新增 `GET /api/v1/content/npc/{localIndex}/script`，NPC 不存在返回 404，NPC 存在但无脚本返回 `found=false`。
+- Control.Web：新增 `npc-scripts` 内容域，地图 NPC 表展示脚本键、路径、行数并可打开脚本抽屉；Web 共 14 个内容域，其中 12 类读取真实批次，`asset` 仅通过通用 API 查询、暂无独立 Web 域。
+- 测试：`scripts/verify-content.sh` 校验脚本/资源计数、脚本字段和哈希；`scripts/test-control-api.sh` 校验 9,797 实体、15 类计数、脚本关系与资源查询；`scripts/test-control-web.sh` 校验脚本列表、脚本抽屉和地图 NPC 脚本关系。
+- 验证：`CRYSTAL_DATABASE_URL=... ./scripts/ci.sh` 通过（全量构建、358 项旧服务端回归、内容快照/二进制往返、区服冒烟、Control API 15 类实体集成）；`SKIP_API_SETUP=1 ./scripts/test-control-web.sh` Playwright 集成通过；Shell `bash -n`、全部 JavaScript `node --check` 和 `git diff --check` 通过。
+- 未验证：脚本 DSL 的 AST/编译校验和运行时执行；图库、音效、特效、客户端补丁等其他资源二进制；地图尺寸/阻挡资源；PostgreSQL 16 staging 和 Windows 客户端/区服运行冒烟。
+- 决策：复用现有 `content_entity`、只读契约和资源元数据模型，未改变数据库 schema、协议或发布模型，因此不新增 ADR。
+
+### 2026-11-11（M1 脚本 AST、地图解析与资源完整性下载）
+
+- 范围：补齐脚本 AST/编译校验、地图尺寸/阻挡/门格解析和资源文件服务，让 Control API 与 Control.Web 能展示并下载经过完整性校验的真实资源。
+- 新增 `NpcScriptParser`/`NpcScriptAst`：解析页面、块、命令、按钮和跳转引用，校验重复页面、缺失跳转目标、未知指令和空页面；脚本实体新增 `ast` 与 `validation`，测试脚本为 11 页、26 条命令、0 error、1 warning，`compiledSha256` 为 `c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff`。
+- 新增 `MapAssetParser`/`MapAssetMetadata`：支持旧地图格式 0/1/2/3/4/5/6/7/100，校验尺寸和文件长度并统计可走、阻挡和门格；用 Jev 全量 1,698 张地图验证，`bad=0`，格式分布为 `0:237`、`1:1441`、`3:1`、`5:6`、`100:13`。
+- 资源样本：删除文本假地图，新增确定性二进制 `tests/fixtures/content/Maps/0.map`（10×10 v0、1,252 字节、99 可走、1 阻挡、1 门格、SHA256 `3ab00f38…237f`）。
+- Control API：新增 `GET /content/script/{localIndex}/validation` 和需要 `asset:read` 的 `GET /content/asset/{localIndex}/file`；资源下载校验配置根目录、路径穿越、文件大小和 SHA256，返回 Content-Type/ETag/缓存头；地图关系响应新增 `asset` 元数据。
+- Control.Web：新增 `resources` 内容域，地图/资源列表展示格式、尺寸和阻挡统计；脚本抽屉展示 AST、错误/警告和编译哈希；资源抽屉可下载文件并在浏览器端复核 SHA256。
+- 配置：`ControlApi:AssetRoot` / `CRYSTAL_CONTROL_ASSET_ROOT` 指定资源根目录；未配置时下载接口返回明确错误，不影响其他只读内容。
+- 快照：测试内容根仍为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291`；脚本、资源、掉落、配方和 Buff 均不参与旧二进制重建。
+- 测试：`scripts/verify-content.sh` 校验脚本 AST、编译哈希、地图元数据和资源哈希；`scripts/test-control-api.sh` 校验脚本校验端点、地图资源元数据和下载字节；`scripts/test-control-web.sh` 校验脚本 AST 抽屉、地图尺寸/阻挡信息和资源下载/哈希复核。
+- 验证：`./scripts/build.sh`、`./scripts/test.sh`（358 项安全回归 + 30 项内容快照检查）、`./scripts/verify-content.sh`、`./scripts/inspect-db.sh`、PostgreSQL 12 上的 `./scripts/test-control-api.sh` 和 `SKIP_API_SETUP=1 ./scripts/test-control-web.sh` 全部通过；Shell `bash -n`、全部 JavaScript `node --check` 和 `git diff --check` 通过。
+- 未验证：PostgreSQL 16 staging（当前环境仅 12.22）、Windows 客户端/区服运行冒烟、图库/音效/特效/客户端补丁等其他资源二进制，以及脚本 DSL 在旧运行时中的端到端执行。
+- 决策：复用现有 `asset`/`script` 实体和只读契约，未改变数据库 schema、协议或发布模型，因此不新增 ADR。
+
+### 2026-11-11（M1 进展评估与回归验证）
+
+- 范围：核对当前工作区、M1 里程碑交付物和文档口径，并重跑本地可执行验证。
+- 验证：`scripts/build.sh`、`scripts/test.sh`（358 项安全回归 + 30 项内容快照检查）、`scripts/verify-content.sh`、`scripts/inspect-db.sh`、PostgreSQL 12 上的 `scripts/test-control-api.sh`（15 类实体）和 `SKIP_API_SETUP=1 scripts/test-control-web.sh`、`scripts/zone-smoke.sh` 均通过；Shell `bash -n`、JavaScript `node --check` 和 `git diff --check` 通过。客户端交叉构建仅有既有 `WindowsBase` 版本冲突警告。
+- 结论：内容导入、快照往返、只读 API、Control.Web、Linux 区服和本地回归已形成闭环，M1 功能链路接近收口；但当前 29 个修改文件和 12 个未跟踪文件尚未提交，远端 `main` 仍停在 `eedb980`。
+- 发现（评估时）：`.github/workflows/ci.yml` 只监听 `master` 分支的 push，而当前主分支为 `main`，主分支直接推送不会触发 CI；M1 计划中的 `Crystal.GameCore`、`Crystal.Agent.Contracts`、Compose（PostgreSQL/Redis/MinIO/API/Web）和内容包签名仍未落地，因此 97% 仅代表内容功能链路完成度，不代表 M1 交付物全部完成。CI 触发与内容包基本签名已在后续条目修复。
+- 未验证：PostgreSQL 16 staging、Windows 客户端登录/选角/进服、systemd 实际安装与开机启动、全量 Jev 掉落/配方/脚本/资源导入性能。
+- 下一步：提交并推送当前工作区、修正 CI 分支触发，再推进 PG16 全量导入与 M2 内容写入/发布闭环。
+
+### 2026-11-11（M1 内容快照签名与 CI 修复）
+
+- 范围：补齐内容包基本签名/验签能力，并修复主分支 push 不触发 CI 的问题。
+- 签名：新增 `ContentSnapshotSignature` 和 `ContentSnapshotSigner`。使用 ECDSA P-256 + SHA-256、IEEE P1363 固定宽度签名；签名覆盖 canonical manifest 和 `algorithm`/`keyId`/`signedAt` 元数据，`contentHash` 与旧二进制重建不受影响。
+- CLI：新增 MIT 工具 `tools/Crystal.ContentTool`，提供 `sign`/`verify`，只依赖 `Crystal.Content`，可用于生成签名快照并在发布前校验实体哈希、内容哈希和签名。
+- CI：`.github/workflows/ci.yml` 的 push 触发改为 `main`/`master`，并增加 `workflow_dispatch`；内容签名已加入 `scripts/verify-content.sh`，包含正确密钥、错误 key id、错误公钥和 manifest 篡改场景。
+- 测试：`./scripts/ci.sh` 通过（全量构建、358 项安全回归、39 项内容快照检查、内容签名/快照重建/二进制往返、区服冒烟、Control API 15 类实体）；`SKIP_API_SETUP=1 ./scripts/test-control-web.sh` Playwright 集成通过。
+- 未验证：KMS/HSM 托管私钥、Control API 发布审批与签名编排、ZoneServer/Agent 强制验签、PostgreSQL 16 staging 和 Windows 客户端运行冒烟。
+- 决策：新增 ADR 0005，记录 ECDSA P-256 当前算法、canonical 签名载荷和未来 Ed25519/KMS 迁移条件。
+
 ## 4. 决策记录
 
 | 日期 | 决策 | ADR |
@@ -287,6 +345,7 @@
 | 2026-11-09 | PostgreSQL 与内容快照 | `docs/adr/0002-postgresql-and-content-snapshots.md` |
 | 2026-11-09 | 保留现有协议并引入边缘网关 | `docs/adr/0003-legacy-protocol-with-gateway.md` |
 | 2026-11-09 | GPL 边界与代码隔离 | `docs/adr/0004-gpl-boundary.md` |
+| 2026-11-11 | 内容快照签名格式 | `docs/adr/0005-content-signature-format.md` |
 
 ## 5. 阻塞与风险
 
@@ -295,16 +354,18 @@
 | 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
 | 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
 | 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
+| CI | CI 已覆盖 `main`/`master` push，但 PostgreSQL 16 job 尚未在远端实际运行验证 | 无法确认 GitHub Actions 环境与本地结果一致 | 推送后检查 Actions 结果并保留日志 |
+| 交付口径 | M1 计划中的 `Crystal.GameCore`、`Crystal.Agent.Contracts` 骨架和 Compose（PostgreSQL/Redis/MinIO/API/Web）尚未落地 | 内容链路虽接近完成，但按里程碑交付物口径仍不能判定 M1 完成 | 作为 M1/M2 收口项排期，并在进度表中区分功能链路与交付物完成度 |
 | 许可 | `Crystal.MapEditor` 未发现明确许可证 | 不能随发布包分发 | 联系维护者、确认许可证或替换工具 |
 | 许可 | 服务端 GPL-3.0-only、素材版权 | 分发和商业化受限 | M0 完成合规审查并保留源码归档流程 |
 | 技术 | `Envir`/`Map` 耦合高 | 迁移和热重载风险 | 绞杀者模式 + 黄金样本测试 |
 
 ## 6. 下一步
 
-1. 把 NPC 脚本、配方、Buff 和资源元数据接入导入/快照管线，补齐脚本/配方关系 API，并评估全量掉落导入。
-2. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
-3. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
-4. 在 PostgreSQL 16 staging 演练 schema 和升级路径，确认 GitHub Actions PG16 job 稳定。
+1. 设计并实现内容写入/发布 API 和不可变发布清单，接入已实现的内容快照签名，补齐 M1 剩余的控制面闭环。
+2. 在 PostgreSQL 16 staging 评估全量掉落、配方、NPC 脚本、地图和资源元数据导入，并演练 schema/升级路径，确认 GitHub Actions PG16 job 稳定。
+3. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
+4. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
 5. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
 6. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
 7. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。

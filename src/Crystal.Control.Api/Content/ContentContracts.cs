@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Crystal.Content;
 
 namespace Crystal.Control.Api.Content;
 
@@ -40,6 +41,14 @@ public sealed record MapSummaryDto(
     string? FileName,
     string? Title);
 
+public sealed record MapAssetReferenceDto(
+    long LocalIndex,
+    string ContentKey,
+    string? RelativePath,
+    long SizeBytes,
+    string? Sha256,
+    MapAssetMetadata? Map);
+
 public sealed record MapMovementRelationDto(
     int TargetMapIndex,
     MapSummaryDto? TargetMap,
@@ -56,6 +65,14 @@ public sealed record MapSafeZoneRelationDto(
     int Size,
     bool StartPoint);
 
+public sealed record MapNpcScriptReferenceDto(
+    long LocalIndex,
+    string ContentKey,
+    string? FileName,
+    string? RelativePath,
+    int? LineCount,
+    int? PageCount);
+
 public sealed record MapNpcRelationDto(
     long LocalIndex,
     string ContentKey,
@@ -63,7 +80,8 @@ public sealed record MapNpcRelationDto(
     string? FileName,
     PointDto? Location,
     int? Image,
-    bool ShowOnBigMap);
+    bool ShowOnBigMap,
+    MapNpcScriptReferenceDto? Script);
 
 public sealed record MapRespawnRelationDto(
     long LocalIndex,
@@ -90,6 +108,7 @@ public sealed record MapRespawnPageDto(
 public sealed record MapRelationsDto(
     long ImportRunId,
     MapSummaryDto Map,
+    MapAssetReferenceDto? Asset,
     IReadOnlyList<MapMovementRelationDto> Movements,
     IReadOnlyList<MapSafeZoneRelationDto> SafeZones,
     IReadOnlyList<MapNpcRelationDto> Npcs,
@@ -121,3 +140,77 @@ public sealed record MonsterDropsDto(
     string? DropPath,
     string? DropContentKey,
     IReadOnlyList<DropRelationDto> Drops);
+
+public sealed record RecipeItemReferenceDto(
+    long? LocalIndex,
+    string? ContentKey,
+    int ItemIndex,
+    string? Name,
+    int Count,
+    int CurrentDura,
+    int MaxDura);
+
+public sealed record NpcScriptIncludeDto(string Path, string Page);
+
+public sealed record NpcScriptRelationsDto(
+    long ImportRunId,
+    long NpcLocalIndex,
+    string NpcContentKey,
+    string? Name,
+    string? FileName,
+    bool Found,
+    long? ScriptLocalIndex,
+    string? ScriptContentKey,
+    string? ScriptPath,
+    string? Language,
+    string? Sha256,
+    int? SizeBytes,
+    int? LineCount,
+    IReadOnlyList<string> Pages,
+    IReadOnlyList<NpcScriptIncludeDto> Includes,
+    IReadOnlyList<string> Inserts,
+    IReadOnlyList<string> Calls,
+    NpcScriptValidationSummaryDto? Validation,
+    string? Source);
+
+public sealed record NpcScriptValidationSummaryDto(
+    bool Valid,
+    int ErrorCount,
+    int WarningCount,
+    string? CompiledSha256);
+
+public sealed record NpcScriptValidationDto(
+    bool Available,
+    long ImportRunId,
+    long LocalIndex,
+    string ContentKey,
+    string? FileName,
+    string? RelativePath,
+    string? Sha256,
+    NpcScriptValidationSummaryDto Validation,
+    IReadOnlyList<NpcScriptValidationIssueDto> Issues,
+    NpcScriptAst? Ast);
+
+public sealed record NpcScriptValidationIssueDto(
+    string Code,
+    string Severity,
+    string Message,
+    int? Line,
+    string? Page);
+
+public sealed record RecipeRelationsDto(
+    long ImportRunId,
+    long LocalIndex,
+    string ContentKey,
+    string? Name,
+    string? FileName,
+    RecipeItemReferenceDto? Output,
+    IReadOnlyList<RecipeItemReferenceDto> Ingredients,
+    IReadOnlyList<RecipeItemReferenceDto> Tools,
+    int Chance,
+    uint Gold,
+    int? RequiredLevel,
+    string? RequiredGender,
+    IReadOnlyList<string> RequiredClasses,
+    IReadOnlyList<int> RequiredFlags,
+    IReadOnlyList<int> RequiredQuests);

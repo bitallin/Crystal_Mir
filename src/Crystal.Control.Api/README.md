@@ -1,6 +1,6 @@
 # Crystal.Control.Api
 
-控制面 API，读取 PostgreSQL 中的内容、账号、角色和审计数据。内容接口目前只读；账号登录、
+控制面 API，读取 PostgreSQL 中的内容、账号、角色和审计数据。内容接口目前只读并暴露 15 类实体；账号登录、
 会话、RBAC、账号生命周期和审计已提供初版。
 
 ## 运行
@@ -11,6 +11,7 @@ export CRYSTAL_CONTROL_API_KEY='local-dev-key'
 export CRYSTAL_CONTROL_JWT_SIGNING_KEY='local-dev-signing-key-at-least-32-bytes'
 export CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD='initial-admin-password'
 export CRYSTAL_CONTROL_CORS_ORIGINS='http://127.0.0.1:4173'
+export CRYSTAL_CONTROL_ASSET_ROOT='./.external/Crystal.Database/Jev'
 dotnet run --project src/Crystal.Control.Api
 ```
 
@@ -25,6 +26,9 @@ dotnet run --project src/Crystal.Control.Api
 `Crystal.Control.Web` 跨端口调用。Production 必须显式配置，不要使用通配符。开发配置默认允许
 `http://127.0.0.1:4173` 和 `http://localhost:4173`。
 
+`CRYSTAL_CONTROL_ASSET_ROOT` 或 `ControlApi:AssetRoot` 是资源文件根目录，快照中的 `relativePath`
+相对该目录解析。未配置时内容元数据仍可查询，但 `/content/asset/{localIndex}/file` 会返回明确错误。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
@@ -37,6 +41,13 @@ dotnet run --project src/Crystal.Control.Api
 | GET | `/api/v1/content/{entityType}?importRunId=&page=1&pageSize=50&q=&sort=index&direction=asc` | 分页查询 |
 | GET | `/api/v1/content/{entityType}/{localIndex}` | 按旧 `Index` 查询 |
 | GET | `/api/v1/content/{entityType}/key/{contentKey}` | 按内容键查询 |
+| GET | `/api/v1/content/map/{localIndex}/relations` | 地图拓扑、NPC/NPC 脚本、刷新点和传送关系 |
+| GET | `/api/v1/content/map/catalog?q=&page=1&pageSize=500` | 全量地图摘要目录与检索 |
+| GET | `/api/v1/content/monster/{localIndex}/drops` | 怪物掉落关系 |
+| GET | `/api/v1/content/recipe/{localIndex}/relations` | 配方产出、材料、工具和条件 |
+| GET | `/api/v1/content/npc/{localIndex}/script` | NPC 对应脚本或 `found=false` |
+| GET | `/api/v1/content/script/{localIndex}/validation` | 脚本 AST、静态校验和编译哈希 |
+| GET | `/api/v1/content/asset/{localIndex}/file` | 经路径/大小/SHA256 校验的资源文件下载 |
 | POST | `/api/v1/auth/login` | 用户名密码登录 |
 | POST | `/api/v1/auth/refresh` | 轮换刷新令牌并签发新访问令牌 |
 | POST | `/api/v1/auth/logout` | 撤销当前会话 |
@@ -50,11 +61,11 @@ dotnet run --project src/Crystal.Control.Api
 | GET | `/api/v1/roles` | 角色和权限定义 |
 | GET | `/api/v1/audit/events?limit=50&action=&result=&actorAccountId=` | 审计事件 |
 
-`entityType` 使用 `item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn` 等。
+`entityType` 使用 `item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn`、`drop`、`recipe`、`buff`、`script`、`asset`，共 15 类。
 `importRunId` 省略时使用最新 `imported` 批次。`sort` 只允许 `index`、`key`、`name`。
 
 内容接口要求 `content:read`，账号管理要求 `account:read`/`account:write`，审计查询要求
-`audit:read`。API key 使用 `X-Api-Key: <key>` 或 `Authorization: Bearer <key>`；JWT 使用
+`audit:read`，资源文件下载要求 `asset:read`。API key 使用 `X-Api-Key: <key>` 或 `Authorization: Bearer <key>`；JWT 使用
 `Authorization: Bearer <accessToken>`。
 
 账号生命周期操作不能停用当前请求账号，也不能停用或移除最后一个启用平台管理员的
@@ -71,4 +82,6 @@ CRYSTAL_DATABASE_URL="$CRYSTAL_DB_CONNECTION" ./scripts/test-control-web.sh
 `test-control-api.sh` 验证 schema、导入、认证、RBAC、账号生命周期、审计和 CORS 预检。
 `test-control-web.sh` 在真实 API 上启动静态后台，用 Playwright 验证登录失败/成功、内容总览、
 导入批次、内容分页检索、搜索焦点、访问令牌刷新、账号创建/停用/启用/重置密码/角色调整、
-角色权限矩阵、审计查询与 CSV 导出、登出、财务账号导航/403 和控制台错误；需要 Python Playwright。
+脚本 AST/校验、地图尺寸/阻挡、资源下载与 SHA256、角色权限矩阵、审计查询与 CSV 导出、登出、
+财务账号导航/403 和控制台错误；需要 Python Playwright。Web 集成脚本启动 API 时必须设置
+`ControlApi__AssetRoot` 指向测试内容根。

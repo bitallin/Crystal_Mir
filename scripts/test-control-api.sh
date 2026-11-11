@@ -85,6 +85,7 @@ ControlApi__ApiRateLimitPermitLimit=5000 \
 ControlApi__BootstrapAdminUsername="$ADMIN_USERNAME" \
 ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
 ControlApi__CorsOrigins="$WEB_ORIGIN" \
+ControlApi__AssetRoot="$ROOT/tests/fixtures/content" \
 "$DOTNET" "$ROOT/src/Crystal.Control.Api/bin/$CONFIGURATION/net8.0/Crystal.Control.Api.dll" \
   >"$TMP/api.log" 2>&1 &
 API_PID=$!
@@ -130,13 +131,21 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/catalog" >"$TMP/m
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/catalog?q=map.1&pageSize=5" >"$TMP/map-catalog-search.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/1/relations?respawnPage=2&respawnPageSize=5" >"$TMP/map-relations.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/monster/1/drops" >"$TMP/monster-drops.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/recipe?pageSize=5" >"$TMP/recipes.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/buff?pageSize=5" >"$TMP/buffs.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script?pageSize=5" >"$TMP/scripts.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset?pageSize=5" >"$TMP/assets.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/recipe/1/relations" >"$TMP/recipe-relations.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script/1/validation" >"$TMP/script-validation.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset/1/file" >"$TMP/asset-file.bin"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/npc/1/script" >"$TMP/npc-script.json"
 
 RUN_ID="$(python3 - "$TMP/runs.json" <<'PY'
 import json, sys
 runs = json.load(open(sys.argv[1]))
 assert runs, "no import runs returned"
 assert runs[0]["status"] == "imported", runs[0]
-assert runs[0]["entityCount"] == 9735, runs[0]
+assert runs[0]["entityCount"] == 9797, runs[0]
 print(runs[0]["id"])
 PY
 )"
@@ -144,7 +153,7 @@ PY
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/import-runs/$RUN_ID/content-types" >"$TMP/counts.json"
 
 python3 - "$TMP" <<'PY'
-import json, os, sys
+import hashlib, json, os, sys
 root = sys.argv[1]
 def load(name):
     with open(os.path.join(root, name), encoding="utf-8") as f:
@@ -191,6 +200,14 @@ relations = load("map-relations.json")
 assert relations["map"]["contentKey"] == "map.1", relations["map"]
 assert relations["map"]["fileName"] == "0", relations["map"]
 assert relations["map"]["title"] == "BichonProvince", relations["map"]
+assert relations["asset"]["contentKey"] == "asset.maps.0.map", relations["asset"]
+assert relations["asset"]["relativePath"] == "Maps/0.map", relations["asset"]
+assert relations["asset"]["map"] == {
+    "valid": True, "format": 0, "formatName": "mir2-v0",
+    "width": 10, "height": 10, "cellCount": 100,
+    "walkableCells": 99, "blockedCells": 1, "doorCells": 1,
+    "error": None,
+}, relations["asset"]
 assert len(relations["movements"]) == 72, len(relations["movements"])
 assert relations["movements"][0]["targetMapIndex"] == 2, relations["movements"][0]
 assert relations["movements"][0]["targetMap"]["contentKey"] == "map.2", relations["movements"][0]
@@ -199,6 +216,9 @@ assert len(relations["safeZones"]) == 6, relations["safeZones"]
 assert relations["safeZones"][0]["startPoint"] is True, relations["safeZones"][0]
 assert len(relations["npcs"]) == 46, len(relations["npcs"])
 assert relations["npcs"][0]["name"] == "Teleport_Gilbert", relations["npcs"][0]
+assert relations["npcs"][0]["script"]["contentKey"] == "script.BichonProvince.BorderVillage.Transport", relations["npcs"][0]
+assert relations["npcs"][0]["script"]["lineCount"] == 95, relations["npcs"][0]
+assert relations["npcs"][1]["script"] is None, relations["npcs"][1]
 assert relations["respawns"]["page"] == 2, relations["respawns"]
 assert relations["respawns"]["pageSize"] == 5, relations["respawns"]
 assert relations["respawns"]["total"] == 360, relations["respawns"]
@@ -216,12 +236,93 @@ assert drops["drops"][0]["chance"] == 1, drops
 assert drops["drops"][0]["item"]["contentKey"] == "item.710", drops
 assert drops["drops"][0]["item"]["name"] == "GreenPoison", drops
 
+recipes = load("recipes.json")
+assert recipes["entityType"] == "recipe", recipes
+assert recipes["total"] == 1, recipes["total"]
+recipe = recipes["items"][0]
+assert recipe["contentKey"] == "recipe.GreenPoison", recipe
+assert recipe["data"]["name"] == "GreenPoison", recipe
+assert recipe["data"]["output"]["itemIndex"] == 710, recipe
+assert recipe["data"]["output"]["count"] == 2, recipe
+
+buffs = load("buffs.json")
+assert buffs["entityType"] == "buff", buffs
+assert buffs["total"] == 59, buffs["total"]
+assert buffs["items"][0]["contentKey"] == "buff.TemporalFlux", buffs["items"][0]
+assert buffs["items"][0]["data"]["StackType"] == "ResetDuration", buffs["items"][0]
+
+scripts = load("scripts.json")
+assert scripts["entityType"] == "script", scripts
+assert scripts["total"] == 1, scripts["total"]
+script = scripts["items"][0]
+assert script["contentKey"] == "script.BichonProvince.BorderVillage.Transport", script
+assert script["data"]["npcIndexes"] == [1], script
+assert script["data"]["lineCount"] == 95, script
+
+assets = load("assets.json")
+assert assets["entityType"] == "asset", assets
+assert assets["total"] == 1, assets["total"]
+asset = assets["items"][0]
+assert asset["contentKey"] == "asset.maps.0.map", asset
+assert asset["data"]["assetType"] == "map", asset
+assert asset["data"]["relativePath"] == "Maps/0.map", asset
+assert asset["data"]["sizeBytes"] == 1252, asset
+assert len(asset["data"]["sha256"]) == 64, asset
+assert asset["data"]["map"]["width"] == 10 and asset["data"]["map"]["height"] == 10, asset
+assert asset["data"]["map"]["blockedCells"] == 1, asset
+
+script_validation = load("script-validation.json")
+assert script_validation["available"] is True, script_validation
+assert script_validation["contentKey"] == "script.BichonProvince.BorderVillage.Transport", script_validation
+assert script_validation["validation"]["valid"] is True, script_validation
+assert script_validation["validation"]["errorCount"] == 0, script_validation
+assert script_validation["validation"]["warningCount"] == 1, script_validation
+assert script_validation["validation"]["compiledSha256"] == "c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff", script_validation
+assert len(script_validation["ast"]["pages"]) == 11, script_validation
+assert script_validation["ast"]["pages"][0]["key"] == "@MAIN", script_validation
+assert script_validation["issues"][0]["code"] == "empty-page", script_validation
+
+asset_bytes = open(os.path.join(root, "asset-file.bin"), "rb").read()
+assert len(asset_bytes) == asset["data"]["sizeBytes"], (len(asset_bytes), asset)
+assert hashlib.sha256(asset_bytes).hexdigest() == asset["data"]["sha256"], asset
+
+npc_script = load("npc-script.json")
+assert npc_script["npcContentKey"] == "npc.1", npc_script
+assert npc_script["name"] == "Teleport_Gilbert", npc_script
+assert npc_script["found"] is True, npc_script
+assert npc_script["scriptContentKey"] == "script.BichonProvince.BorderVillage.Transport", npc_script
+assert npc_script["scriptPath"] == "Envir/NPCs/BichonProvince/BorderVillage/Transport.txt", npc_script
+assert npc_script["language"] == "CrystalNpc", npc_script
+assert npc_script["lineCount"] == 95, npc_script
+assert npc_script["pages"][0] == "@MAIN", npc_script
+assert "[@MAIN]" in npc_script["source"], npc_script
+assert npc_script["validation"]["valid"] is True, npc_script
+assert npc_script["validation"]["warningCount"] == 1, npc_script
+
+recipe_relations = load("recipe-relations.json")
+assert recipe_relations["contentKey"] == "recipe.GreenPoison", recipe_relations
+assert recipe_relations["name"] == "GreenPoison", recipe_relations
+assert recipe_relations["fileName"] == "Envir/Recipe/GreenPoison.txt", recipe_relations
+assert recipe_relations["output"]["contentKey"] == "item.710", recipe_relations
+assert recipe_relations["output"]["name"] == "GreenPoison", recipe_relations
+assert recipe_relations["output"]["count"] == 2, recipe_relations
+assert recipe_relations["ingredients"][0]["contentKey"] == "item.710", recipe_relations
+assert recipe_relations["ingredients"][0]["count"] == 3, recipe_relations
+assert recipe_relations["tools"][0]["contentKey"] == "item.710", recipe_relations
+assert recipe_relations["chance"] == 75, recipe_relations
+assert recipe_relations["gold"] == 123, recipe_relations
+assert recipe_relations["requiredLevel"] == 22, recipe_relations
+assert recipe_relations["requiredGender"] == "Female", recipe_relations
+assert recipe_relations["requiredClasses"] == ["Taoist"], recipe_relations
+assert recipe_relations["requiredFlags"] == [1], recipe_relations
+assert recipe_relations["requiredQuests"] == [2], recipe_relations
+
 counts = load("counts.json")
 actual = {entry["entityType"]: entry["count"] for entry in counts["counts"]}
 expected = {
     "item": 1628, "monster": 555, "map": 463, "npc": 375, "quest": 154,
     "magic": 111, "gameshop": 105, "conquest": 1, "dragon": 1, "respawn": 6341,
-    "drop": 1,
+    "drop": 1, "recipe": 1, "buff": 59, "script": 1, "asset": 1,
 }
 assert actual == expected, (actual, expected)
 PY
@@ -573,4 +674,4 @@ for secret in ("Integration!Passw0rd2026", "ResetIntegration!Passw0rd2026", "Sel
     assert secret not in audit_text, secret
 PY
 
-echo "Control API integration verified (run $RUN_ID, 11 entity types, auth/RBAC/audit/relations)."
+echo "Control API integration verified (run $RUN_ID, 15 entity types, auth/RBAC/audit/relations)."

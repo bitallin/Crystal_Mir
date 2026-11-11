@@ -25,6 +25,19 @@ public sealed class ContentSnapshotManifest
     public required SortedDictionary<string, int> Counts { get; init; }
 
     public JsonElement? Legacy { get; init; }
+
+    public ContentSnapshotSignature? Signature { get; init; }
+}
+
+public sealed class ContentSnapshotSignature
+{
+    public required string Algorithm { get; init; }
+
+    public required string KeyId { get; init; }
+
+    public required DateTimeOffset SignedAt { get; init; }
+
+    public required string Value { get; init; }
 }
 
 public sealed class ContentSnapshotFile

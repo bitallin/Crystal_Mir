@@ -29,6 +29,14 @@ public static class ContentEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/monster/{localIndex:long}/drops", GetMonsterDropsAsync)
             .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/npc/{localIndex:long}/script", GetNpcScriptAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/script/{localIndex:long}/validation", GetScriptValidationAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/recipe/{localIndex:long}/relations", GetRecipeRelationsAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/asset/{localIndex:long}/file", GetAssetFileAsync)
+            .RequireAuthorization(Permissions.AssetRead);
         return api;
     }
 
@@ -363,5 +371,163 @@ public static class ContentEndpoints
                 title: "Monster not found",
                 detail: $"monster/{localIndex} was not found in import run {runId.Value}.")
             : Results.Ok(drops);
+    }
+
+    private static async Task<IResult> GetNpcScriptAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentRelationStore relationStore,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var script = await relationStore.GetNpcScriptAsync(runId.Value, localIndex, cancellationToken);
+        return script is null
+            ? Results.Problem(
+                statusCode: 404,
+                title: "NPC not found",
+                detail: $"npc/{localIndex} was not found in import run {runId.Value}.")
+            : Results.Ok(script);
+    }
+
+    private static async Task<IResult> GetScriptValidationAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentRelationStore relationStore,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var validation = await relationStore.GetScriptValidationAsync(
+            runId.Value,
+            localIndex,
+            cancellationToken);
+        return validation is null
+            ? Results.Problem(
+                statusCode: 404,
+                title: "Script not found",
+                detail: $"script/{localIndex} was not found in import run {runId.Value}.")
+            : Results.Ok(validation);
+    }
+
+    private static async Task<IResult> GetAssetFileAsync(
+        HttpContext context,
+        long localIndex,
+        ContentQueryStore store,
+        ContentAssetService assetService,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var asset = await assetService.ResolveAsync(runId.Value, localIndex, cancellationToken);
+        if (asset.IsOk && asset.FullPath is not null && asset.Entity is not null)
+        {
+            var sha256 = ReadAssetSha256(asset.Entity.Data);
+            if (!string.IsNullOrWhiteSpace(sha256))
+            {
+                context.Response.Headers.ETag = $"\"{sha256}\"";
+            }
+
+            context.Response.Headers.CacheControl = "private, max-age=300";
+            return Results.File(
+                asset.FullPath,
+                asset.ContentType ?? "application/octet-stream",
+                Path.GetFileName(asset.FullPath),
+                enableRangeProcessing: true);
+        }
+
+        return asset.Status switch
+        {
+            ContentAssetStatus.NotFound => Results.Problem(
+                statusCode: 404,
+                title: "Asset not found",
+                detail: $"asset/{localIndex} was not found in import run {runId.Value}."),
+            ContentAssetStatus.NotConfigured => Results.Problem(
+                statusCode: 503,
+                title: "Asset store is not configured",
+                detail: asset.Error),
+            ContentAssetStatus.MissingFile => Results.Problem(
+                statusCode: 404,
+                title: "Asset file is missing",
+                detail: asset.Error),
+            ContentAssetStatus.InvalidPath => Results.Problem(
+                statusCode: 400,
+                title: "Invalid asset path",
+                detail: asset.Error),
+            ContentAssetStatus.IntegrityMismatch => Results.Problem(
+                statusCode: 409,
+                title: "Asset integrity check failed",
+                detail: asset.Error),
+            _ => Results.Problem(
+                statusCode: 422,
+                title: "Invalid asset metadata",
+                detail: asset.Error)
+        };
+    }
+
+    private static string? ReadAssetSha256(System.Text.Json.JsonElement data)
+    {
+        return data.ValueKind == System.Text.Json.JsonValueKind.Object &&
+               data.TryGetProperty("sha256", out var value) &&
+               value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static async Task<IResult> GetRecipeRelationsAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentRelationStore relationStore,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var recipe = await relationStore.GetRecipeRelationsAsync(runId.Value, localIndex, cancellationToken);
+        return recipe is null
+            ? Results.Problem(
+                statusCode: 404,
+                title: "Recipe not found",
+                detail: $"recipe/{localIndex} was not found in import run {runId.Value}.")
+            : Results.Ok(recipe);
     }
 }

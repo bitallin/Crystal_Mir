@@ -220,6 +220,43 @@
     return request(`/api/v1/content/monster/${encodeURIComponent(localIndex)}/drops${params}`);
   }
 
+  function getRecipeRelations(localIndex, importRunId) {
+    const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
+    return request(`/api/v1/content/recipe/${encodeURIComponent(localIndex)}/relations${params}`);
+  }
+
+  function getScriptValidation(localIndex, importRunId) {
+    const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
+    return request(`/api/v1/content/script/${encodeURIComponent(localIndex)}/validation${params}`);
+  }
+
+  async function downloadAsset(localIndex, importRunId) {
+    if (tokenNeedsRefresh()) await refresh();
+    const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
+    const path = `/api/v1/content/asset/${encodeURIComponent(localIndex)}/file${params}`;
+    let response = await window.fetch(`${baseUrl()}${path}`, {
+      headers: { Authorization: `Bearer ${session?.accessToken || ""}` }
+    });
+    if (response.status === 401 && session?.refreshToken) {
+      await refresh();
+      response = await window.fetch(`${baseUrl()}${path}`, {
+        headers: { Authorization: `Bearer ${session?.accessToken || ""}` }
+      });
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      let payload = null;
+      try { payload = JSON.parse(text); } catch { payload = { detail: text }; }
+      throw new ApiError(payload?.detail || payload?.title || `HTTP ${response.status}`, response.status, payload);
+    }
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    return {
+      blob: await response.blob(),
+      fileName: match ? match[1] : `asset-${localIndex}`
+    };
+  }
+
   function listAuditEvents(limit = 100, filters = {}) {
     const params = new URLSearchParams({ limit });
     if (filters.action) params.set("action", filters.action);
@@ -283,6 +320,8 @@
     getImportRun,
     getMapRelations,
     getMonsterDrops,
+    getRecipeRelations,
+    getScriptValidation,
     getUser,
     isAuthenticated,
     listAccounts,
@@ -294,6 +333,7 @@
     logout,
     me,
     queryContent,
+    downloadAsset,
     resetAccountPassword,
     restoreSession,
     setAccountStatus,

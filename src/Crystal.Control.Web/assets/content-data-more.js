@@ -32,6 +32,19 @@
   });
 
   types.push({
+    id: "npc-scripts", entity: "script", icon: "code", label: "NPC 脚本", singular: "脚本",
+    total: 635, draft: 0, issues: 0, source: "外部 NPC 文本（待导入）", tone: "blue",
+    description: "NPC 对话、商店、任务、传送和行为脚本，保留来源路径、页面、包含关系和内容哈希。",
+    columns: ["key", "name", "category", "level", "metric", "status", "updated"],
+    columnLabels: { key: "内容键", name: "脚本文件", category: "语言", level: "行数", metric: "页面", status: "状态", updated: "最近更新" },
+    rows: [
+      { key: "script.BichonProvince.BorderVillage.Transport", name: "BorderVillage/Transport", subtitle: "Envir/NPCs/BichonProvince/BorderVillage/Transport.txt", category: "CrystalNpc", level: 95, metric: "11 个页面", status: "published", updated: "今天 18:22", icon: "code", tags: ["NPC", "传送"], attributes: [["文件", "Envir/NPCs/BichonProvince/BorderVillage/Transport.txt"], ["页面", "11"], ["行数", "95"], ["语言", "CrystalNpc"], ["调用", "无"], ["内容哈希", "4411fb16…"]] },
+      { key: "script.BichonProvince.BichonWall.Blacksmith", name: "BichonWall/Blacksmith", subtitle: "Envir/NPCs/BichonProvince/BichonWall/Blacksmith.txt", category: "CrystalNpc", level: 45, metric: "3 个页面", status: "published", updated: "今天 17:48", icon: "code", tags: ["NPC", "修理"], attributes: [["文件", "Envir/NPCs/BichonProvince/BichonWall/Blacksmith.txt"], ["页面", "3"], ["行数", "45"], ["语言", "CrystalNpc"], ["商店类型", "武器"], ["内容哈希", "7f3a…"]] },
+      { key: "script.BichonProvince.BichonWall.Sir.Mogu", name: "BichonWall/Sir.Mogu", subtitle: "Envir/NPCs/BichonProvince/BichonWall/Sir.Mogu.txt", category: "CrystalNpc", level: 31, metric: "包含 1 个页面", status: "validating", updated: "昨天 21:16", icon: "code", tags: ["NPC", "包含"], attributes: [["文件", "Envir/NPCs/BichonProvince/BichonWall/Sir.Mogu.txt"], ["包含", "SystemScripts/SharedNPCS/Tavern.txt @Main"], ["页面", "多个"], ["语言", "CrystalNpc"], ["校验", "等待全量脚本导入"]] }
+    ]
+  });
+
+  types.push({
     id: "recipes", entity: "recipe", icon: "hammer", label: "配方与锻造", singular: "配方",
     total: 86, draft: 14, issues: 2, source: "外部配方文本（待导入）", tone: "orange",
     description: "锻造、合成与材料配方，包含材料校验、成功率、产出模拟和解锁条件。",
@@ -102,6 +115,17 @@
       { index: 7005, name: "赤月峡谷北 · 虹魔区", subtitle: "精英刷新点", category: "赤月峡谷北", coord: "88, 132", level: 6, metric: "30 分钟", status: "published", updated: "今天 15:16", icon: "spawn", tags: ["精英", "区域"], attributes: [["地图", "赤月峡谷北"], ["坐标", "88, 132"], ["怪物", "虹魔猪卫"], ["怪物数", "6"], ["刷新半径", "8 格"], ["刷新间隔", "30 分钟"]] },
       { index: 7006, name: "祖玛寺庙三层 · 卫士走廊", subtitle: "普通刷新点", category: "祖玛寺庙三层", coord: "40, 44", level: 12, metric: "18 分钟", status: "published", updated: "今天 14:58", icon: "route", tags: ["普通", "走廊"], attributes: [["地图", "祖玛寺庙三层"], ["坐标", "40, 44"], ["怪物", "祖玛卫士"], ["怪物数", "12"], ["刷新半径", "6 格"], ["刷新间隔", "18 分钟"]] },
       { index: 7007, name: "沃玛寺庙二层 · 教主房", subtitle: "Boss 刷新点", category: "沃玛寺庙二层", coord: "80, 96", level: 1, metric: "180 分钟", status: "published", updated: "今天 13:38", icon: "crown", tags: ["Boss", "固定点"], attributes: [["地图", "沃玛寺庙二层"], ["坐标", "80, 96"], ["怪物", "沃玛教主"], ["怪物数", "1"], ["刷新半径", "2 格"], ["刷新间隔", "180 分钟"]] }
+    ]
+  });
+
+  types.push({
+    id: "resources", entity: "asset", icon: "image", label: "地图与资源文件", singular: "资源",
+    total: 1, draft: 0, issues: 0, source: "内容根目录", tone: "blue",
+    description: "地图、预览图和后续图库/音效资源的路径、大小、哈希、格式、尺寸与阻挡统计。",
+    columns: ["key", "name", "category", "level", "metric", "status", "updated"],
+    columnLabels: { key: "内容键", name: "文件", category: "类型", level: "尺寸 / 格子", metric: "大小", status: "状态", updated: "最近更新" },
+    rows: [
+      { key: "asset.maps.0.map", name: "Maps/0.map", subtitle: "地图资源", category: "map", level: "10 × 10", metric: "1.2 KB", status: "published", updated: "今天 06:00", icon: "map", tags: ["地图", "已校验"], attributes: [["类型", "map"], ["尺寸", "10 × 10"], ["阻挡格", "1"], ["门格", "1"], ["哈希", "3ab00f38…"]] }
     ]
   });
 

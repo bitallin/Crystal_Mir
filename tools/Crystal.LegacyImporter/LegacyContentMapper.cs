@@ -42,6 +42,10 @@ public static class LegacyContentMapper
         AddEntities(entities, sourceCounts, ContentEntityTypes.Conquest, envir.ConquestInfoList,
             conquest => conquest.Index, conquest => $"conquest.{conquest.Index}");
 
+        var buffs = BuffContentImporter.Map();
+        sourceCounts[ContentEntityTypes.Buff] = buffs.Count;
+        entities.AddRange(buffs);
+
         if (envir.DragonInfo is not null)
         {
             sourceCounts[ContentEntityTypes.Dragon] = 1;
@@ -64,11 +68,26 @@ public static class LegacyContentMapper
         }
 
         DropContentImportResult? drops = null;
+        RecipeContentImportResult? recipes = null;
+        ScriptContentImportResult? scripts = null;
+        AssetContentImportResult? assets = null;
         if (contentRoot is not null)
         {
             drops = DropContentImporter.Map(envir, contentRoot);
             sourceCounts[ContentEntityTypes.Drop] = drops.Entities.Count;
             entities.AddRange(drops.Entities);
+
+            recipes = RecipeContentImporter.Map(envir, contentRoot);
+            sourceCounts[ContentEntityTypes.Recipe] = recipes.Entities.Count;
+            entities.AddRange(recipes.Entities);
+
+            scripts = ScriptContentImporter.Map(envir, contentRoot);
+            sourceCounts[ContentEntityTypes.Script] = scripts.Entities.Count;
+            entities.AddRange(scripts.Entities);
+
+            assets = AssetContentImporter.Map(contentRoot);
+            sourceCounts[ContentEntityTypes.Asset] = assets.Entities.Count;
+            entities.AddRange(assets.Entities);
         }
 
         var legacy = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(new
@@ -112,6 +131,36 @@ public static class LegacyContentMapper
                     entries = drops.DropCount,
                     entities = drops.Entities.Count
                 },
+            recipes = recipes is null
+                ? null
+                : new
+                {
+                    files = recipes.FileCount,
+                    entities = recipes.Entities.Count
+                },
+            scripts = scripts is null
+                ? null
+                : new
+                {
+                    files = scripts.FileCount,
+                    referencedNpcs = scripts.ReferencedNpcCount,
+                    errors = scripts.ErrorCount,
+                    warnings = scripts.WarningCount,
+                    entities = scripts.Entities.Count
+                },
+            assets = assets is null
+                ? null
+                : new
+                {
+                    files = assets.FileCount,
+                    totalBytes = assets.TotalBytes,
+                    entities = assets.Entities.Count
+                },
+            buffs = new
+            {
+                source = "BuffInfo.Load",
+                entities = buffs.Count
+            },
             order = new
             {
                 maps = envir.MapInfoList.Select(map => map.Index).ToArray(),
@@ -147,10 +196,15 @@ public static class LegacyContentMapper
             }).ToArray(),
             notImported = new
             {
-                recipes = "loaded from Envir/Recipe, outside Server.MirDB",
-                buffs = "initialized during server startup, outside Server.MirDB",
+                scriptClientLibraries = "client libraries and runtime assets outside Maps/Envir/Previews are not imported yet",
                 drops = drops is null
                     ? "not loaded; pass --content-root to import Envir/Drops"
+                    : null,
+                scripts = scripts is null
+                    ? "not loaded; pass --content-root to import Envir/NPCs"
+                    : null,
+                assets = assets is null
+                    ? "not loaded; pass --content-root to import Maps and Envir/Previews metadata"
                     : null
             }
         }, ContentJson.CompactOptions));

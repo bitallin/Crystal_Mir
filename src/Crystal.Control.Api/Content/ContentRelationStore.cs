@@ -30,6 +30,16 @@ public sealed class ContentRelationStore
             cancellationToken);
         if (map is null) return null;
 
+        var mapFileName = ReadString(map.Data, "FileName");
+        var mapAssetPath = BuildMapAssetPath(mapFileName);
+        var mapAsset = mapAssetPath is null
+            ? null
+            : await GetAssetByRelativePathAsync(
+                connection,
+                importRunId,
+                mapAssetPath,
+                cancellationToken);
+
         var movementElements = ReadArray(map.Data, "Movements");
         var targetMapIndices = movementElements
             .Select(movement => ReadInt(movement, "MapIndex"))
@@ -70,21 +80,41 @@ public sealed class ContentRelationStore
                 ReadBool(safeZone, "StartPoint")))
             .ToArray();
 
-        var npcs = (await GetByJsonValueAsync(
-                connection,
-                importRunId,
-                ContentEntityTypes.Npc,
-                "MapIndex",
-                mapIndex,
-                cancellationToken))
-            .Select(npc => new MapNpcRelationDto(
-                npc.LocalIndex,
-                npc.ContentKey,
-                ReadString(npc.Data, "Name"),
-                ReadString(npc.Data, "FileName"),
-                ReadPoint(npc.Data, "Location"),
-                ReadInt(npc.Data, "Image"),
-                ReadBool(npc.Data, "ShowOnBigMap")))
+        var npcEntities = await GetByJsonValueAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Npc,
+            "MapIndex",
+            mapIndex,
+            cancellationToken);
+        var scriptFileNames = npcEntities
+            .Select(npc => NormalizeScriptFileName(ReadString(npc.Data, "FileName")))
+            .Where(fileName => fileName is not null)
+            .Select(fileName => fileName!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var scriptsByFileName = await GetByJsonValueListAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Script,
+            "fileNameKey",
+            scriptFileNames,
+            cancellationToken);
+        var npcs = npcEntities
+            .Select(npc =>
+            {
+                var fileName = NormalizeScriptFileName(ReadString(npc.Data, "FileName"));
+                var script = fileName is null ? null : scriptsByFileName.GetValueOrDefault(fileName);
+                return new MapNpcRelationDto(
+                    npc.LocalIndex,
+                    npc.ContentKey,
+                    ReadString(npc.Data, "Name"),
+                    ReadString(npc.Data, "FileName"),
+                    ReadPoint(npc.Data, "Location"),
+                    ReadInt(npc.Data, "Image"),
+                    ReadBool(npc.Data, "ShowOnBigMap"),
+                    ToScriptReference(script));
+            })
             .ToArray();
 
         var respawnTotal = await CountByJsonValueAsync(
@@ -141,6 +171,7 @@ public sealed class ContentRelationStore
         return new MapRelationsDto(
             importRunId,
             ToMapSummary(map),
+            ToMapAssetReference(mapAsset),
             movements,
             safeZones,
             npcs,
@@ -197,6 +228,113 @@ public sealed class ContentRelationStore
             ReadString(drop.Data, "dropPath") ?? ReadString(monster.Data, "DropPath"),
             drop.ContentKey,
             dropDtos);
+    }
+
+    public async Task<NpcScriptRelationsDto?> GetNpcScriptAsync(
+        long importRunId,
+        long npcIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        var npc = await GetByLocalIndexAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Npc,
+            npcIndex,
+            cancellationToken);
+        if (npc is null) return null;
+
+        var fileName = NormalizeScriptFileName(ReadString(npc.Data, "FileName"));
+        var script = fileName is null
+            ? null
+            : await GetByJsonValueStringAsync(
+                connection,
+                importRunId,
+                ContentEntityTypes.Script,
+                "fileNameKey",
+                fileName,
+                cancellationToken);
+        return ToNpcScriptRelations(importRunId, npc, script);
+    }
+
+    public async Task<NpcScriptValidationDto?> GetScriptValidationAsync(
+        long importRunId,
+        long scriptIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        var script = await GetByLocalIndexAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Script,
+            scriptIndex,
+            cancellationToken);
+        if (script is null) return null;
+
+        var validation = ReadValidationSummary(script.Data);
+        var issues = ReadValidationIssues(script.Data);
+        NpcScriptAst? ast = null;
+        if (script.Data.ValueKind == JsonValueKind.Object &&
+            script.Data.TryGetProperty("ast", out var astElement) &&
+            astElement.ValueKind == JsonValueKind.Object)
+        {
+            ast = JsonSerializer.Deserialize<NpcScriptAst>(
+                astElement.GetRawText(),
+                ContentJson.CompactOptions);
+        }
+
+        return new NpcScriptValidationDto(
+            validation is not null,
+            importRunId,
+            script.LocalIndex,
+            script.ContentKey,
+            ReadString(script.Data, "fileName"),
+            ReadString(script.Data, "relativePath"),
+            ReadString(script.Data, "sha256"),
+            validation ?? new NpcScriptValidationSummaryDto(false, 0, 0, null),
+            issues,
+            ast);
+    }
+
+    public async Task<RecipeRelationsDto?> GetRecipeRelationsAsync(
+        long importRunId,
+        long recipeIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        var recipe = await GetByLocalIndexAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Recipe,
+            recipeIndex,
+            cancellationToken);
+        if (recipe is null) return null;
+
+        var itemIndices = new HashSet<long>();
+        CollectRecipeItemIndicesFromEntity(recipe.Data, itemIndices);
+        var items = await GetByLocalIndicesAsync(
+            connection,
+            importRunId,
+            ContentEntityTypes.Item,
+            itemIndices.ToArray(),
+            cancellationToken);
+
+        return new RecipeRelationsDto(
+            importRunId,
+            recipe.LocalIndex,
+            recipe.ContentKey,
+            ReadString(recipe.Data, "name"),
+            ReadString(recipe.Data, "fileName"),
+            ReadRecipeItem(recipe.Data, "output", items),
+            ReadRecipeItems(recipe.Data, "ingredients", items),
+            ReadRecipeItems(recipe.Data, "tools", items),
+            ReadInt(recipe.Data, "chance") ?? 0,
+            ReadUInt(recipe.Data, "gold") ?? 0,
+            ReadInt(recipe.Data, "requiredLevel"),
+            ReadString(recipe.Data, "requiredGender"),
+            ReadStringArray(recipe.Data, "requiredClasses"),
+            ReadIntArray(recipe.Data, "requiredFlags"),
+            ReadIntArray(recipe.Data, "requiredQuests"));
     }
 
     private static async Task<ContentEntityDto?> GetByLocalIndexAsync(
@@ -290,6 +428,99 @@ public sealed class ContentRelationStore
         return entities;
     }
 
+    private static async Task<Dictionary<string, ContentEntityDto>> GetByJsonValueListAsync(
+        NpgsqlConnection connection,
+        long importRunId,
+        string entityType,
+        string field,
+        IReadOnlyCollection<string> values,
+        CancellationToken cancellationToken)
+    {
+        if (values.Count == 0)
+        {
+            return new Dictionary<string, ContentEntityDto>(StringComparer.Ordinal);
+        }
+
+        const string sql = """
+                           SELECT id, import_run_id, content_key, local_index, schema_version, data::text
+                           FROM content_entity
+                           WHERE import_run_id = @runId
+                             AND entity_type = @entityType
+                             AND data->>@field = ANY(@values)
+                           ORDER BY local_index;
+                           """;
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("entityType", entityType);
+        command.Parameters.AddWithValue("field", field);
+        command.Parameters.Add(new NpgsqlParameter("values", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = values.ToArray()
+        });
+
+        var entities = new Dictionary<string, ContentEntityDto>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var entity = ReadEntity(reader);
+            var key = ReadString(entity.Data, field);
+            if (key is not null)
+            {
+                entities[key] = entity;
+            }
+        }
+
+        return entities;
+    }
+
+    private static async Task<ContentEntityDto?> GetByJsonValueStringAsync(
+        NpgsqlConnection connection,
+        long importRunId,
+        string entityType,
+        string field,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+                           SELECT id, import_run_id, content_key, local_index, schema_version, data::text
+                           FROM content_entity
+                           WHERE import_run_id = @runId
+                             AND entity_type = @entityType
+                             AND data->>@field = @value
+                           ORDER BY local_index
+                           LIMIT 1;
+                           """;
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("entityType", entityType);
+        command.Parameters.AddWithValue("field", field);
+        command.Parameters.AddWithValue("value", value);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadEntity(reader) : null;
+    }
+
+    private static async Task<ContentEntityDto?> GetAssetByRelativePathAsync(
+        NpgsqlConnection connection,
+        long importRunId,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+                           SELECT id, import_run_id, content_key, local_index, schema_version, data::text
+                           FROM content_entity
+                           WHERE import_run_id = @runId
+                             AND entity_type = 'asset'
+                             AND lower(data->>'relativePath') = lower(@relativePath)
+                           ORDER BY local_index
+                           LIMIT 1;
+                           """;
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("relativePath", relativePath);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadEntity(reader) : null;
+    }
+
     private static async Task<long> CountByJsonValueAsync(
         NpgsqlConnection connection,
         long importRunId,
@@ -355,6 +586,89 @@ public sealed class ContentRelationStore
         return ReadArray(data, "drops")
             .Select(drop => ReadDrop(drop, items))
             .ToArray();
+    }
+
+    private static RecipeItemReferenceDto? ReadRecipeItem(
+        JsonElement data,
+        string propertyName,
+        IReadOnlyDictionary<long, ContentEntityDto> items)
+    {
+        if (data.ValueKind != JsonValueKind.Object ||
+            !data.TryGetProperty(propertyName, out var item) ||
+            item.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return ReadRecipeItemValue(item, items);
+    }
+
+    private static IReadOnlyList<RecipeItemReferenceDto> ReadRecipeItems(
+        JsonElement data,
+        string propertyName,
+        IReadOnlyDictionary<long, ContentEntityDto> items)
+    {
+        return ReadArray(data, propertyName)
+            .Select(item => ReadRecipeItemValue(item, items))
+            .Where(item => item is not null)
+            .Cast<RecipeItemReferenceDto>()
+            .ToArray();
+    }
+
+    private static RecipeItemReferenceDto? ReadRecipeItemValue(
+        JsonElement item,
+        IReadOnlyDictionary<long, ContentEntityDto> items)
+    {
+        var itemIndex = ReadInt(item, "itemIndex");
+        if (itemIndex is null) return null;
+
+        items.TryGetValue(itemIndex.Value, out var itemEntity);
+        return new RecipeItemReferenceDto(
+            itemEntity?.LocalIndex,
+            itemEntity?.ContentKey,
+            itemIndex.Value,
+            itemEntity is null ? ReadString(item, "itemName") : ReadString(itemEntity.Data, "Name"),
+            ReadInt(item, "count") ?? 0,
+            ReadInt(item, "currentDura") ?? 0,
+            ReadInt(item, "maxDura") ?? 0);
+    }
+
+    private static void CollectRecipeItemIndicesFromEntity(JsonElement data, ISet<long> indices)
+    {
+        foreach (var propertyName in new[] { "output", "ingredients", "tools" })
+        {
+            if (propertyName == "output")
+            {
+                CollectRecipeItemIndex(data, propertyName, indices);
+                continue;
+            }
+
+            foreach (var item in ReadArray(data, propertyName))
+            {
+                CollectRecipeItemIndex(item, indices);
+            }
+        }
+    }
+
+    private static void CollectRecipeItemIndex(JsonElement item, ISet<long> indices)
+    {
+        var itemIndex = ReadInt(item, "itemIndex");
+        if (itemIndex is not null) indices.Add(itemIndex.Value);
+    }
+
+    private static void CollectRecipeItemIndex(
+        JsonElement data,
+        string propertyName,
+        ISet<long> indices)
+    {
+        if (data.ValueKind != JsonValueKind.Object ||
+            !data.TryGetProperty(propertyName, out var item) ||
+            item.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        CollectRecipeItemIndex(item, indices);
     }
 
     private static DropRelationDto ReadDrop(
@@ -428,6 +742,125 @@ public sealed class ContentRelationStore
         }
     }
 
+    private static string? NormalizeScriptFileName(string? fileName)
+    {
+        return fileName?.Trim().Replace('\\', '/').Trim('/').ToLowerInvariant();
+    }
+
+    private static MapNpcScriptReferenceDto? ToScriptReference(ContentEntityDto? script)
+    {
+        return script is null
+            ? null
+            : new MapNpcScriptReferenceDto(
+                script.LocalIndex,
+                script.ContentKey,
+                ReadString(script.Data, "fileName"),
+                ReadString(script.Data, "relativePath"),
+                ReadInt(script.Data, "lineCount"),
+                ReadArray(script.Data, "pages").Length);
+    }
+
+    private static NpcScriptRelationsDto ToNpcScriptRelations(
+        long importRunId,
+        ContentEntityDto npc,
+        ContentEntityDto? script)
+    {
+        return new NpcScriptRelationsDto(
+            importRunId,
+            npc.LocalIndex,
+            npc.ContentKey,
+            ReadString(npc.Data, "Name"),
+            ReadString(npc.Data, "FileName"),
+            script is not null,
+            script?.LocalIndex,
+            script?.ContentKey,
+            script is null ? null : ReadString(script.Data, "relativePath"),
+            script is null ? null : ReadString(script.Data, "language"),
+            script is null ? null : ReadString(script.Data, "sha256"),
+            script is null ? null : ReadInt(script.Data, "sizeBytes"),
+            script is null ? null : ReadInt(script.Data, "lineCount"),
+            script is null ? [] : ReadStringArray(script.Data, "pages"),
+            script is null
+                ? []
+                : ReadArray(script.Data, "includes")
+                    .Select(include => new NpcScriptIncludeDto(
+                        ReadString(include, "path") ?? string.Empty,
+                        ReadString(include, "page") ?? string.Empty))
+                    .ToArray(),
+            script is null ? [] : ReadStringArray(script.Data, "inserts"),
+            script is null ? [] : ReadStringArray(script.Data, "calls"),
+            script is null ? null : ReadValidationSummary(script.Data),
+            script is null ? null : ReadString(script.Data, "source"));
+    }
+
+    private static NpcScriptValidationSummaryDto? ReadValidationSummary(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object ||
+            !data.TryGetProperty("validation", out var validation) ||
+            validation.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new NpcScriptValidationSummaryDto(
+            ReadBool(validation, "valid"),
+            ReadInt(validation, "errorCount") ?? 0,
+            ReadInt(validation, "warningCount") ?? 0,
+            ReadString(validation, "compiledSha256"));
+    }
+
+    private static IReadOnlyList<NpcScriptValidationIssueDto> ReadValidationIssues(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object ||
+            !data.TryGetProperty("validation", out var validation) ||
+            validation.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return ReadArray(validation, "issues")
+            .Select(issue => new NpcScriptValidationIssueDto(
+                ReadString(issue, "code") ?? "unknown",
+                ReadString(issue, "severity") ?? "error",
+                ReadString(issue, "message") ?? string.Empty,
+                ReadInt(issue, "line"),
+                ReadString(issue, "page")))
+            .ToArray();
+    }
+
+    private static MapAssetReferenceDto? ToMapAssetReference(ContentEntityDto? asset)
+    {
+        if (asset is null) return null;
+
+        MapAssetMetadata? map = null;
+        if (asset.Data.ValueKind == JsonValueKind.Object &&
+            asset.Data.TryGetProperty("map", out var mapElement) &&
+            mapElement.ValueKind == JsonValueKind.Object)
+        {
+            map = JsonSerializer.Deserialize<MapAssetMetadata>(
+                mapElement.GetRawText(),
+                ContentJson.CompactOptions);
+        }
+
+        return new MapAssetReferenceDto(
+            asset.LocalIndex,
+            asset.ContentKey,
+            ReadString(asset.Data, "relativePath"),
+            ReadLong(asset.Data, "sizeBytes") ?? 0,
+            ReadString(asset.Data, "sha256"),
+            map);
+    }
+
+    private static string? BuildMapAssetPath(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        var normalized = fileName.Trim().Replace('\\', '/').Trim('/');
+        if (normalized.Contains("..", StringComparison.Ordinal)) return null;
+        return normalized.EndsWith(".map", StringComparison.OrdinalIgnoreCase)
+            ? $"Maps/{normalized}"
+            : $"Maps/{normalized}.map";
+    }
+
     private static MapSummaryDto ToMapSummary(ContentEntityDto map)
     {
         return new MapSummaryDto(
@@ -448,6 +881,25 @@ public sealed class ContentRelationStore
         }
 
         return value.EnumerateArray().ToArray();
+    }
+
+    private static IReadOnlyList<int> ReadIntArray(JsonElement element, string propertyName)
+    {
+        return ReadArray(element, propertyName)
+            .Select(value => value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+                ? number
+                : (int?)null)
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadStringArray(JsonElement element, string propertyName)
+    {
+        return ReadArray(element, propertyName)
+            .Where(value => value.ValueKind == JsonValueKind.String)
+            .Select(value => value.GetString()!)
+            .ToArray();
     }
 
     private static PointDto? ReadPoint(JsonElement element, string propertyName)

@@ -1,6 +1,6 @@
 # 数据库清单
 
-> 最后更新：2026-11-09
+> 最后更新：2026-11-11
 > 状态：生成结果
 
 ## 1. 检查工具
@@ -25,7 +25,7 @@
 
 - `NightWolf` 头部版本 34，低于当前 `Envir.MinVersion=60`，不能由当前引擎加载。
 - 数量为加载后的列表计数，不等同于最大索引；检查器同时输出 `indices`。
-- 配方、Buff、GT 地图在部分旧库中为 0，可能是版本未包含或没有数据，不代表引擎不支持。
+- 配方、Buff、NPC 脚本、资源元数据和 GT 地图不由 `Server.MirDB` 保存；上表只统计旧二进制库内的核心实体。
 
 ## 3. 黄金样本
 
@@ -50,9 +50,11 @@ SHA256: 37358b0d95eafe458b060c1db2ebc0524757fe524fb93125ccb98d9b4a8ef78b
 ./scripts/import-db.sh tests/fixtures/golden/Server.MirDB artifacts/content/golden
 ```
 
-黄金样本导入 9,734 个实体：物品 1,628、怪物 555、地图 463、NPC 375、任务 154、技能 111、
-商城 105、攻城 1、龙 1、刷怪点 6,341。`contentHash` 为
-`7e7a6dd14c091b63eed9bb271ae5bbb6ec080d081669048beeefb6c46a373825`。
+黄金样本导入 9,793 个实体：物品 1,628、怪物 555、地图 463、NPC 375、任务 154、技能 111、
+商城 105、攻城 1、龙 1、刷怪点 6,341、Buff 59。`contentHash` 为
+`1c6b6134ebc293e67e22710e8d45130d5e900ff2b5f3b5f07012835ee3e49e1c`。使用测试内容根额外导入
+1 个掉落、1 个配方、1 个 NPC 脚本和 1 个资源元数据后，批次合计 9,797 个实体，`contentHash` 为
+`1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291`。
 
 映射规则和限制见 `content-import.md`。
 

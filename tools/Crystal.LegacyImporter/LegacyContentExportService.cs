@@ -32,12 +32,15 @@ public static class LegacyContentExportService
         {
             using var reloaded = LegacyDatabaseSession.Open(output.Path);
             var reloadedMapped = LegacyContentMapper.Map(reloaded.Envir, reloaded);
-            reloadedIdentity = LegacyBinaryExporter.Capture(reloaded.Envir, reloadedMapped.Entities);
+            var reloadedDatabaseEntities = reloadedMapped.Entities
+                .Where(entity => IsLegacyDatabaseEntity(entity.EntityType))
+                .ToArray();
+            reloadedIdentity = LegacyBinaryExporter.Capture(reloaded.Envir, reloadedDatabaseEntities);
             if (!identity.SemanticallyEquals(reloadedIdentity))
             {
                 var entityDifference = LegacyBinaryExporter.FindFirstEntityDifference(
                     databaseEntities,
-                    reloadedMapped.Entities);
+                    reloadedDatabaseEntities);
                 throw new InvalidDataException(
                     $"Exported database failed semantic reload validation: source={identity.SemanticHash}, " +
                     $"reloaded={reloadedIdentity.SemanticHash}, " +

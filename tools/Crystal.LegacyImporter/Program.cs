@@ -255,7 +255,8 @@ internal sealed class ImportOptions
           --out <dir>          Snapshot output directory (default: artifacts/content/<UTC timestamp>)
           --release <version>  Content release version (default: UTC timestamp)
           --source <text>      Override manifest source label
-          --content-root <dir> Import Envir/Drops from a legacy content root
+          --content-root <dir> Import Envir/Drops, Envir/Recipe, Envir/NPCs script metadata,
+                               and Maps/Envir/Previews asset metadata from a content root
           --dsn <connection>   PostgreSQL connection string or postgres:// URI
           --schema <path>      Apply one migration SQL instead of db/migrations/*.sql
           --export <path>      Export a legacy database instead of writing a snapshot

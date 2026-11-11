@@ -6,6 +6,8 @@
 
 本文件列出 `Server.Settings` 的公开静态字段和常量。部分字段由 `Configs/Setup.ini` 加载；精确的 section/key 映射后续由配置 schema 生成。
 
+## 1. Server.Settings
+
 | 类型 | 名称 | 当前值/默认值 |
 | --- | --- | --- |
 | `Boolean` | `AllowChangePassword` | true |
@@ -272,3 +274,25 @@
 | `string` | `Zuma5` | "ZumaArcher3" |
 | `string` | `Zuma6` | "ZumaStatue3" |
 | `string` | `Zuma7` | "ZumaGuardian3" |
+
+## 2. Crystal.Control.Api
+
+Control API 使用 ASP.NET Core 配置或环境变量。连接串优先读取 `ConnectionStrings:Crystal`，其次
+`ControlApi:DatabaseConnectionString`、`CRYSTAL_DB_CONNECTION`、`CRYSTAL_DATABASE_URL`。
+
+| 配置键 | 环境变量 | 默认值/约束 | 说明 |
+| --- | --- | --- | --- |
+| `ControlApi:DatabaseConnectionString` | `CRYSTAL_DB_CONNECTION` / `CRYSTAL_DATABASE_URL` | 必填 | PostgreSQL 连接串 |
+| `ControlApi:ApiKey` | `CRYSTAL_CONTROL_API_KEY` | 可选 | 机器到机器 API key |
+| `ControlApi:JwtSigningKey` | `CRYSTAL_CONTROL_JWT_SIGNING_KEY` | 至少 32 字节；Production 必填 | JWT 签名密钥 |
+| `ControlApi:JwtIssuer` | - | `crystal-control-api` | JWT issuer |
+| `ControlApi:JwtAudience` | - | `crystal-control` | JWT audience |
+| `ControlApi:AccessTokenMinutes` | - | 15，范围 1～60 | 访问令牌有效期 |
+| `ControlApi:RefreshTokenDays` | - | 30，范围 1～90 | 刷新令牌有效期 |
+| `ControlApi:ApiRateLimitPermitLimit` | - | 240，范围 1～100000 | 普通 API 每 IP 每分钟上限 |
+| `ControlApi:AuthRateLimitPermitLimit` | - | 10，范围 1～100000 | 登录/刷新每 IP 每分钟上限 |
+| `ControlApi:BootstrapAdminUsername` | `CRYSTAL_CONTROL_BOOTSTRAP_USERNAME` | `admin` | 空库首次创建的管理员用户名 |
+| `ControlApi:BootstrapAdminDisplayName` | `CRYSTAL_CONTROL_BOOTSTRAP_DISPLAY_NAME` | `Platform Administrator` | 管理员显示名 |
+| `ControlApi:BootstrapAdminPassword` | `CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD` | 可选 | 空库首次创建管理员的密码 |
+| `ControlApi:CorsOrigins` | `CRYSTAL_CONTROL_CORS_ORIGINS` | 逗号分隔 | 允许的 Web 来源 |
+| `ControlApi:AssetRoot` | `CRYSTAL_CONTROL_ASSET_ROOT` | 可选 | 地图/预览资源文件根目录；用于 `asset` 下载与完整性校验 |

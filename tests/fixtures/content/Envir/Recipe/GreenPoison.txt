@@ -1,0 +1,18 @@
+; Minimal recipe fixture for the golden database. Source: Crystal.Database/Jev under Unlicense.
+[Recipe]
+Amount 2
+Chance 75
+Gold 123
+
+[Tools]
+GreenPoison
+
+[Ingredients]
+GreenPoison 3
+
+[Criteria]
+Level 22
+Class Taoist
+Gender Female
+Flag 1
+Quest 2

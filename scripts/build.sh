@@ -36,5 +36,6 @@ echo "== Tools =="
 "$DOTNET" build tools/Crystal.DbInspector/Crystal.DbInspector.csproj -c "$CONFIGURATION" --nologo
 "$DOTNET" build tools/Crystal.FieldInventory/Crystal.FieldInventory.csproj -c "$CONFIGURATION" --nologo
 "$DOTNET" build tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj -c "$CONFIGURATION" --nologo
+"$DOTNET" build tools/Crystal.ContentTool/Crystal.ContentTool.csproj -c "$CONFIGURATION" --nologo
 
 echo "Build completed."

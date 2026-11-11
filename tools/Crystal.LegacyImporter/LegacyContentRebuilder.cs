@@ -288,9 +288,8 @@ public static class LegacyContentRebuilder
             ContentEntityTypes.GameShop => typeof(GameShopItem),
             ContentEntityTypes.Conquest => typeof(ConquestInfo),
             ContentEntityTypes.Dragon => typeof(DragonInfo),
-            ContentEntityTypes.Respawn or ContentEntityTypes.Drop => null,
-            ContentEntityTypes.Recipe or ContentEntityTypes.Buff or ContentEntityTypes.Script or ContentEntityTypes.Asset => throw new InvalidDataException(
-                $"Entity type '{entityType}' is outside Server.MirDB and cannot be included in a legacy rebuild."),
+            ContentEntityTypes.Respawn or ContentEntityTypes.Drop or ContentEntityTypes.Recipe or
+            ContentEntityTypes.Buff or ContentEntityTypes.Script or ContentEntityTypes.Asset => null,
             _ => throw new InvalidDataException($"Unsupported legacy entity type '{entityType}'.")
         };
     }

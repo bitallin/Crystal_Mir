@@ -63,7 +63,7 @@
     };
   }
 
-  const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop"]);
+  const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop", "recipe", "buff", "script", "asset"]);
 
   const ROUTE_PERMISSIONS = Object.freeze({
     "content-overview": "content:read",
@@ -514,7 +514,7 @@
         ${pageHeader({ title: "后台原型地图", description: "完整信息架构、页面清单和关键业务闭环。每一项都可以直接打开对应高保真页面。", eyebrow: "INFORMATION ARCHITECTURE", actions: `${linkBtn("打开登录页", "login", "login")}${btn("查看设计说明", "book", "btn-primary", 'data-action="open-modal" data-modal="prototype-notes"')}` })}
         <section class="grid grid-4">
           ${kpi({ label: "一级功能域", value: "6", icon: "layers", tone: "blue", meta: "总览 / 内容 / 区服 / 玩家 / 安全 / 平台" })}
-          ${kpi({ label: "可点击页面", value: String(PAGE_INDEX.length), icon: "monitor", tone: "green", meta: "含 13 类内容域与登录页" })}
+          ${kpi({ label: "可点击页面", value: String(PAGE_INDEX.length), icon: "monitor", tone: "green", meta: "含 14 个内容域与登录页" })}
           ${kpi({ label: "关键业务闭环", value: "7", icon: "flow", tone: "violet", meta: "编辑、发布、开区、GM、支付、审计、世界关系" })}
           ${kpi({ label: "高风险确认点", value: "9", icon: "shield", tone: "gold", meta: "发布、回滚、合区、补偿、退款" })}
         </section>
@@ -583,7 +583,7 @@
     const total = hasRun ? run.entityCount : C.reduce((sum, type) => sum + type.total, 0);
     const drafts = C.reduce((sum, type) => sum + type.draft, 0);
     const issues = C.reduce((sum, type) => sum + type.issues, 0);
-    const mirrored = LIVE_ENTITY_TYPES.size;
+    const mirrored = C.filter(type => LIVE_ENTITY_TYPES.has(type.entity)).length;
     const pendingDomains = Math.max(0, C.length - mirrored);
     const totalValue = live ? (hasRun ? formatNumber(total) : "—") : total.toLocaleString();
     const totalMeta = live ? (hasRun ? `批次 #${run.id} · ${formatDateTime(run.startedAt)}` : "正在读取导入批次") : "黄金样本与新增模型";
@@ -595,7 +595,7 @@
         ${pageHeader({ title: "内容总览", description: "以“运行时内容”为中心组织内容域。现有 MirDB 导入内容与新增业务模型在同一套校验、发布和引用体系下管理。", eyebrow: "CONTENT COMMAND", actions: `${btn("导出内容清单", "download", "btn-secondary", 'data-action="toast" data-message="内容清单导出任务已创建"')}${btn("导入 MirDB", "upload", "btn-primary", 'data-action="open-modal" data-modal="import"')}` })}
         <section class="grid grid-4">
           ${kpi({ label: "内容实体总量", value: totalValue, icon: "package", tone: "blue", meta: totalMeta })}
-          ${kpi({ label: "内容域", value: String(C.length), icon: "layers", tone: "green", meta: `${mirrored} 类来自 MirDB / ${pendingDomains} 类待建` })}
+          ${kpi({ label: "内容域", value: String(C.length), icon: "layers", tone: "green", meta: `${mirrored} 类来自只读批次 / ${pendingDomains} 类待建` })}
           ${kpi({ label: "草稿与待发布", value: live ? "—" : String(drafts), icon: "edit", tone: "gold", meta: live ? "内容写入 API 待接" : "需要版本作者继续处理" })}
           ${kpi({ label: "校验问题", value: live ? "—" : String(issues), icon: "alert", tone: "red", trend: live ? undefined : { text: "2 阻断", cls: "down" }, meta: live ? "校验结果 API 待接" : "发布前必须清零" })}
         </section>
@@ -612,7 +612,7 @@
         </section>
         <section class="grid grid-3 mt-16">
           <article class="card span-2">
-            <div class="card-head"><div><h2 class="card-title">内容域全景</h2><p class="card-subtitle">点击进入对应内容库；MirDB 域显示当前批次，其余域标注原型样本</p></div><span class="status ${live ? "info" : "info"}">${batchLabel}</span></div>
+            <div class="card-head"><div><h2 class="card-title">内容域全景</h2><p class="card-subtitle">点击进入对应内容库；批次域显示当前批次，其余域标注原型样本</p></div><span class="status ${live ? "info" : "info"}">${batchLabel}</span></div>
             <div class="card-body">
               <div class="content-domain-grid">
                 ${C.map(type => {
@@ -640,7 +640,7 @@
             <article class="card">
               <div class="card-head"><div><h2 class="card-title">数据来源缺口</h2><p class="card-subtitle">当前迁移边界</p></div></div>
               <div class="card-body alert-list">
-                <div class="alert-item warning"><span class="alert-mark" style="color:var(--orange);background:var(--orange-soft)">${I("warning", 13)}</span><div class="alert-copy"><strong>掉落、配方、NPC 脚本</strong><span>不在标准 MirDB 中，需要外部文本和脚本管线。</span></div></div>
+                <div class="alert-item warning"><span class="alert-mark" style="color:var(--orange);background:var(--orange-soft)">${I("warning", 13)}</span><div class="alert-copy"><strong>脚本与资源管线</strong><span>NPC 脚本 AST/校验、资源下载服务和地图尺寸/阻挡统计已接入；图库、音效与客户端补丁资源待扩展。</span></div></div>
                 <div class="alert-item warning"><span class="alert-mark" style="color:var(--orange);background:var(--orange-soft)">${I("warning", 13)}</span><div class="alert-copy"><strong>图库素材授权</strong><span>Items / Monsters / Objects 来源待确认。</span></div></div>
               </div>
             </article>
@@ -1160,9 +1160,83 @@
         ["旧索引", entity.localIndex], ["怪物索引", data.monsterIndex], ["怪物", data.monsterName],
         ["掉落路径", data.dropPath], ["文件", data.fileName], ["条目", dropCount], ["内容键", entity.contentKey]
       ]);
+    } else if (type.entity === "recipe") {
+      const output = data.output || {};
+      const ingredients = Array.isArray(data.ingredients) ? data.ingredients : [];
+      const tools = Array.isArray(data.tools) ? data.tools : [];
+      row.name = textValue(data.name, entity.contentKey);
+      row.subtitle = textValue(data.fileName, "外部配方文本");
+      row.category = `产出 ${textValue(output.itemName, output.itemIndex)}`;
+      row.level = ingredients.length;
+      row.metric = `${textValue(output.itemName, "—")} × ${textValue(output.count, "1")}`;
+      row.icon = "hammer";
+      row.tags = ["配方", "文件内容"];
+      row.attributes = attributesOf([
+        ["旧索引", entity.localIndex], ["文件", data.fileName],
+        ["产出", `${textValue(output.itemName, "—")} × ${textValue(output.count, "—")}`],
+        ["材料", ingredients.length], ["工具", tools.length],
+        ["成功率", data.chance === undefined ? null : `${data.chance}%`],
+        ["金币", data.gold === undefined ? null : formatNumber(data.gold)], ["内容键", entity.contentKey]
+      ]);
+    } else if (type.entity === "script") {
+      const pages = Array.isArray(data.pages) ? data.pages : [];
+      const includes = Array.isArray(data.includes) ? data.includes : [];
+      row.name = textValue(data.fileName, entity.contentKey);
+      row.subtitle = textValue(data.relativePath, entity.contentKey);
+      row.category = textValue(data.language, "CrystalNpc");
+      row.level = textValue(data.lineCount);
+      row.metric = `${pages.length} 个页面`;
+      row.icon = "code";
+      row.tags = ["脚本", "文件内容"];
+      const validation = data.validation || {};
+      row.attributes = attributesOf([
+        ["本地索引", entity.localIndex], ["文件", data.relativePath], ["语言", data.language],
+        ["行数", data.lineCount], ["字节", data.sizeBytes], ["页面", pages.join(" / ")],
+        ["包含", includes.length], ["调用", arrayCount(data.calls)],
+        ["校验", validation.valid ? "通过" : `${validation.errorCount || 0} 个错误`],
+        ["AST SHA256", validation.compiledSha256],
+        ["SHA256", data.sha256], ["内容键", entity.contentKey]
+      ]);
+    } else if (type.entity === "asset") {
+      const map = data.map || null;
+      row.name = textValue(data.relativePath || data.fileName, entity.contentKey);
+      row.subtitle = textValue(data.assetType, "资源文件");
+      row.category = textValue(data.assetType);
+      row.level = map ? `${map.width} × ${map.height}` : "—";
+      row.metric = data.sizeBytes === undefined ? "—" : formatBytes(data.sizeBytes);
+      row.icon = data.assetType === "map" ? "map" : "image";
+      row.tags = [textValue(data.assetType), map?.valid ? "地图已解析" : "资源元数据"];
+      row.attributes = attributesOf([
+        ["本地索引", entity.localIndex], ["类型", data.assetType], ["文件", data.relativePath],
+        ["大小", data.sizeBytes === undefined ? null : formatBytes(data.sizeBytes)],
+        ["地图格式", map?.formatName], ["尺寸", map ? `${map.width} × ${map.height}` : null],
+        ["格子", map?.cellCount], ["可走", map?.walkableCells], ["阻挡", map?.blockedCells],
+        ["门", map?.doorCells], ["SHA256", data.sha256], ["内容键", entity.contentKey]
+      ]);
+    } else if (type.entity === "buff") {
+      row.name = textValue(data.Name || data.Type, entity.contentKey);
+      row.subtitle = [data.Properties, data.StackType].filter(Boolean).join(" · ");
+      row.category = textValue(data.StackType);
+      row.level = textValue(data.Icon);
+      row.metric = data.Visible ? "可见" : "隐藏";
+      row.icon = "sparkles";
+      row.tags = ["Buff", "运行时"];
+      row.attributes = attributesOf([
+        ["本地索引", entity.localIndex], ["类型", data.Type], ["叠加", data.StackType],
+        ["属性", data.Properties], ["图标", data.Icon], ["可见", data.Visible ? "是" : "否"],
+        ["内容键", entity.contentKey]
+      ]);
     }
 
     return row;
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   function contentView(type) {
@@ -1451,7 +1525,7 @@
         </div>
       </section>
       ${map ? `<section class="grid grid-2 mt-16" id="live-relation-data">
-        <article class="card"><div class="card-head"><div><h2 class="card-title">入口、出口与 NPC</h2><p class="card-subtitle">按地图本地索引关联 MovementInfo 和 NPCInfo.MapIndex</p></div><span class="tag blue">${movements.length} 传送 · ${npcs.length} NPC</span></div><div class="table-wrap"><table><thead><tr><th>目标地图</th><th>源坐标</th><th>目标坐标</th><th>规则</th></tr></thead><tbody>${movements.map(move => `<tr><td><span class="cell-main">${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</span><div class="cell-sub mono">${esc(move.targetMap?.contentKey || `map.${move.targetMapIndex}`)}</div></td><td class="mono">${esc(pointText(move.source))}</td><td class="mono">${esc(pointText(move.destination))}</td><td>${move.needHole ? `<span class="tag">洞口</span>` : ""}${move.needMove ? `<span class="tag">踩点</span>` : ""}${move.showOnBigMap ? `<span class="tag">大地图</span>` : ""}${!move.needHole && !move.needMove && !move.showOnBigMap ? "—" : ""}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有传送关系。</div></td></tr>`}</tbody></table></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>NPC</th><th>脚本</th><th>坐标</th><th>图像</th></tr></thead><tbody>${npcs.map(npc => `<tr><td><button class="row-link" data-action="open-content" data-type="npcs" data-key="${esc(npc.contentKey)}">${esc(npc.name || npc.contentKey)}</button><div class="cell-sub mono">${esc(npc.contentKey)}</div></td><td class="mono">${esc(npc.fileName || "—")}</td><td class="mono">${esc(pointText(npc.location))}</td><td>${esc(npc.image ?? "—")}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有 NPC 实体。</div></td></tr>`}</tbody></table></div></div></article>
+        <article class="card"><div class="card-head"><div><h2 class="card-title">入口、出口与 NPC</h2><p class="card-subtitle">按地图本地索引关联 MovementInfo 和 NPCInfo.MapIndex</p></div><span class="tag blue">${movements.length} 传送 · ${npcs.length} NPC</span></div><div class="table-wrap"><table><thead><tr><th>目标地图</th><th>源坐标</th><th>目标坐标</th><th>规则</th></tr></thead><tbody>${movements.map(move => `<tr><td><span class="cell-main">${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</span><div class="cell-sub mono">${esc(move.targetMap?.contentKey || `map.${move.targetMapIndex}`)}</div></td><td class="mono">${esc(pointText(move.source))}</td><td class="mono">${esc(pointText(move.destination))}</td><td>${move.needHole ? `<span class="tag">洞口</span>` : ""}${move.needMove ? `<span class="tag">踩点</span>` : ""}${move.showOnBigMap ? `<span class="tag">大地图</span>` : ""}${!move.needHole && !move.needMove && !move.showOnBigMap ? "—" : ""}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有传送关系。</div></td></tr>`}</tbody></table></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>NPC</th><th>脚本</th><th>坐标</th><th>图像</th></tr></thead><tbody>${npcs.map(npc => `<tr><td><button class="row-link" data-action="open-content" data-type="npcs" data-key="${esc(npc.contentKey)}">${esc(npc.name || npc.contentKey)}</button><div class="cell-sub mono">${esc(npc.contentKey)}</div></td><td>${npc.script ? `<button class="row-link mono" data-action="open-content" data-type="npc-scripts" data-key="${esc(npc.script.contentKey)}">${esc(npc.script.contentKey)}</button><div class="cell-sub mono">${esc(npc.fileName || "—")} · ${esc(npc.script.lineCount ?? "—")} 行</div>` : `<span class="warning-text">脚本未导入</span><div class="cell-sub mono">${esc(npc.fileName || "—")}</div>`}</td><td class="mono">${esc(pointText(npc.location))}</td><td>${esc(npc.image ?? "—")}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-inline">该地图没有 NPC 实体。</div></td></tr>`}</tbody></table></div></div></article>
         <article class="card"><div class="card-head"><div><h2 class="card-title">刷新点与掉落</h2><p class="card-subtitle">刷新点按 mapIndex 分页；怪物掉落按 monster localIndex 单独查询</p></div><span class="tag gold">${formatNumber(total)} 个刷新点</span></div><div class="table-wrap"><table><thead><tr><th>怪物</th><th>坐标</th><th>数量 / 半径</th><th>刷新</th><th>掉落</th></tr></thead><tbody>${respawnRows.map(respawn => `<tr><td><span class="cell-main">${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</span><div class="cell-sub mono">${esc(respawn.monsterContentKey || `monster.${respawn.monsterIndex}`)}</div></td><td class="mono">${esc(pointText(respawn.location))}</td><td>${esc(respawn.count)} 只<div class="cell-sub">半径 ${esc(respawn.spread)}</div></td><td>${esc(respawn.delay)} 分钟<div class="cell-sub">±${esc(respawn.randomDelay)}</div></td><td><button class="row-link" data-action="open-live-drops" data-index="${esc(respawn.monsterIndex)}" data-name="${esc(respawn.monsterName || "")}">查看掉落</button></td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-inline">该地图没有刷新点。</div></td></tr>`}</tbody></table></div><div class="card-foot"><span class="muted">第 ${page} / ${pages} 页</span><div class="page-buttons"><button class="page-btn" data-action="live-respawn-page" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>${I("chevronLeft", 11)}</button><button class="page-btn" data-action="live-respawn-page" data-page="${page + 1}" ${page >= pages ? "disabled" : ""}>${I("chevronRight", 11)}</button></div></div></article>
       </section>` : ""}`;
   }
@@ -1627,6 +1701,51 @@
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast(`已导出当前查询结果，共 ${rows.length} 条。`);
+  }
+
+  function saveBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName || "download";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function sha256Hex(blob) {
+    if (!globalThis.crypto?.subtle) return null;
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function downloadAssetFromDrawer(actionEl) {
+    const localIndex = Number(actionEl.dataset.index);
+    if (!Number.isFinite(localIndex)) {
+      showToast("资源索引无效，无法下载。", "danger");
+      return;
+    }
+    actionEl.disabled = true;
+    try {
+      const result = await API.downloadAsset(localIndex, state.live.run?.id);
+      const expectedSha256 = String(actionEl.dataset.sha256 || "").toLowerCase();
+      const actualSha256 = expectedSha256 ? await sha256Hex(result.blob) : null;
+      if (expectedSha256 && actualSha256 && actualSha256 !== expectedSha256) {
+        showToast(`资源哈希校验失败：期望 ${expectedSha256.slice(0, 12)}…，实际 ${actualSha256.slice(0, 12)}…。`, "danger");
+        return;
+      }
+      saveBlob(result.blob, actionEl.dataset.fileName || result.fileName);
+      showToast(expectedSha256 && actualSha256 ? "资源已下载，SHA256 校验通过。" : "资源已下载。");
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      showToast(`资源下载失败：${error?.message || "Control API 请求失败"}`, "danger");
+    } finally {
+      actionEl.disabled = false;
+    }
   }
 
   function auditRows() {
@@ -2889,7 +3008,8 @@
         const movements = payload.movements || [];
         const npcs = payload.npcs || [];
         const respawns = payload.respawns?.items || [];
-        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实世界关系</span><span class="tag gold">批次 #${esc(runId ?? "—")}</span></div><div class="data-list"><div class="data-row"><span>内容键 / 本地索引</span><strong class="mono">${esc(payload.map.contentKey)} · ${esc(payload.map.localIndex)}</strong></div><div class="data-row"><span>传送 / 安全区 / NPC</span><strong>${movements.length} / ${(payload.safeZones || []).length} / ${npcs.length}</strong></div><div class="data-row"><span>刷新点</span><strong>${formatNumber(payload.respawns?.total || 0)} 个</strong></div></div><div class="divider"></div><div class="relation-mini-list">${movements.slice(0, 3).map(move => `<div class="relation-mini"><span class="relation-mini-icon">${I("teleport", 13)}</span><span><strong>${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</strong><small>${esc(pointText(move.source))} → ${esc(pointText(move.destination))}</small></span></div>`).join("")}${npcs.slice(0, 2).map(npc => `<div class="relation-mini"><span class="relation-mini-icon">${I("message", 13)}</span><span><strong>${esc(npc.name || npc.contentKey)}</strong><small>${esc(npc.fileName || "无脚本")} · ${esc(pointText(npc.location))}</small></span></div>`).join("")}${respawns.slice(0, 2).map(respawn => `<div class="relation-mini"><span class="relation-mini-icon">${I("spawn", 13)}</span><span><strong>${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</strong><small>${esc(pointText(respawn.location))} · ${esc(respawn.count)} 只 · ${esc(respawn.delay)} 分钟</small></span></div>`).join("")}</div></div>`;
+        const mapAsset = payload.asset?.map;
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实世界关系</span><span class="tag gold">批次 #${esc(runId ?? "—")}</span></div><div class="data-list"><div class="data-row"><span>内容键 / 本地索引</span><strong class="mono">${esc(payload.map.contentKey)} · ${esc(payload.map.localIndex)}</strong></div><div class="data-row"><span>地图资源</span><strong class="mono">${esc(payload.asset?.relativePath || "未导入")}</strong></div><div class="data-row"><span>尺寸 / 阻挡 / 门</span><strong>${mapAsset?.valid ? `${esc(mapAsset.width)} × ${esc(mapAsset.height)} · ${esc(mapAsset.blockedCells)} · ${esc(mapAsset.doorCells)}` : "未解析"}</strong></div><div class="data-row"><span>传送 / 安全区 / NPC</span><strong>${movements.length} / ${(payload.safeZones || []).length} / ${npcs.length}</strong></div><div class="data-row"><span>刷新点</span><strong>${formatNumber(payload.respawns?.total || 0)} 个</strong></div></div><div class="divider"></div><div class="relation-mini-list">${movements.slice(0, 3).map(move => `<div class="relation-mini"><span class="relation-mini-icon">${I("teleport", 13)}</span><span><strong>${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</strong><small>${esc(pointText(move.source))} → ${esc(pointText(move.destination))}</small></span></div>`).join("")}${npcs.slice(0, 2).map(npc => `<div class="relation-mini"><span class="relation-mini-icon">${I("message", 13)}</span><span><strong>${esc(npc.name || npc.contentKey)}</strong><small>${esc(npc.script?.contentKey || "脚本未导入")} · ${esc(pointText(npc.location))}</small></span></div>`).join("")}${respawns.slice(0, 2).map(respawn => `<div class="relation-mini"><span class="relation-mini-icon">${I("spawn", 13)}</span><span><strong>${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</strong><small>${esc(pointText(respawn.location))} · ${esc(respawn.count)} 只 · ${esc(respawn.delay)} 分钟</small></span></div>`).join("")}</div></div>`;
         return;
       }
 
@@ -2899,6 +3019,36 @@
         liveRelations().drops[key] = payload;
         if (!document.getElementById("live-drawer-relations")) return;
         host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>真实掉落关系</span><span class="tag gold">${esc(payload.dropContentKey || "无掉落文件")}</span></div><div class="data-list"><div class="data-row"><span>掉落路径</span><strong class="mono">${esc(payload.dropPath || "—")}</strong></div><div class="data-row"><span>顶层条目</span><strong>${arrayCount(payload.drops)}</strong></div></div><div class="divider"></div>${dropTableHtml(payload.drops)}</div>`;
+        return;
+      }
+
+      if (entityType === "recipe") {
+        const payload = await API.getRecipeRelations(row.index, runId);
+        if (!document.getElementById("live-drawer-relations")) return;
+        const recipeItem = item => item
+          ? `<div class="relation-mini"><span class="relation-mini-icon">${I("sword", 13)}</span><span><strong>${esc(item.name || `物品 ${item.itemIndex}`)} × ${esc(item.count)}</strong><small>${esc(item.contentKey || "未解析物品引用")} · 持久 ${esc(item.currentDura)} / ${esc(item.maxDura)}</small></span></div>`
+          : "";
+        const ingredients = (payload.ingredients || []).map(recipeItem).join("");
+        const tools = (payload.tools || []).map(recipeItem).join("");
+        const classes = (payload.requiredClasses || []).join(" / ") || "不限";
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>配方产出与材料</span><span class="tag gold">${esc(payload.chance)}% · ${formatNumber(payload.gold)} 金币</span></div><div class="data-list"><div class="data-row"><span>产出</span><strong>${esc(payload.output?.name || payload.output?.contentKey || "—")} × ${esc(payload.output?.count ?? "—")}</strong></div><div class="data-row"><span>条件</span><strong>等级 ${esc(payload.requiredLevel ?? "不限")} · ${esc(classes)} · ${esc(payload.requiredGender || "不限性别")}</strong></div><div class="data-row"><span>文件</span><strong class="mono">${esc(payload.fileName || "—")}</strong></div></div><div class="divider"></div><div class="relation-mini-list">${recipeItem(payload.output)}${ingredients}${tools}</div></div>`;
+      }
+
+      if (entityType === "script") {
+        const payload = await API.getScriptValidation(row.index, runId);
+        if (!document.getElementById("live-drawer-relations")) return;
+        const validation = payload.validation || {};
+        const issues = payload.issues || [];
+        const astPages = payload.ast?.pages || [];
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>AST 与编译校验</span><span class="${validation.valid ? "success-text" : "warning-text"}">${validation.valid ? "通过" : "未通过"}</span></div><div class="data-list"><div class="data-row"><span>页面 / 命令</span><strong>${esc(astPages.length)} / ${esc(payload.ast?.statementCount ?? "—")}</strong></div><div class="data-row"><span>错误 / 警告</span><strong>${esc(validation.errorCount ?? 0)} / ${esc(validation.warningCount ?? 0)}</strong></div><div class="data-row"><span>编译哈希</span><strong class="mono">${esc(validation.compiledSha256 || "—")}</strong></div></div><div class="divider"></div><div class="validation-list">${issues.length ? issues.map(issue => `<div class="validation-item ${issue.severity === "error" ? "warn" : "ok"}">${I(issue.severity === "error" ? "warning" : "checkCircle", 12)}<span>${esc(issue.line || "—")} 行 · ${esc(issue.message)}</span></div>`).join("") : `<div class="validation-item ok">${I("checkCircle", 12)}<span>没有校验问题。</span></div>`}</div></div>`;
+        return;
+      }
+
+      if (entityType === "asset") {
+        const payload = await API.getContentByKey("asset", row.key, runId);
+        if (!document.getElementById("live-drawer-relations")) return;
+        const map = payload.data?.map;
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>资源文件</span><span class="tag gold">${esc(formatBytes(payload.data?.sizeBytes))}</span></div><div class="data-list"><div class="data-row"><span>路径</span><strong class="mono">${esc(payload.data?.relativePath || "—")}</strong></div><div class="data-row"><span>哈希</span><strong class="mono">${esc(payload.data?.sha256 || "—")}</strong></div><div class="data-row"><span>地图格式</span><strong>${esc(map?.formatName || "非地图资源")}</strong></div><div class="data-row"><span>尺寸 / 可走 / 阻挡</span><strong>${map?.valid ? `${esc(map.width)} × ${esc(map.height)} / ${esc(map.walkableCells)} / ${esc(map.blockedCells)}` : "—"}</strong></div></div><div class="divider"></div><button class="btn btn-primary" style="width:100%" data-action="download-asset" data-index="${esc(row.index)}" data-file-name="${esc(payload.data?.fileName || "")}" data-sha256="${esc(payload.data?.sha256 || "")}">${I("download", 14)}下载并校验资源</button></div>`;
       }
     } catch (error) {
       if (error?.status === 401) {
@@ -2925,7 +3075,7 @@
             <div class="detail-section"><div class="flex gap-8 items-center">${status(row.status)}${row.tags.map(tag => `<span class="tag gold">${esc(tag)}</span>`).join("")}</div></div>
             <div class="detail-section"><div class="detail-section-title"><span>基础字段</span><button class="btn btn-ghost btn-sm" data-action="toast" data-message="已切换到字段编辑模式">${I("edit", 11)}编辑</button></div><div class="data-list">${row.attributes.map(([label, value]) => `<div class="data-row"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div></div>
             ${isLive() && LIVE_ENTITY_TYPES.has(type.entity)
-              ? (type.entity === "map" || type.entity === "monster" ? `<div id="live-drawer-relations"><div class="detail-section"><div class="empty-inline">${I("refresh", 14)} 正在读取真实关系...</div></div></div>` : "")
+              ? (type.entity === "map" || type.entity === "monster" || type.entity === "recipe" || type.entity === "script" || type.entity === "asset" ? `<div id="live-drawer-relations"><div class="detail-section"><div class="empty-inline">${I("refresh", 14)} 正在读取真实关系...</div></div></div>` : "")
               : drawerRelations(typeId, row)}
             <div class="detail-section"><div class="detail-section-title"><span>校验与引用</span><span class="success-text">通过</span></div><div class="validation-list" style="padding:0"><div class="validation-item ok">${I("checkCircle", 12)}<span>Schema 校验通过</span></div><div class="validation-item ok">${I("checkCircle", 12)}<span>资源引用存在且哈希一致</span></div><div class="validation-item ${type.issues ? "warn" : "ok"}">${I(type.issues ? "warning" : "checkCircle", 12)}<span>${type.issues} 个内容域级提示</span></div><div class="validation-item ok">${I("checkCircle", 12)}<span>协议本地索引 ${esc(row.index || row.key)} 在允许范围内</span></div></div></div>
             <div class="detail-section"><div class="detail-section-title"><span>发布影响</span></div><div class="grid grid-2"><div class="metric-mini"><span>影响区服</span><strong style="font-size:11px">5 个</strong></div><div class="metric-mini"><span>引用内容</span><strong style="font-size:11px">${row.tags.length + 2} 处</strong></div><div class="metric-mini"><span>热重载</span><strong style="font-size:11px">支持</strong></div><div class="metric-mini"><span>回滚</span><strong style="font-size:11px">支持</strong></div></div></div>
@@ -2934,7 +3084,7 @@
           <div class="drawer-foot"><button class="btn btn-secondary" data-action="toast" data-message="内容键已复制">${I("copy", 13)}复制内容键</button><button class="btn btn-secondary" data-action="toast" data-message="变更历史已打开">${I("clock", 13)}变更历史</button><button class="btn btn-primary" data-action="toast" data-message="已进入内容编辑草稿">${I("edit", 13)}编辑内容</button></div>
         </aside>
       </div>`;
-    if (isLive() && (type.entity === "map" || type.entity === "monster")) {
+    if (isLive() && (type.entity === "map" || type.entity === "monster" || type.entity === "recipe" || type.entity === "script" || type.entity === "asset")) {
       void hydrateLiveDrawerRelations(type.entity, row);
     }
   }
@@ -3152,6 +3302,7 @@
         return;
       }
       if (action === "export-audit") { exportAuditCsv(); return; }
+      if (action === "download-asset") { void downloadAssetFromDrawer(actionEl); return; }
       if (action === "open-modal") { openModal(actionEl.dataset.modal, actionEl.dataset); return; }
       if (action === "close-modal" || action === "close-drawer" || action === "close-overlays") { closeOverlays(); return; }
       if (action === "login") { state.apiStatus = "demo"; state.user = null; navigate("dashboard"); setTimeout(() => showToast("已进入 MIR Control 高保真原型"), 80); return; }
