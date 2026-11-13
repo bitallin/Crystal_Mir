@@ -1,14 +1,14 @@
 # 项目进度台账
 
-> 最后更新：2026-11-11
-> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、内容快照签名、Control API、账号/JWT/RBAC/审计、NPC 脚本 AST/编译校验、地图格式解析与资源文件校验下载、Control.Web 全量地图目录与地图/NPC 脚本/怪物/配方/Buff/资源真实关系接入、Linux 区服宿主和 Ubuntu 部署已完成初版；内容写入/发布 API 与 PG16 staging 待做）
+> 最后更新：2026-11-13
+> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、内容快照签名、Control API、账号/JWT/RBAC/审计、NPC 脚本 AST/编译校验、地图格式解析与资源文件校验下载、Control.Web 全量地图目录与真实关系接入、Linux 区服宿主和 Ubuntu 部署已完成初版；从导入批次创建/校验/编译/签名/发布 API 已完成初版；可编辑内容草稿写入、M1 计划中的 GameCore/Agent/Compose 交付物与 PG16 staging 待做）
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0004 |
+| 架构决策 | 已完成初版 | ADR 0001～0005 |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具构建成功；358 项回归检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
@@ -17,7 +17,7 @@
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
-| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口暴露 15 类实体，含全量地图目录、地图拓扑/刷新点/传送门/NPC/NPC 脚本/怪物掉落/配方引用关系、NPC 脚本 AST/校验、地图资源元数据和经完整性校验的文件下载，账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次）、全量地图目录与检索、地图/NPC 脚本/怪物/配方/资源真实关系面板与详情抽屉、脚本 AST 与编译校验、资源下载与浏览器端 SHA256 复核、Buff 列表、账号创建/停用/启用/重置密码/角色调整、角色权限和审计导出，并按服务端权限点过滤导航、直达路由和页面动作；内容写入/发布 API 待做 |
+| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口暴露 15 类实体，含全量地图目录、地图拓扑/刷新点/传送门/NPC/NPC 脚本/怪物掉落/配方引用关系、NPC 脚本 AST/校验、地图资源元数据和经完整性校验的文件下载；发布 API 支持从导入批次创建不可变 `draft`、dry-run 校验、编译内容包、ECDSA 签名、验签发布、重复发布幂等和作者/审批人权限分离；账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、15 个内容域、全量地图目录与检索、真实关系面板与详情抽屉、脚本 AST 与编译校验、资源下载与浏览器端 SHA256 复核、Buff 列表、账号管理和审计导出；发布中心 Web 仍为原型，可编辑内容草稿写入待做 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 未开始 | 新 manifest/启动器/Agent 尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
@@ -28,7 +28,7 @@
 | 里程碑 | 状态 | 完成度 | 备注 |
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
-| M1 架构骨架与数据底座 | 进行中 | 97% | 数据链路、只读 API、地图目录与关系/掉落/配方/NPC 脚本 API、脚本 AST/编译校验、地图尺寸/阻挡解析、资源完整性下载、内容快照签名、Web 全量地图检索、真实关系面板与抽屉、配方/Buff/脚本/资源批次、账号/JWT/RBAC/审计、账号生命周期、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；内容写入/发布 API 和 PG16 staging 待做 |
+| M1 架构骨架与数据底座 | 进行中 | 98% | 数据链路、只读 API、地图目录与关系/掉落/配方/NPC 脚本 API、脚本 AST/编译校验、地图尺寸/阻挡解析、资源完整性下载、内容快照签名、发布校验/编译/签名/发布 API、账号/JWT/RBAC/审计、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；`Crystal.GameCore`、`Crystal.Agent.Contracts`、Compose 交付物、可编辑内容草稿写入和 PG16 staging 待做 |
 | M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
@@ -337,6 +337,17 @@
 - 未验证：KMS/HSM 托管私钥、Control API 发布审批与签名编排、ZoneServer/Agent 强制验签、PostgreSQL 16 staging 和 Windows 客户端运行冒烟。
 - 决策：新增 ADR 0005，记录 ECDSA P-256 当前算法、canonical 签名载荷和未来 Ed25519/KMS 迁移条件。
 
+### 2026-11-13（M1 内容发布生命周期 API）
+
+- 范围：补齐从不可变导入批次到内容发布的 Control API 闭环，复用现有 `content_release`/`content_release_entity` schema 和 `Crystal.Content` 快照/签名能力，不新增数据模型。
+- 快照：`ContentSnapshotWriter` 增加内存构建和 `WriteBuild` 能力，发布创建时即可计算稳定的 `contentHash`；目录写入仍保持原子发布，旧导入/重建路径复用同一构建逻辑。
+- API：新增 `GET /releases`、`GET /releases/{id}`、`GET /releases/{id}/manifest`、`POST /releases`、`/validate`、`/compile`、`/sign`、`/publish`。`draft -> compiled -> signed -> published` 使用条件更新；校验失败持久化为 `failed`，签名前重新校验产物哈希，发布前强制验签，重复发布幂等。
+- 权限与审计：创建/校验/编译/签名要求 `release:write`，发布要求 `release:publish`，读取要求 `release:read`；发布创建、校验、编译、签名和发布均写入审计事件。
+- 配置：新增 `ControlApi:ReleaseRoot`、`ReleaseSigningPrivateKeyPath`、`ReleaseSigningPublicKeyPath` 和 `ReleaseSigningKeyId`，签名私钥未配置时 `sign`/`publish` 返回 503。
+- 测试：`scripts/build.sh` 全量构建通过（客户端/旧宿主仅有既有警告）；`scripts/test.sh` 通过 358 项安全回归和 39 项内容快照检查；`scripts/verify-content.sh` 黄金内容导入、签名、快照重建和旧二进制往返通过；`scripts/test-control-api.sh` 在 PostgreSQL 18.3 上通过 15 类实体、认证/RBAC/审计、作者创建/校验/编译/签名、审批人发布、越权 403、重复版本 409、发布前未签名 409 和重复发布幂等验证。
+- 未验证：Control.Web 发布中心尚未接入真实发布 API；可编辑内容草稿/修订模型、发布回滚、KMS/HSM 托管密钥、Zone Agent 强制验签和 PostgreSQL 16 CI job 待做；本轮未运行 Playwright Web 集成和区服冒烟。
+- 决策：复用既有发布表和 ADR 0005 签名格式，未改变协议或数据模型，因此不新增 ADR。
+
 ## 4. 决策记录
 
 | 日期 | 决策 | ADR |
@@ -362,10 +373,10 @@
 
 ## 6. 下一步
 
-1. 设计并实现内容写入/发布 API 和不可变发布清单，接入已实现的内容快照签名，补齐 M1 剩余的控制面闭环。
-2. 在 PostgreSQL 16 staging 评估全量掉落、配方、NPC 脚本、地图和资源元数据导入，并演练 schema/升级路径，确认 GitHub Actions PG16 job 稳定。
-3. 补服务端审计导出任务与字段级权限，并评估自定义角色 CRUD、账号删除和管理员解锁。
-4. 评估 MFA/OIDC、高风险操作再认证和账号安全策略。
+1. 补齐 M1 交付物口径：`Crystal.GameCore`、`Crystal.Agent.Contracts` 骨架和 PostgreSQL/Redis/MinIO/API/Web Compose。
+2. 将 Control.Web 发布中心接入真实 `/releases` API，补发布列表、校验报告、manifest/签名详情和审批操作。
+3. 为 M2 设计可编辑内容草稿/修订模型和写入 API，明确草稿与已导入不可变批次的边界；涉及数据模型变更，先补 ADR。
+4. 在 PostgreSQL 16 staging 验证全量导入与发布链路，确认 GitHub Actions PG16 job 稳定，并补发布回滚路径。
 5. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
 6. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
 7. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。

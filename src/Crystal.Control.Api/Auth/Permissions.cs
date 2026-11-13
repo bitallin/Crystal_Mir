@@ -12,6 +12,10 @@ public static class Permissions
     public const string AuditRead = "audit:read";
     public const string ContentRead = "content:read";
     public const string AssetRead = "asset:read";
+    public const string ReleaseRead = "release:read";
+    public const string ReleaseWrite = "release:write";
+    public const string ReleasePublish = "release:publish";
+    public const string ReleaseRollback = "release:rollback";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -22,10 +26,10 @@ public static class Permissions
         AuditRead,
         ContentRead,
         "content:write",
-        "release:read",
-        "release:write",
-        "release:publish",
-        "release:rollback",
+        ReleaseRead,
+        ReleaseWrite,
+        ReleasePublish,
+        ReleaseRollback,
         AssetRead,
         "asset:write",
         "zone:read",

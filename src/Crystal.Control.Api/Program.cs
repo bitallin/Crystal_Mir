@@ -20,6 +20,8 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(options.DatabaseConne
 builder.Services.AddSingleton<ContentQueryStore>();
 builder.Services.AddSingleton<ContentRelationStore>();
 builder.Services.AddSingleton<ContentAssetService>();
+builder.Services.AddSingleton<ContentReleaseStore>();
+builder.Services.AddSingleton<ContentReleaseService>();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<AuthStore>();
@@ -118,6 +120,13 @@ if (options.ApiKey is null)
         "Service API key is disabled. Only account access tokens can call the Control API.");
 }
 
+if (string.IsNullOrWhiteSpace(options.ReleaseSigningPrivateKeyPath) ||
+    string.IsNullOrWhiteSpace(options.ReleaseSigningKeyId))
+{
+    app.Logger.LogWarning(
+        "Release signing is not configured. Compile works, but sign and publish will be unavailable.");
+}
+
 app.UseExceptionHandler();
 app.UseStatusCodePages(async statusContext =>
 {
@@ -154,6 +163,7 @@ app.MapHealthEndpoints();
 var api = app.MapGroup("/api/v1").RequireRateLimiting("api");
 api.MapAuthEndpoints();
 api.MapContentEndpoints();
+api.MapReleaseEndpoints();
 api.MapAccountEndpoints();
 api.MapAuditEndpoints();
 

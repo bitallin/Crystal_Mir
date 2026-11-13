@@ -35,6 +35,14 @@ public sealed class ControlApiOptions
 
     public string? AssetRoot { get; init; }
 
+    public required string ReleaseRoot { get; init; }
+
+    public string? ReleaseSigningPrivateKeyPath { get; init; }
+
+    public string? ReleaseSigningPublicKeyPath { get; init; }
+
+    public string? ReleaseSigningKeyId { get; init; }
+
     public static ControlApiOptions Load(IConfiguration configuration, IWebHostEnvironment environment)
     {
         var connectionString = FirstNonEmpty(
@@ -95,6 +103,14 @@ public sealed class ControlApiOptions
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var releaseRoot = FirstNonEmpty(
+            configuration["ControlApi:ReleaseRoot"],
+            Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_ROOT"),
+            Path.Combine(environment.ContentRootPath, "artifacts", "releases"))!;
+        if (!Path.IsPathRooted(releaseRoot))
+        {
+            releaseRoot = Path.Combine(environment.ContentRootPath, releaseRoot);
+        }
 
         return new ControlApiOptions
         {
@@ -120,7 +136,17 @@ public sealed class ControlApiOptions
             CorsOrigins = corsOrigins,
             AssetRoot = FirstNonEmpty(
                 configuration["ControlApi:AssetRoot"],
-                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_ASSET_ROOT"))
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_ASSET_ROOT")),
+            ReleaseRoot = Path.GetFullPath(releaseRoot),
+            ReleaseSigningPrivateKeyPath = FirstNonEmpty(
+                configuration["ControlApi:ReleaseSigningPrivateKeyPath"],
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_PRIVATE_KEY_PATH")),
+            ReleaseSigningPublicKeyPath = FirstNonEmpty(
+                configuration["ControlApi:ReleaseSigningPublicKeyPath"],
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_PUBLIC_KEY_PATH")),
+            ReleaseSigningKeyId = FirstNonEmpty(
+                configuration["ControlApi:ReleaseSigningKeyId"],
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID"))
         };
     }
 

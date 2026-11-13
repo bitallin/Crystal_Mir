@@ -1,6 +1,6 @@
 # 构建、测试与发布
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-13
 > 状态：生效
 
 ## 1. 解决方案结构
@@ -56,7 +56,7 @@ src/Crystal.Cli
 ```
 
 结果：旧服务端、客户端、内容库、Control API 和工具构建成功；`ItemSecurity` 通过 358 项检查；
-`ContentSnapshot` 通过 13 项检查；黄金数据库可加载；黄金内容导入、快照重建和二进制导出 round-trip 通过；
+`ContentSnapshot` 通过 39 项检查；黄金数据库可加载；黄金内容导入、快照重建和二进制导出 round-trip 通过；
 Control.Web 全部 JavaScript 通过 `node --check`；Linux 区服加载 463 张地图并以 SIGTERM 正常退出。
 
 发布自包含 Linux 区服：
@@ -91,7 +91,7 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
   ./scripts/test-control-web.sh
 ```
 
-该脚本先运行 Control API 集成（schema、黄金导入、认证/RBAC/账号生命周期/审计/CORS 预检），再启动
+该脚本先运行 Control API 集成（schema、黄金导入、认证/RBAC/账号生命周期/审计/CORS 预检、发布校验/编译/签名/发布），再启动
 真实 API 和静态后台，验证登录、内容总览 KPI、导入批次、内容分页与搜索、访问令牌刷新、账号创建、
 停用/启用、密码重置、角色调整、角色权限矩阵、审计 CSV 导出、登出和控制台错误。测试还会创建临时
 财务账号，验证导航隐藏、直达 403 和不会发起越权内容/账号请求。
@@ -106,8 +106,9 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 `test-control-api.sh` 同时验证受控 CORS 预检；Control.Web 使用 `?api=` 指定 API 地址，
 API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 
-该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期和只读接口验证。CI 使用 PostgreSQL 16 service container
-运行同一脚本；本地已验证 PostgreSQL 12 兼容。本地设置 `CRYSTAL_DATABASE_URL` 或
+该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期、只读接口和
+发布生命周期验证。CI 使用 PostgreSQL 16 service container 运行同一脚本；本地已验证 PostgreSQL 12 兼容，
+并在 PostgreSQL 18.3 上验证发布签名/发布链路。本地设置 `CRYSTAL_DATABASE_URL` 或
 `CRYSTAL_DB_CONNECTION` 后，`./scripts/ci.sh` 也会自动运行该集成测试，否则明确跳过。
 
 ## 3. 测试策略
@@ -122,7 +123,7 @@ API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 
 ### 3.2 集成测试
 
-- PostgreSQL 内容 CRUD、发布、回滚。
+- PostgreSQL 内容发布（已实现初版）、内容 CRUD 和回滚（待实现）。
 - 区服启动、Agent 注册、内容拉取、热重载。
 - 客户端 manifest 校验、断点续传、回滚。
 - 支付回调、幂等发货、对账。

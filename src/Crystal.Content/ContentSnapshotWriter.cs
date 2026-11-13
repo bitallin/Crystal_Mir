@@ -22,6 +22,13 @@ public sealed class ContentSnapshotWriteOptions
     public bool Force { get; init; }
 }
 
+public sealed class ContentSnapshotBuild
+{
+    public required ContentSnapshotManifest Manifest { get; init; }
+
+    public required IReadOnlyDictionary<string, byte[]> EntityFiles { get; init; }
+}
+
 public static class ContentSnapshotWriter
 {
     public static ContentSnapshotManifest Write(
@@ -31,20 +38,30 @@ public static class ContentSnapshotWriter
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(entities);
 
-        var ordered = ValidateAndOrder(entities);
-        var outputDirectory = Path.GetFullPath(options.OutputDirectory);
-        var entitiesDirectory = Path.Combine(outputDirectory, "entities");
+        var build = Build(options, entities);
+        WriteBuild(build, options.OutputDirectory, options.Force);
+        return build.Manifest;
+    }
 
-        if (Directory.Exists(outputDirectory) &&
-            Directory.EnumerateFileSystemEntries(outputDirectory).Any() &&
-            !options.Force)
+    public static void WriteBuild(
+        ContentSnapshotBuild build,
+        string outputDirectory,
+        bool force = false)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        var directory = Path.GetFullPath(outputDirectory);
+        var entitiesDirectory = Path.Combine(directory, "entities");
+
+        if (Directory.Exists(directory) &&
+            Directory.EnumerateFileSystemEntries(directory).Any() &&
+            !force)
         {
             throw new InvalidOperationException(
-                $"Output directory is not empty: {outputDirectory}. Use --force to replace snapshot files.");
+                $"Output directory is not empty: {directory}. Use force to replace snapshot files.");
         }
 
         Directory.CreateDirectory(entitiesDirectory);
-        if (options.Force)
+        if (force)
         {
             foreach (var file in Directory.GetFiles(entitiesDirectory))
             {
@@ -53,21 +70,36 @@ public static class ContentSnapshotWriter
 
             foreach (var name in new[] { "manifest.json", "summary.json" })
             {
-                var path = Path.Combine(outputDirectory, name);
+                var path = Path.Combine(directory, name);
                 if (File.Exists(path)) File.Delete(path);
             }
         }
 
+        foreach (var (entityType, bytes) in build.EntityFiles)
+        {
+            File.WriteAllBytes(Path.Combine(entitiesDirectory, $"{entityType}.jsonl"), bytes);
+        }
+
+        WriteManifestFiles(directory, build.Manifest);
+    }
+
+    public static ContentSnapshotBuild Build(
+        ContentSnapshotWriteOptions options,
+        IEnumerable<ContentEntity> entities)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(entities);
+
+        var ordered = ValidateAndOrder(entities);
         var files = new SortedDictionary<string, ContentSnapshotFile>(StringComparer.Ordinal);
         var counts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var entityFiles = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
 
         foreach (var group in ordered.GroupBy(entity => entity.EntityType, StringComparer.Ordinal)
                      .OrderBy(group => group.Key, StringComparer.Ordinal))
         {
-            var fileName = $"{group.Key}.jsonl";
-            var filePath = Path.Combine(entitiesDirectory, fileName);
-            using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+            using var stream = new MemoryStream();
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true)
                    {
                        NewLine = "\n"
                    })
@@ -86,11 +118,12 @@ public static class ContentSnapshotWriter
                 }
             }
 
-            var bytes = File.ReadAllBytes(filePath);
+            var bytes = stream.ToArray();
+            entityFiles[group.Key] = bytes;
             counts[group.Key] = group.Count();
             files[group.Key] = new ContentSnapshotFile
             {
-                File = $"entities/{fileName}",
+                File = $"entities/{group.Key}.jsonl",
                 Sha256 = ContentJson.Sha256Hex(bytes),
                 SizeBytes = bytes.LongLength,
                 Count = group.Count()
@@ -111,8 +144,18 @@ public static class ContentSnapshotWriter
             Legacy = options.Legacy
         };
 
-        var manifestPath = Path.Combine(outputDirectory, "manifest.json");
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ContentJson.IndentedOptions) + "\n");
+        return new ContentSnapshotBuild
+        {
+            Manifest = manifest,
+            EntityFiles = entityFiles
+        };
+    }
+
+    private static void WriteManifestFiles(string outputDirectory, ContentSnapshotManifest manifest)
+    {
+        File.WriteAllText(
+            Path.Combine(outputDirectory, "manifest.json"),
+            JsonSerializer.Serialize(manifest, ContentJson.IndentedOptions) + "\n");
         File.WriteAllText(
             Path.Combine(outputDirectory, "summary.json"),
             JsonSerializer.Serialize(new
@@ -123,8 +166,6 @@ public static class ContentSnapshotWriter
                 manifest.ContentHash,
                 manifest.Counts
             }, ContentJson.IndentedOptions) + "\n");
-
-        return manifest;
     }
 
     public static IReadOnlyList<ContentEntity> ValidateAndOrder(IEnumerable<ContentEntity> entities)

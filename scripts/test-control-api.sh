@@ -33,6 +33,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl is required to generate release signing test keys." >&2
+  exit 2
+fi
+
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+  -out "$TMP/release-private.pem" >/dev/null 2>&1
+openssl pkey -in "$TMP/release-private.pem" -pubout \
+  -out "$TMP/release-public.pem" >/dev/null 2>&1
+
 cd "$ROOT"
 "$DOTNET" build tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj -c "$CONFIGURATION" --nologo >/dev/null
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo >/dev/null
@@ -86,6 +96,10 @@ ControlApi__BootstrapAdminUsername="$ADMIN_USERNAME" \
 ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
 ControlApi__CorsOrigins="$WEB_ORIGIN" \
 ControlApi__AssetRoot="$ROOT/tests/fixtures/content" \
+ControlApi__ReleaseRoot="$TMP/releases" \
+ControlApi__ReleaseSigningPrivateKeyPath="$TMP/release-private.pem" \
+ControlApi__ReleaseSigningPublicKeyPath="$TMP/release-public.pem" \
+ControlApi__ReleaseSigningKeyId="integration-test" \
 "$DOTNET" "$ROOT/src/Crystal.Control.Api/bin/$CONFIGURATION/net8.0/Crystal.Control.Api.dll" \
   >"$TMP/api.log" 2>&1 &
 API_PID=$!
@@ -378,6 +392,8 @@ curl -fsS --max-time 10 -H "Authorization: Bearer $ADMIN_ACCESS" "$BASE/api/v1/c
 SUFFIX="$(date -u +%s)$$"
 FINANCE_USER="finance_${SUFFIX}"
 AUDITOR_USER="auditor_${SUFFIX}"
+AUTHOR_USER="author_${SUFFIX}"
+APPROVER_USER="approver_${SUFFIX}"
 
 create_account() {
   local username="$1"
@@ -391,6 +407,88 @@ create_account() {
 
 create_account "$FINANCE_USER" "finance" "$TMP/finance-account.json"
 create_account "$AUDITOR_USER" "auditor" "$TMP/auditor-account.json"
+create_account "$AUTHOR_USER" "content_author" "$TMP/author-account.json"
+create_account "$APPROVER_USER" "release_approver" "$TMP/approver-account.json"
+
+login_account() {
+  local username="$1"
+  local output="$2"
+  local access="$3"
+  local refresh="$4"
+  curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+    --data "$(printf '{"username":"%s","password":"%s"}' "$username" "$TEST_PASSWORD")" \
+    "$BASE/api/v1/auth/login" >"$output"
+  json_tokens "$output" "$access" "$refresh"
+}
+
+login_account "$AUTHOR_USER" "$TMP/author-login.json" "$TMP/author.access" "$TMP/author.refresh"
+login_account "$APPROVER_USER" "$TMP/approver-login.json" "$TMP/approver.access" "$TMP/approver.refresh"
+AUTHOR_ACCESS="$(cat "$TMP/author.access")"
+APPROVER_ACCESS="$(cat "$TMP/approver.access")"
+
+RELEASE_VERSION="api.release.${SUFFIX}"
+RELEASE_BODY="$(printf '{"importRunId":%s,"version":"%s","notes":"integration release"}' "$RUN_ID" "$RELEASE_VERSION")"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' --data "$RELEASE_BODY" \
+  "$BASE/api/v1/releases" >"$TMP/release-created.json"
+RELEASE_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/release-created.json")"
+
+PUBLISH_BEFORE_COMPILE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" "$BASE/api/v1/releases/$RELEASE_ID/publish")"
+if [ "$PUBLISH_BEFORE_COMPILE_STATUS" != "409" ]; then
+  echo "Expected unsigned release publish to return 409, got $PUBLISH_BEFORE_COMPILE_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/validate" >"$TMP/release-validated.json"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/compile" >"$TMP/release-compiled.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/manifest" >"$TMP/release-manifest-unsigned.json"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/sign" >"$TMP/release-signed.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/manifest" >"$TMP/release-manifest-signed.json"
+
+AUTHOR_PUBLISH_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" "$BASE/api/v1/releases/$RELEASE_ID/publish")"
+if [ "$AUTHOR_PUBLISH_STATUS" != "403" ]; then
+  echo "Expected content author publish to return 403, got $AUTHOR_PUBLISH_STATUS." >&2
+  exit 1
+fi
+
+APPROVER_CREATE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"importRunId":%s,"version":"%s.denied"}' "$RUN_ID" "$RELEASE_VERSION")" \
+  "$BASE/api/v1/releases")"
+if [ "$APPROVER_CREATE_STATUS" != "403" ]; then
+  echo "Expected release approver create to return 403, got $APPROVER_CREATE_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/publish" >"$TMP/release-published.json"
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases/$RELEASE_ID/publish" >"$TMP/release-published-again.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases?limit=10&status=published" >"$TMP/release-list.json"
+
+DUPLICATE_VERSION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data "$RELEASE_BODY" "$BASE/api/v1/releases")"
+if [ "$DUPLICATE_VERSION_STATUS" != "409" ]; then
+  echo "Expected duplicate release version to return 409, got $DUPLICATE_VERSION_STATUS." >&2
+  exit 1
+fi
+
+INVALID_VERSION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"version":"../escape"}' "$BASE/api/v1/releases")"
+if [ "$INVALID_VERSION_STATUS" != "400" ]; then
+  echo "Expected invalid release version to return 400, got $INVALID_VERSION_STATUS." >&2
+  exit 1
+fi
 
 FINANCE_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$FINANCE_USER" "$TEST_PASSWORD")"
 curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
@@ -668,10 +766,51 @@ assert any(e["action"] == "account.status" and e["metadata"].get("afterStatus") 
 assert any(e["action"] == "account.password.reset" and e["result"] == "success" for e in events), events
 assert any(e["action"] == "auth.password.change" and e["result"] == "success" for e in events), events
 assert any(e["action"] == "account.roles.update" and e["metadata"].get("afterRoles") == ["auditor"] for e in events), events
+assert any(e["action"] == "release.create" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "release.validate" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "release.compile" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "release.sign" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "release.publish" and e["result"] == "success" for e in events), events
 audit_text = json.dumps(raw_audit, ensure_ascii=False)
 assert "password_hash" not in audit_text, audit_text[:1000]
 for secret in ("Integration!Passw0rd2026", "ResetIntegration!Passw0rd2026", "SelfChange!Passw0rd2026"):
     assert secret not in audit_text, secret
+
+created = load("release-created.json")
+assert created["status"] == "draft", created
+assert created["importRunId"] is not None, created
+assert len(created["contentHash"]) == 64, created
+expected_counts = {entry["entityType"]: entry["count"] for entry in load("counts.json")["counts"]}
+assert {entry["entityType"]: entry["count"] for entry in created["counts"]} == expected_counts, created["counts"]
+
+validated = load("release-validated.json")
+assert validated["valid"] is True, validated
+assert validated["issues"] == [], validated
+assert validated["entityCount"] == 9797, validated
+
+compiled = load("release-compiled.json")
+assert compiled["status"] == "compiled", compiled
+assert compiled["manifestObjectKey"] == compiled["version"], compiled
+assert compiled["contentHash"] == created["contentHash"], (compiled, created)
+
+unsigned_manifest = load("release-manifest-unsigned.json")
+assert unsigned_manifest.get("signature") is None, unsigned_manifest
+
+signed = load("release-signed.json")
+assert signed["status"] == "signed", signed
+signed_manifest = load("release-manifest-signed.json")
+assert signed_manifest["signature"]["algorithm"] == "ecdsa-p256-sha256", signed_manifest
+assert signed_manifest["signature"]["keyId"] == "integration-test", signed_manifest
+assert signed_manifest["signature"]["value"], signed_manifest
+assert signed_manifest["contentHash"] == created["contentHash"], signed_manifest
+
+published = load("release-published.json")
+assert published["status"] == "published", published
+assert published["publishedAt"], published
+published_again = load("release-published-again.json")
+assert published_again["status"] == "published", published_again
+release_list = load("release-list.json")
+assert any(release["id"] == created["id"] for release in release_list["items"]), release_list
 PY
 
-echo "Control API integration verified (run $RUN_ID, 15 entity types, auth/RBAC/audit/relations)."
+echo "Control API integration verified (run $RUN_ID, 15 entity types, auth/RBAC/audit/relations/release lifecycle)."

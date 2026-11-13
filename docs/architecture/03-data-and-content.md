@@ -1,6 +1,6 @@
 # 数据与内容架构
 
-> 最后更新：2026-11-11
+> 最后更新：2026-11-13
 > 状态：生效
 
 ## 1. 数据域
@@ -166,6 +166,11 @@ asset(
 content_release_asset(release_id, asset_id, role)
 ```
 
+M1 已实现发布 API：从已完成的 `content_import_run` 复制实体生成不可变 `draft`，重建并校验快照后
+编译到 `ReleaseRoot/<version>/`，再使用 ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会
+进入 `failed` 且禁止继续编译/签名/发布；重复发布保持幂等。当前 `draft` 是导入批次对应的不可变
+候选版本，还不是 M2 的可编辑草稿。
+
 ### 4.4 区服与运营
 
 ```text
@@ -226,7 +231,7 @@ draft -> validating -> compiled -> signed -> published -> active -> archived
 
 | 阶段 | 产物 | 是否可修改 |
 | --- | --- | --- |
-| draft | 编辑态表 | 是 |
+| draft | M1：导入批次的不可变候选；M2：编辑态表 | M1 否，M2 是 |
 | validating | 校验报告 | 否 |
 | compiled | 内容包 + manifest | 否 |
 | signed | 签名 manifest | 否 |
@@ -284,6 +289,10 @@ entities/<type>.jsonl  每行一个实体，按 localIndex 排序
 - `contentHash` 只由实体类型、数量和实体文件 SHA256 计算，不受发布时间和输入顺序影响。
 - 读取器校验文件哈希、字节数、计数和 `contentHash`。
 - PostgreSQL 导入以 `content_import_run` 隔离批次，快照和批次都不可变。
+- 发布编译使用同一构建器在内存中重建 manifest，写入独立的 `ReleaseRoot/<version>/`；先写临时目录，
+  再原子改名，已有同版本目录必须内容哈希一致。
+- `POST /api/v1/releases/{id}/validate` 是 dry-run 校验；`compile` 会再次校验并把错误状态持久化为
+  `failed`，`sign` 只接受 `compiled`，`publish` 只接受验签通过的 `signed`。
 
 实现和黄金样本结果见 `reference/content-import.md`。
 
