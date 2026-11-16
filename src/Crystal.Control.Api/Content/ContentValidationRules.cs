@@ -12,6 +12,25 @@ public static class ContentValidationRules
         {
             if (entity.Data.ValueKind != JsonValueKind.Object) continue;
 
+            if (entity.EntityType == ContentEntityTypes.Item)
+            {
+                foreach (var message in ContentItemEditorSchema.ValidateCompleteness(entity.Data))
+                {
+                    yield return new ReleaseValidationIssueDto(
+                        "item-completeness",
+                        message,
+                        entity.ContentKey);
+                }
+
+                if (!string.Equals(entity.ContentKey, $"item.{entity.LocalIndex}", StringComparison.Ordinal))
+                {
+                    yield return new ReleaseValidationIssueDto(
+                        "item-content-key",
+                        $"Item content key must be 'item.{entity.LocalIndex}'.",
+                        entity.ContentKey);
+                }
+            }
+
             if (entity.EntityType == ContentEntityTypes.Script &&
                 entity.Data.TryGetProperty("validation", out var validation))
             {

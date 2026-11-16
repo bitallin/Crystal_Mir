@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Crystal.Content;
 using Npgsql;
 using NpgsqlTypes;
@@ -279,6 +280,110 @@ public sealed class ContentDraftStore
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadEntity(reader) : null;
+    }
+
+    public async Task<DraftEntityDto> CreateEntityAsync(
+        long draftId,
+        string entityType,
+        JsonElement data,
+        int schemaVersion,
+        long? actorAccountId,
+        string? reason,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        string draftStatus;
+        await using (var draft = new NpgsqlCommand(
+                         "SELECT status FROM content_draft WHERE id = @draftId FOR UPDATE;",
+                         connection,
+                         transaction))
+        {
+            draft.Parameters.AddWithValue("draftId", draftId);
+            draftStatus = await draft.ExecuteScalarAsync(cancellationToken) as string
+                ?? throw new DraftNotFoundException($"Draft {draftId} does not exist.");
+        }
+
+        if (draftStatus == "archived")
+        {
+            throw new DraftConflictException($"Draft {draftId} is archived and cannot be edited.");
+        }
+
+        long localIndex;
+        await using (var nextIndex = new NpgsqlCommand(
+                         """
+                         SELECT COALESCE(max(local_index), 0) + 1
+                         FROM content_draft_entity
+                         WHERE draft_id = @draftId AND entity_type = @entityType;
+                         """,
+                         connection,
+                         transaction))
+        {
+            nextIndex.Parameters.AddWithValue("draftId", draftId);
+            nextIndex.Parameters.AddWithValue("entityType", entityType);
+            localIndex = (long)(await nextIndex.ExecuteScalarAsync(cancellationToken))!;
+        }
+
+        if (localIndex > int.MaxValue)
+        {
+            throw new DraftConflictException(
+                $"No item local index is available in draft {draftId}.");
+        }
+
+        JsonObject payload;
+        try
+        {
+            payload = JsonNode.Parse(data.GetRawText())?.AsObject()
+                      ?? throw new JsonException("Item data must be a JSON object.");
+        }
+        catch (JsonException exception)
+        {
+            throw new DraftInputValidationException(new Dictionary<string, string[]>
+            {
+                ["data"] = [exception.Message]
+            });
+        }
+
+        payload["Index"] = localIndex;
+        var normalizedData = JsonSerializer.SerializeToElement(payload, ContentJson.CompactOptions);
+        var contentKey = $"{entityType}.{localIndex}";
+        var validationErrors = ContentItemEditorSchema.ValidateStructure(normalizedData, localIndex, contentKey);
+        if (validationErrors.Count > 0)
+        {
+            throw new DraftInputValidationException(validationErrors);
+        }
+
+        try
+        {
+            await using var insert = new NpgsqlCommand(
+                """
+                INSERT INTO content_draft_entity
+                    (draft_id, entity_type, local_index, content_key, schema_version, data,
+                     revision, updated_by, updated_at)
+                VALUES
+                    (@draftId, @entityType, @localIndex, @contentKey, @schemaVersion,
+                     @data, 1, @actor, @occurredAt);
+                """,
+                connection,
+                transaction);
+            AddEntityParameters(insert, draftId, entityType, localIndex, contentKey, schemaVersion,
+                normalizedData, 1, actorAccountId, occurredAt);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            throw new DraftConflictException(
+                $"Entity type/index/key already exists in draft {draftId}: {entityType}/{localIndex}/{contentKey}.");
+        }
+
+        await InsertRevisionAsync(connection, transaction, draftId, "create", entityType, localIndex,
+            contentKey, null, normalizedData, actorAccountId, reason, occurredAt, cancellationToken);
+        await TouchDraftAsync(connection, transaction, draftId, actorAccountId, occurredAt, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return await GetEntityAsync(draftId, entityType, localIndex, cancellationToken)
+               ?? throw new DraftNotFoundException($"Draft entity {entityType}/{localIndex} was not found after creation.");
     }
 
     public async Task<DraftEntityDto> UpsertEntityAsync(

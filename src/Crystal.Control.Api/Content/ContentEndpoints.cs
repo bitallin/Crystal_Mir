@@ -19,6 +19,8 @@ public static class ContentEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}", QueryContentAsync)
             .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/editor-schemas/{entityType}", GetEditorSchemaAsync)
+            .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}/{localIndex:long}", GetContentByIndexAsync)
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}/key/{contentKey}", GetContentByKeyAsync)
@@ -38,6 +40,19 @@ public static class ContentEndpoints
         api.MapGet("/content/asset/{localIndex:long}/file", GetAssetFileAsync)
             .RequireAuthorization(Permissions.AssetRead);
         return api;
+    }
+
+    private static IResult GetEditorSchemaAsync(string entityType)
+    {
+        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Editor schema not found",
+                detail: $"No typed editor schema is available for '{entityType}'.");
+        }
+
+        return Results.Ok(ContentItemEditorSchema.Schema);
     }
 
     private static async Task<IResult> GetImportRunsAsync(

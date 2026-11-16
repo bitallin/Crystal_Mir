@@ -189,6 +189,56 @@
     });
   }
 
+  function getEditorSchema(entityType) {
+    return request(`/api/v1/editor-schemas/${encodeURIComponent(entityType)}`);
+  }
+
+  function queryDraftContent(draftId, entityType, options = {}) {
+    const params = new URLSearchParams({ entityType });
+    params.set("page", options.page || 1);
+    params.set("pageSize", options.pageSize || 50);
+    if (options.q) params.set("q", options.q);
+    params.set("sort", options.sort || "index");
+    params.set("direction", options.direction || "asc");
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content?${params}`);
+  }
+
+  function getDraftEntity(draftId, entityType, localIndex) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}/${encodeURIComponent(localIndex)}`);
+  }
+
+  function createDraftEntity(draftId, entityType, data, reason) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}`, {
+      method: "POST",
+      body: { schemaVersion: 1, data, reason }
+    });
+  }
+
+  function updateDraftEntity(draftId, entityType, localIndex, entity) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}/${encodeURIComponent(localIndex)}`, {
+      method: "PUT",
+      body: entity
+    });
+  }
+
+  function deleteDraftEntity(draftId, entityType, localIndex, expectedRevision, reason) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}/${encodeURIComponent(localIndex)}`, {
+      method: "DELETE",
+      body: { expectedRevision, reason }
+    });
+  }
+
+  function validateDraft(draftId) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/validate`, { method: "POST" });
+  }
+
+  function listDraftRevisions(draftId, options = {}) {
+    const params = new URLSearchParams({ limit: options.limit || 50 });
+    if (options.entityType) params.set("entityType", options.entityType);
+    if (options.contentKey) params.set("contentKey", options.contentKey);
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/revisions?${params}`);
+  }
+
   function listReleases(limit = 50, status) {
     const params = new URLSearchParams({ limit });
     if (status) params.set("status", status);
@@ -372,9 +422,13 @@
     compileRelease,
     createAccount,
     createDraft,
+    createDraftEntity,
     createRelease,
+    deleteDraftEntity,
     getContentByKey,
     getContentTypes,
+    getDraftEntity,
+    getEditorSchema,
     getImportRun,
     getMapRelations,
     getMonsterDrops,
@@ -387,6 +441,7 @@
     listAccounts,
     listAuditEvents,
     listDrafts,
+    listDraftRevisions,
     listImportRuns,
     listMapCatalog,
     listRoles,
@@ -395,6 +450,7 @@
     logout,
     me,
     queryContent,
+    queryDraftContent,
     publishRelease,
     downloadAsset,
     resetAccountPassword,
@@ -404,6 +460,8 @@
     signRelease,
     validateRelease,
     updateAccountRoles,
+    updateDraftEntity,
+    validateDraft,
     setBaseUrl
   };
 })();

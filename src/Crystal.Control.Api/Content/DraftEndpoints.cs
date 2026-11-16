@@ -17,6 +17,8 @@ public static class DraftEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapPost("/drafts", CreateDraftAsync)
             .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPost("/drafts/{id:long}/content/{entityType}", CreateDraftEntityAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
         api.MapGet("/drafts/{id:long}/content", QueryDraftContentAsync)
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/drafts/{id:long}/content/{entityType}/{localIndex:long}", GetDraftEntityAsync)
@@ -240,6 +242,59 @@ public static class DraftEndpoints
         catch (DraftConflictException exception)
         {
             return Conflict(exception.Message);
+        }
+        catch (DraftInputValidationException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>(exception.Errors));
+        }
+    }
+
+    private static async Task<IResult> CreateDraftEntityAsync(
+        long id,
+        string entityType,
+        CreateDraftEntityRequest request,
+        ContentDraftService service,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var entity = await service.CreateEntityAsync(
+                id,
+                entityType,
+                request,
+                RequestMetadata.AccountId(context.User),
+                cancellationToken);
+            await auditStore.WriteAsync(new AuditEventWrite(
+                RequestMetadata.AccountId(context.User),
+                context.User.Identity?.Name,
+                RequestMetadata.ClientIp(context),
+                "draft.entity.create",
+                "content_draft",
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                null,
+                entity.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                RequestMetadata.RequestId(context),
+                "success",
+                request.Reason,
+                RequestMetadata.UserAgent(context),
+                new { entity.EntityType, entity.LocalIndex, entity.ContentKey, entity.Revision }), cancellationToken);
+            return Results.Created(
+                $"/api/v1/drafts/{id}/content/{entityType}/{entity.LocalIndex}",
+                entity);
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (DraftInputValidationException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>(exception.Errors));
         }
     }
 

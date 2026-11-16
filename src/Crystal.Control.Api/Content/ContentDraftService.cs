@@ -132,6 +132,8 @@ public sealed partial class ContentDraftService
             throw new DraftConflictException("schemaVersion must be a positive integer.");
         }
 
+        ValidateItemStructure(entityType, localIndex, contentKey, request.Data.Value);
+
         var reason = NormalizeReason(request.Reason);
         return await _store.UpsertEntityAsync(
             draftId,
@@ -143,6 +145,44 @@ public sealed partial class ContentDraftService
             schemaVersion,
             actorAccountId,
             reason,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+    }
+
+    public async Task<DraftEntityDto> CreateEntityAsync(
+        long draftId,
+        string entityType,
+        CreateDraftEntityRequest request,
+        long? actorAccountId,
+        CancellationToken cancellationToken)
+    {
+        _ = await GetAsync(draftId, cancellationToken);
+        ValidateEntityType(entityType);
+        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        {
+            throw new DraftConflictException(
+                $"Typed creation is not available for entity type '{entityType}'.");
+        }
+
+        if (request.Data is null || request.Data.Value.ValueKind != JsonValueKind.Object)
+        {
+            throw new DraftConflictException("data must be a JSON object.");
+        }
+
+        var schemaVersion = request.SchemaVersion ?? ContentItemEditorSchema.SchemaVersion;
+        if (schemaVersion != ContentItemEditorSchema.SchemaVersion)
+        {
+            throw new DraftConflictException(
+                $"Unsupported item schemaVersion {schemaVersion}; expected {ContentItemEditorSchema.SchemaVersion}.");
+        }
+
+        return await _store.CreateEntityAsync(
+            draftId,
+            entityType,
+            request.Data.Value,
+            schemaVersion,
+            actorAccountId,
+            NormalizeReason(request.Reason),
             DateTimeOffset.UtcNow,
             cancellationToken);
     }
@@ -263,6 +303,24 @@ public sealed partial class ContentDraftService
         if (!ContentEntityTypes.All.Contains(entityType, StringComparer.Ordinal))
         {
             throw new DraftConflictException($"Unknown entity type '{entityType}'.");
+        }
+    }
+
+    private static void ValidateItemStructure(
+        string entityType,
+        long localIndex,
+        string? contentKey,
+        JsonElement data)
+    {
+        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var errors = ContentItemEditorSchema.ValidateStructure(data, localIndex, contentKey);
+        if (errors.Count > 0)
+        {
+            throw new DraftInputValidationException(errors);
         }
     }
 

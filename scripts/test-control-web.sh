@@ -124,13 +124,16 @@ from playwright.sync_api import sync_playwright
 web, api, password, finance_user, finance_password, ui_user, ui_password = sys.argv[1:8]
 login_url = f"{web}/?api={api}#/login"
 
+def is_expected_console_error(text):
+    return any(f"status of {status}" in text for status in ("400", "401", "409"))
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     errors = []
     failed = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
-    page.on("console", lambda msg: errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and "401" not in msg.text else None)
+    page.on("console", lambda msg: errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and not is_expected_console_error(msg.text) else None)
     page.on("requestfailed", lambda request: failed.append(f"{request.method} {request.url}: {request.failure}") if "ERR_ABORTED" not in str(request.failure) else None)
 
     page.goto(login_url, wait_until="networkidle")
@@ -197,6 +200,104 @@ with sync_playwright() as playwright:
     assert "555" in page.locator(".paginator").inner_text()
     new_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
     assert new_token and new_token != old_token
+
+    admin_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
+    page.goto(f"{web}/?api={api}#/content/items", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.wait_for_selector("[data-live-draft-select]", timeout=15000)
+    previous_draft = page.locator("[data-live-draft-select]").input_value()
+    page.click('[data-action="open-modal"][data-modal="create-draft"]')
+    page.wait_for_selector('.modal input[name="name"]', timeout=5000)
+    page.fill('.modal input[name="name"]', f"Web UI Item Draft {time.time_ns()}")
+    page.click('.modal [data-action="submit-draft-create"]')
+    page.wait_for_function("!document.querySelector('.modal')", timeout=60000)
+    page.wait_for_function(
+        "old => { const select = document.querySelector('[data-live-draft-select]'); return select && select.value && select.value !== old; }",
+        arg=previous_draft,
+        timeout=15000)
+    draft_ui_id = int(page.locator("[data-live-draft-select]").input_value())
+    assert draft_ui_id > 0, draft_ui_id
+
+    page.fill("#content-search-items", "")
+    page.wait_for_timeout(500)
+    page.fill("#content-search-items", "Spirit")
+    page.wait_for_timeout(1400)
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
+    assert page.locator("#item-editor .editor-field").count() >= 100
+    assert page.locator('#item-editor [data-edit-path^="RandomStats."]').count() == 70
+    page.fill('#item-editor [data-edit-path="Name"]', "SpiritBladeUI")
+    page.fill('#item-editor [data-edit-path="Price"]', "23456")
+    page.fill('#item-editor [data-edit-path="RandomStats.AccuracyChance"]', "42")
+    page.click('#item-editor [data-action="editor-add-stat"]')
+    stat_row = page.locator("#item-editor .editor-stat-row").last
+    stat_row.locator("[data-stat-key]").select_option("Luck")
+    stat_row.locator("[data-stat-value]").fill("7")
+    page.fill("#editor-reason", "Web UI item editor full-field update")
+    page.wait_for_function("document.querySelector('#editor-diff')?.innerText.includes('SpiritBladeUI')", timeout=5000)
+    assert "Price" in page.locator("#editor-diff").inner_text()
+    page.click('#item-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('SpiritBladeUI')", timeout=15000)
+
+    edited_entity = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/1", token=admin_token)
+    assert edited_entity["revision"] == 2, edited_entity
+    assert edited_entity["data"]["Name"] == "SpiritBladeUI", edited_entity["data"]
+    assert edited_entity["data"]["Price"] == 23456, edited_entity["data"]
+    assert edited_entity["data"]["RandomStats"]["AccuracyChance"] == 42, edited_entity["data"]["RandomStats"]
+    assert edited_entity["data"]["Stats"]["Values"]["Luck"] == 7, edited_entity["data"]["Stats"]
+
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
+    page.click('#item-editor [data-action="editor-validate"]')
+    page.wait_for_selector("#item-editor [data-editor-validation]", timeout=60000)
+    validation_text = page.locator("#item-editor [data-editor-validation]").inner_text()
+    assert "通过" in validation_text, validation_text[:1200]
+
+    concurrent = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/1", token=admin_token)
+    concurrent_data = concurrent["data"]
+    concurrent_data["Name"] = "SpiritBladeConcurrent"
+    api_request("PUT", f"/api/v1/drafts/{draft_ui_id}/content/item/1", {
+        "contentKey": concurrent["contentKey"],
+        "schemaVersion": concurrent["schemaVersion"],
+        "data": concurrent_data,
+        "expectedRevision": concurrent["revision"],
+        "reason": "Web UI simulate concurrent edit"
+    }, admin_token)
+    page.fill('#item-editor [data-edit-path="Name"]', "SpiritBladeConflictSave")
+    page.click('#item-editor [data-action="editor-save"]')
+    page.wait_for_selector("#item-editor [data-editor-conflict]", timeout=15000)
+    assert page.locator('#item-editor [data-edit-path="Name"]').input_value() == "SpiritBladeConflictSave"
+    page.click('#item-editor [data-action="editor-reload"]')
+    page.wait_for_function(
+        "() => document.querySelector('#item-editor [data-edit-path=Name]')?.value === 'SpiritBladeConcurrent'",
+        timeout=15000)
+
+    page.fill('#item-editor [data-edit-path="Price"]', "-1")
+    page.click('#item-editor [data-action="editor-save"]')
+    page.wait_for_selector('#item-editor .editor-field[data-field-path="Price"].has-error', timeout=15000)
+    assert "between" in page.locator('#item-editor .editor-field[data-field-path="Price"]').inner_text()
+    page.fill('#item-editor [data-edit-path="Price"]', "20000")
+    page.click('#item-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+
+    page.fill("#content-search-items", "UITempItem")
+    page.wait_for_timeout(1200)
+    page.click('[data-action="open-item-editor-new"]')
+    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
+    page.fill('#item-editor [data-edit-path="Name"]', "UITempItem")
+    page.fill("#editor-reason", "Web UI create temporary item")
+    page.click('#item-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('UITempItem')", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
+    page.click('#item-editor [data-action="editor-delete-request"]')
+    page.wait_for_selector('#item-editor [data-action="editor-delete-confirm"]', timeout=5000)
+    page.click('#item-editor [data-action="editor-delete-confirm"]')
+    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempItem')", timeout=15000)
 
     page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
@@ -454,7 +555,7 @@ with sync_playwright() as playwright:
     finance_errors = []
     finance_requests = []
     finance_page.on("pageerror", lambda exc: finance_errors.append(str(exc)))
-    finance_page.on("console", lambda msg: finance_errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and "401" not in msg.text else None)
+    finance_page.on("console", lambda msg: finance_errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and not is_expected_console_error(msg.text) else None)
     finance_page.on("request", lambda request: finance_requests.append(request.url))
     finance_page.goto(login_url, wait_until="networkidle")
     finance_page.fill('input[name="username"]', finance_user)
@@ -485,7 +586,7 @@ with sync_playwright() as playwright:
     auditor_page = browser.new_page(viewport={"width": 1440, "height": 1000})
     auditor_errors = []
     auditor_page.on("pageerror", lambda exc: auditor_errors.append(str(exc)))
-    auditor_page.on("console", lambda msg: auditor_errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and "401" not in msg.text else None)
+    auditor_page.on("console", lambda msg: auditor_errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and not is_expected_console_error(msg.text) else None)
     auditor_page.goto(login_url, wait_until="networkidle")
     auditor_page.fill('input[name="username"]', ui_user)
     auditor_page.fill('input[name="password"]', f"{ui_password}Reset")
@@ -499,6 +600,15 @@ with sync_playwright() as playwright:
     assert auditor_page.locator('button[title="回滚"]').count() == 0
     assert auditor_page.locator('button[title="查看版本"]').count() >= 1
     assert auditor_page.locator('.main-content').inner_text().find("只读") >= 0 or auditor_page.locator('button[title="查看版本"]').count() >= 1
+
+    auditor_page.goto(f"{web}/?api={api}#/content/items", wait_until="networkidle")
+    auditor_page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    assert auditor_page.locator('[data-action="open-item-editor-new"]').count() == 0
+    assert auditor_page.locator('[data-action="open-modal"][data-modal="create-draft"]').count() == 0
+    auditor_page.locator("#content-table tbody tr.content-row").first.click()
+    auditor_page.wait_for_selector(".drawer", timeout=10000)
+    assert auditor_page.locator("#item-editor").count() == 0
+    assert auditor_page.locator('[data-action="editor-save"]').count() == 0
 
     assert not errors, errors
     assert not failed, failed

@@ -1,6 +1,6 @@
 # 数据与内容架构
 
-> 最后更新：2026-11-13
+> 最后更新：2026-11-16
 > 状态：生效
 
 ## 1. 数据域
@@ -173,6 +173,13 @@ content_draft_revision(
 草稿创建时复制基础批次的全部实体。逐实体 `revision` 用于乐观并发；更新/删除携带
 `expectedRevision`，不一致返回 409。每次变更追加不可修改的修订记录，保存操作者、原因、前后数据和时间。
 校验结果持久化到 `content_draft.last_validation`，发布时从草稿当前实体复制到不可变发布版本。
+
+M2 的物品编辑器垂直切片复用上述草稿表，不新增迁移。Control API 手工维护 `item` 的版本化 Schema，
+覆盖 33 个顶层字段、`Stats.Values` 和 70 个随机属性字段；字段枚举、flags 和属性键不引用 GPL 程序集。
+类型化创建在事务内为草稿分配下一个 `local_index`，覆盖 `Index` 并生成 `item.<localIndex>`。
+保存只阻断字段类型、范围、枚举、`Index`/内容键一致性等结构错误；缺失字段和空名称由草稿/发布校验报告。
+旧内容省略 `RandomStats` 表示全零随机属性，视为合法；未知字段在编辑保存时原样保留。
+详见 `adr/0007-item-editor-schema-and-validation.md`。
 
 专用表用于需要索引、关联约束和后台筛选的字段；`data jsonb` 保存完整实体。
 

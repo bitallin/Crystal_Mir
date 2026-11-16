@@ -128,6 +128,12 @@ if [ "$UNAUTHORIZED_STATUS" != "401" ]; then
   exit 1
 fi
 
+UNAUTHORIZED_SCHEMA_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$BASE/api/v1/editor-schemas/item")"
+if [ "$UNAUTHORIZED_SCHEMA_STATUS" != "401" ]; then
+  echo "Expected unauthenticated editor schema request to return 401, got $UNAUTHORIZED_SCHEMA_STATUS." >&2
+  exit 1
+fi
+
 CORS_HEADERS="$(curl -sS --max-time 10 -D - -o /dev/null -X OPTIONS   -H "Origin: $WEB_ORIGIN"   -H 'Access-Control-Request-Method: POST'   -H 'Access-Control-Request-Headers: content-type,authorization'   "$BASE/api/v1/auth/login")"
 if ! grep -qi "^Access-Control-Allow-Origin: $WEB_ORIGIN" <<<"$CORS_HEADERS"; then
   echo "Expected Control API CORS preflight to allow $WEB_ORIGIN." >&2
@@ -153,6 +159,12 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/recipe/1/relations" >
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script/1/validation" >"$TMP/script-validation.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset/1/file" >"$TMP/asset-file.bin"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/npc/1/script" >"$TMP/npc-script.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/item" >"$TMP/item-schema.json"
+UNKNOWN_SCHEMA_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "X-Api-Key: $API_KEY" "$BASE/api/v1/editor-schemas/monster")"
+if [ "$UNKNOWN_SCHEMA_STATUS" != "404" ]; then
+  echo "Expected unknown editor schema to return 404, got $UNKNOWN_SCHEMA_STATUS." >&2
+  exit 1
+fi
 
 RUN_ID="$(python3 - "$TMP/runs.json" <<'PY'
 import json, sys
@@ -187,6 +199,17 @@ assert item["data"]["Index"] == 1, item
 
 item_by_key = load("item-key.json")
 assert item_by_key["id"] == item["id"], (item_by_key, item)
+
+schema = load("item-schema.json")
+assert schema["entityType"] == "item", schema
+assert schema["schemaVersion"] == 1, schema
+schema_fields = [field for section in schema["sections"] for field in section.get("fields", [])]
+random_fields = [field for field in schema_fields if field["path"].startswith("RandomStats.")]
+assert len(random_fields) == 70, len(random_fields)
+assert any(field["path"] == "Stats" and field["kind"] == "stat-map" for field in schema_fields), schema_fields
+assert any(field["path"] == "Bind" and field["kind"] == "flags" for field in schema_fields), schema_fields
+assert any(field["path"] == "Type" and field["kind"] == "enum" and len(field.get("options", [])) >= 40 for field in schema_fields), schema_fields
+assert {section["id"] for section in schema["sections"]} >= {"identity", "requirements", "inventory", "flags", "stats", "random-stats"}, schema["sections"]
 
 monster = load("monster.json")
 assert monster["entityType"] == "monster", monster
@@ -506,6 +529,31 @@ curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts" >"$TMP/draft-created.json"
 DRAFT_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/draft-created.json")"
 
+APPROVER_SCHEMA_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $APPROVER_ACCESS" "$BASE/api/v1/editor-schemas/item")"
+if [ "$APPROVER_SCHEMA_STATUS" != "200" ]; then
+  echo "Expected release approver to read item editor schema, got $APPROVER_SCHEMA_STATUS." >&2
+  exit 1
+fi
+
+APPROVER_ENTITY_CREATE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"schemaVersion":1,"data":{"Name":"Denied"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item")"
+if [ "$APPROVER_ENTITY_CREATE_STATUS" != "403" ]; then
+  echo "Expected release approver item create to return 403, got $APPROVER_ENTITY_CREATE_STATUS." >&2
+  exit 1
+fi
+
+APPROVER_ENTITY_UPDATE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":1,"data":{"Index":1,"Name":"Denied"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$APPROVER_ENTITY_UPDATE_STATUS" != "403" ]; then
+  echo "Expected release approver item update to return 403, got $APPROVER_ENTITY_UPDATE_STATUS." >&2
+  exit 1
+fi
+
 curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts?limit=20" >"$TMP/drafts-list.json"
 curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
@@ -515,7 +563,22 @@ curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
 curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item.json"
 
-DRAFT_UPDATE_BODY='{"contentKey":"item.1","schemaVersion":1,"expectedRevision":1,"reason":"integration draft update","data":{"Index":1,"Name":"SpiritBladeDraft","Price":12345}}'
+python3 - "$TMP/draft-item.json" "$TMP/draft-update-body.json" <<'PY'
+import json, sys
+entity = json.load(open(sys.argv[1]))
+data = entity["data"]
+data["Name"] = "SpiritBladeDraft"
+data["Price"] = 12345
+body = {
+    "contentKey": entity["contentKey"],
+    "schemaVersion": 1,
+    "expectedRevision": entity["revision"],
+    "reason": "integration draft update",
+    "data": data,
+}
+json.dump(body, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY
+DRAFT_UPDATE_BODY="$(cat "$TMP/draft-update-body.json")"
 curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' --data "$DRAFT_UPDATE_BODY" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item-updated.json"
@@ -528,16 +591,84 @@ if [ "$STALE_REVISION_STATUS" != "409" ]; then
   exit 1
 fi
 
-ADDED_ITEM_KEY="item.draft.${SUFFIX}"
-curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+INVALID_ITEM_TYPE_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-type-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"Name":123}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_TYPE_STATUS" != "400" ]; then
+  echo "Expected invalid item string type to return 400, got $INVALID_ITEM_TYPE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_ENUM_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-enum-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"Type":"NotAnItemType"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_ENUM_STATUS" != "400" ]; then
+  echo "Expected invalid item enum to return 400, got $INVALID_ITEM_ENUM_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_RANGE_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-range-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"Weight":256}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_RANGE_STATUS" != "400" ]; then
+  echo "Expected out-of-range item integer to return 400, got $INVALID_ITEM_RANGE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_FLAGS_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-flags-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"Bind":"DontTrade,NotAFlag"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_FLAGS_STATUS" != "400" ]; then
+  echo "Expected unknown item flag to return 400, got $INVALID_ITEM_FLAGS_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_BOOLEAN_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-boolean-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"StartItem":"yes"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_BOOLEAN_STATUS" != "400" ]; then
+  echo "Expected invalid item boolean to return 400, got $INVALID_ITEM_BOOLEAN_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_INDEX_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-index-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"data":{"Index":2,"Name":"WrongIndex"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_INDEX_STATUS" != "400" ]; then
+  echo "Expected mismatched item Index to return 400, got $INVALID_ITEM_INDEX_STATUS." >&2
+  exit 1
+fi
+
+INVALID_ITEM_KEY_STATUS="$(curl -sS --max-time 20 -o "$TMP/invalid-item-key-error.json" -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.999999","schemaVersion":1,"expectedRevision":2,"data":{"Index":1,"Name":"WrongKey"}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$INVALID_ITEM_KEY_STATUS" != "400" ]; then
+  echo "Expected mismatched item contentKey to return 400, got $INVALID_ITEM_KEY_STATUS." >&2
+  exit 1
+fi
+
+ADDED_ITEM_BODY='{"schemaVersion":1,"reason":"integration draft add","data":{"Name":"DraftAddedItem","Price":1,"Stats":{}}}'
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
-  --data "$(printf '{"contentKey":"%s","schemaVersion":1,"expectedRevision":0,"reason":"integration draft add","data":{"Index":999999,"Name":"DraftAddedItem","Price":1}}' "$ADDED_ITEM_KEY")" \
-  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/999999" >"$TMP/draft-item-added.json"
+  --data "$ADDED_ITEM_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item" >"$TMP/draft-item-added.json"
+ADDED_ITEM_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-item-added.json")"
+ADDED_ITEM_KEY="item.${ADDED_ITEM_INDEX}"
+
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/validate" >"$TMP/draft-incomplete-report.json"
 
 curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
   --data '{"expectedRevision":1,"reason":"integration draft delete"}' \
-  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/999999"
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/$ADDED_ITEM_INDEX"
 
 STALE_DELETE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X DELETE \
   -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
@@ -591,9 +722,24 @@ curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
 curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
   "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/publish" >"$TMP/draft-release-published.json"
 
+python3 - "$TMP/draft-item-updated.json" "$TMP/draft-after-release-body.json" <<'PY'
+import json, sys
+entity = json.load(open(sys.argv[1]))
+data = entity["data"]
+data["Name"] = "SpiritBladeAfterRelease"
+data["Price"] = 54321
+body = {
+    "contentKey": entity["contentKey"],
+    "schemaVersion": 1,
+    "expectedRevision": entity["revision"],
+    "reason": "mutate draft after release",
+    "data": data,
+}
+json.dump(body, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY
 curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
-  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"reason":"mutate draft after release","data":{"Index":1,"Name":"SpiritBladeAfterRelease","Price":54321}}' \
+  --data "$(cat "$TMP/draft-after-release-body.json")" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item-after-release.json"
 curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/validate" >"$TMP/draft-release-validated-after-change.json"
@@ -993,9 +1139,26 @@ assert draft_item["data"]["Name"] == "SpiritBlade", draft_item
 draft_item_updated = load("draft-item-updated.json")
 assert draft_item_updated["revision"] == 2, draft_item_updated
 assert draft_item_updated["data"]["Name"] == "SpiritBladeDraft", draft_item_updated
+assert draft_item_updated["data"]["Index"] == 1, draft_item_updated
+assert len(draft_item_updated["data"]["RandomStats"]) == 70, draft_item_updated["data"]["RandomStats"]
+assert draft_item_updated["data"]["Stats"]["Values"]["MaxDC"] == 20, draft_item_updated["data"]["Stats"]
 draft_item_added = load("draft-item-added.json")
 assert draft_item_added["revision"] == 1, draft_item_added
-assert draft_item_added["contentKey"].startswith("item.draft."), draft_item_added
+assert draft_item_added["contentKey"] == f"item.{draft_item_added['localIndex']}", draft_item_added
+assert draft_item_added["data"]["Index"] == draft_item_added["localIndex"], draft_item_added
+
+assert "Name" in load("invalid-item-type-error.json")["errors"], load("invalid-item-type-error.json")
+assert "Type" in load("invalid-item-enum-error.json")["errors"], load("invalid-item-enum-error.json")
+assert "Weight" in load("invalid-item-range-error.json")["errors"], load("invalid-item-range-error.json")
+assert "Bind" in load("invalid-item-flags-error.json")["errors"], load("invalid-item-flags-error.json")
+assert "StartItem" in load("invalid-item-boolean-error.json")["errors"], load("invalid-item-boolean-error.json")
+assert "Index" in load("invalid-item-index-error.json")["errors"], load("invalid-item-index-error.json")
+assert "contentKey" in load("invalid-item-key-error.json")["errors"], load("invalid-item-key-error.json")
+
+incomplete_report = load("draft-incomplete-report.json")
+assert incomplete_report["valid"] is False, incomplete_report
+assert any(issue["code"] == "item-completeness" and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["message"] == "Missing required item field 'Stats.Values'." and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 
 invalid_report = load("draft-invalid-report.json")
 assert invalid_report["valid"] is False, invalid_report
@@ -1007,8 +1170,8 @@ assert valid_report["entityCount"] == 9797, valid_report
 
 revisions = load("draft-revisions.json")["items"]
 assert any(revision["action"] == "update" and revision["contentKey"] == "item.1" and revision["reason"] == "integration draft update" for revision in revisions), revisions
-assert any(revision["action"] == "create" and revision["contentKey"].startswith("item.draft.") for revision in revisions), revisions
-assert any(revision["action"] == "delete" and revision["contentKey"].startswith("item.draft.") for revision in revisions), revisions
+assert any(revision["action"] == "create" and revision["contentKey"] == draft_item_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "delete" and revision["contentKey"] == draft_item_added["contentKey"] for revision in revisions), revisions
 assert any(revision["beforeData"] is not None and revision["afterData"] is not None for revision in revisions), revisions
 
 draft_release_created = load("draft-release-created.json")

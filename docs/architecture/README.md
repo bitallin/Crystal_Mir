@@ -1,6 +1,6 @@
 # 架构文档索引
 
-> 最后更新：2026-11-13
+> 最后更新：2026-11-16
 > 状态：生效
 
 ## 1. 架构目标
@@ -39,6 +39,7 @@
 | 游戏协议 | 保留现有二进制协议，新增边缘网关和版本协商 | `adr/0003-legacy-protocol-with-gateway.md` |
 | 许可证边界 | 控制面与 GPL 服务端代码隔离，跨边界只使用 MIT 契约 | `adr/0004-gpl-boundary.md` |
 | 草稿与回滚 | 草稿独立复制、逐实体 revision、发布冻结、回滚切换发布状态 | `adr/0006-content-drafts-and-release-rollback.md` |
+| 物品编辑器 | 手工维护 Schema、类型化自动索引、保存只阻断结构错误、发布校验完整性 | `adr/0007-item-editor-schema-and-validation.md` |
 
 ## 5. 文档索引
 
