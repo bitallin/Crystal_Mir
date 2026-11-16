@@ -123,6 +123,57 @@ content_entity(
 
 一次二进制导入对应一个 `content_import_run`，批次不可变，便于回滚和历史对比。
 
+可编辑草稿使用独立副本，不修改导入批次：
+
+```text
+content_draft(
+  id bigint primary key,
+  name text not null,
+  base_import_run_id bigint references content_import_run(id),
+  status text not null,              -- editing / validated / failed / archived
+  created_by bigint,
+  updated_by bigint,
+  entity_count int not null,
+  last_validation jsonb,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+
+content_draft_entity(
+  draft_id bigint references content_draft(id),
+  entity_type text not null,
+  local_index bigint not null,
+  content_key text not null,
+  schema_version int not null,
+  data jsonb not null,
+  revision bigint not null,
+  updated_by bigint,
+  updated_at timestamptz,
+  unique (draft_id, entity_type, content_key),
+  unique (draft_id, entity_type, local_index)
+)
+
+content_draft_revision(
+  id bigint primary key,
+  draft_id bigint references content_draft(id),
+  revision_number bigint not null,
+  action text not null,              -- create / update / delete
+  entity_type text not null,
+  local_index bigint not null,
+  content_key text not null,
+  before_data jsonb,
+  after_data jsonb,
+  actor_account_id bigint,
+  reason text,
+  occurred_at timestamptz,
+  unique (draft_id, revision_number)
+)
+```
+
+草稿创建时复制基础批次的全部实体。逐实体 `revision` 用于乐观并发；更新/删除携带
+`expectedRevision`，不一致返回 409。每次变更追加不可修改的修订记录，保存操作者、原因、前后数据和时间。
+校验结果持久化到 `content_draft.last_validation`，发布时从草稿当前实体复制到不可变发布版本。
+
 专用表用于需要索引、关联约束和后台筛选的字段；`data jsonb` 保存完整实体。
 
 文件型、启动生成和资源元数据也进入同一实体模型：M1 已支持把 `Envir/Drops` 导入为 `drop` 实体，内容键为
@@ -140,17 +191,25 @@ Control API 直接按 `jsonb` 关系提供地图拓扑、刷新点、传送门�
 ```text
 content_release(
   id bigint primary key,
+  import_run_id bigint,
+  draft_id bigint,
   version text not null,
-  status text not null,             -- draft / validating / published / archived
+  status text not null,             -- draft / validating / compiled / signed / published / active / archived / failed / rolled_back
   schema_version int not null,
+  format_version int not null,
   content_hash text not null,
   manifest_object_key text,
   created_by bigint,
+  created_at timestamptz,
   published_at timestamptz,
-  notes text
+  notes text,
+  rolled_back_at timestamptz,
+  rolled_back_by bigint,
+  rollback_reason text,
+  rollback_target_id bigint references content_release(id)
 )
 
-content_release_entity(release_id, entity_type, content_key, payload jsonb)
+content_release_entity(release_id, entity_type, local_index, content_key, payload jsonb)
 
 asset(
   id bigint primary key,
@@ -166,10 +225,16 @@ asset(
 content_release_asset(release_id, asset_id, role)
 ```
 
-M1 已实现发布 API：从已完成的 `content_import_run` 复制实体生成不可变 `draft`，重建并校验快照后
-编译到 `ReleaseRoot/<version>/`，再使用 ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会
-进入 `failed` 且禁止继续编译/签名/发布；重复发布保持幂等。当前 `draft` 是导入批次对应的不可变
-候选版本，还不是 M2 的可编辑草稿。
+M1 已实现发布 API：创建版本时必须从已完成的 `content_import_run` 或 `content_draft` 二选一复制实体，
+生成不可变 `content_release_entity`；重建并校验快照后编译到 `ReleaseRoot/<version>/`，再使用
+ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会进入 `failed` 且禁止继续编译/签名/发布；
+重复发布保持幂等。发布事务复制实体后会回读并重算内容哈希，来源草稿并发变更时返回 409；
+从草稿创建版本后，后续草稿修改不会影响已创建版本。
+
+回滚只作用于当前 `published` 或 `active` 版本。事务内锁定当前版本、当前 active 版本和目标版本，
+重新验签目标产物后把当前版本标记为 `rolled_back`，把目标版本标记为 `active`，并记录
+`rolled_back_at`、`rolled_back_by`、`rollback_reason` 和 `rollback_target_id`。部分唯一索引
+保证最多一个 `active` 版本。详见 `adr/0006-content-drafts-and-release-rollback.md`。
 
 ### 4.4 区服与运营
 
@@ -231,12 +296,16 @@ draft -> validating -> compiled -> signed -> published -> active -> archived
 
 | 阶段 | 产物 | 是否可修改 |
 | --- | --- | --- |
-| draft | M1：导入批次的不可变候选；M2：编辑态表 | M1 否，M2 是 |
+| draft | 导入批次或可编辑草稿的不可变候选 | 否 |
 | validating | 校验报告 | 否 |
 | compiled | 内容包 + manifest | 否 |
 | signed | 签名 manifest | 否 |
 | published | 可被区服拉取的 release | 否 |
-| active | 区服正在运行 | 否 |
+| active | 平台当前生效版本；由回滚事务设置 | 否 |
+| rolled_back | 已被回滚并保留目标和原因 | 否 |
+
+`publish` 只把版本标记为可用，不直接设置 `active`。当前没有 active 版本时，Control.Web 展示最新发布版本，
+但不会虚构区服灰度或热切换状态；真实区服激活属于 M3 Agent。
 
 ## 6. 内容包格式
 

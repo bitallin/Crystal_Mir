@@ -1,25 +1,25 @@
 # 项目进度台账
 
 > 最后更新：2026-11-13
-> 当前阶段：M1 架构骨架与数据底座（内容快照、导入器、快照/PostgreSQL 到旧二进制重建、PostgreSQL schema、内容快照签名、Control API、账号/JWT/RBAC/审计、NPC 脚本 AST/编译校验、地图格式解析与资源文件校验下载、Control.Web 全量地图目录与真实关系接入、Linux 区服宿主和 Ubuntu 部署已完成初版；从导入批次创建/校验/编译/签名/发布 API 已完成初版；可编辑内容草稿写入、M1 计划中的 GameCore/Agent/Compose 交付物与 PG16 staging 待做）
+> 当前阶段：M1 架构骨架与数据底座已完成（代码、Linux 构建、PostgreSQL 16 集成与 Compose 冒烟口径）；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0005 |
-| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具构建成功；358 项回归检查通过 |
+| 架构决策 | 已完成初版 | ADR 0001～0006 |
+| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts 构建成功；安全回归与内容快照检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
-| CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job |
-| 控制面 | 进行中 | `Crystal.Control.Api` 内容只读接口暴露 15 类实体，含全量地图目录、地图拓扑/刷新点/传送门/NPC/NPC 脚本/怪物掉落/配方引用关系、NPC 脚本 AST/校验、地图资源元数据和经完整性校验的文件下载；发布 API 支持从导入批次创建不可变 `draft`、dry-run 校验、编译内容包、ECDSA 签名、验签发布、重复发布幂等和作者/审批人权限分离；账号生命周期、健康检查、可配置限流、CORS 和 PG 集成测试完成；`Crystal.Control.Web` 已接入真实登录、刷新/登出/自助改密、内容总览、导入批次、15 个内容域、全量地图目录与检索、真实关系面板与详情抽屉、脚本 AST 与编译校验、资源下载与浏览器端 SHA256 复核、Buff 列表、账号管理和审计导出；发布中心 Web 仍为原型，可编辑内容草稿写入待做 |
+| CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job |
+| 控制面 | 已完成初版 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持从导入批次复制实体、逐实体增改删、revision 乐观并发、修订记录和校验结果持久化；发布 API 支持从导入批次或草稿创建不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 发布中心已接真实列表、KPI、详情、manifest/签名、校验报告和全部发布/回滚动作；发布中心不再展示虚构区服灰度或 Ed25519 信息 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
-| 热更新 | 未开始 | 新 manifest/启动器/Agent 尚未实现 |
+| 热更新 | 未开始 | `Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实区服热切换尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
 | 许可证清单 | 进行中 | 代码/外部资源清单已建立；MapEditor 和素材授权待确认 |
 
@@ -28,7 +28,7 @@
 | 里程碑 | 状态 | 完成度 | 备注 |
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
-| M1 架构骨架与数据底座 | 进行中 | 98% | 数据链路、只读 API、地图目录与关系/掉落/配方/NPC 脚本 API、脚本 AST/编译校验、地图尺寸/阻挡解析、资源完整性下载、内容快照签名、发布校验/编译/签名/发布 API、账号/JWT/RBAC/审计、旧二进制导出与快照/PostgreSQL 重建、Linux 区服宿主和 Ubuntu 部署完成；`Crystal.GameCore`、`Crystal.Agent.Contracts`、Compose 交付物、可编辑内容草稿写入和 PG16 staging 待做 |
+| M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
 | M2 内容后台 MVP | 未开始 | 0% | 依赖 M1 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
@@ -348,6 +348,25 @@
 - 未验证：Control.Web 发布中心尚未接入真实发布 API；可编辑内容草稿/修订模型、发布回滚、KMS/HSM 托管密钥、Zone Agent 强制验签和 PostgreSQL 16 CI job 待做；本轮未运行 Playwright Web 集成和区服冒烟。
 - 决策：复用既有发布表和 ADR 0005 签名格式，未改变协议或数据模型，因此不新增 ADR。
 
+### 2026-11-13（M1 收口：骨架、草稿/回滚闭环与可部署栈）
+
+- 范围：按 M1 收口计划补齐 `Crystal.GameCore`、`Crystal.Agent.Contracts`、依赖边界检查、可编辑内容草稿、发布回滚、Control.Web 真实发布中心和 Compose 可部署栈；不迁移 `Envir`/`Map` 游戏逻辑，不改变客户端协议。
+- GameCore：新增 `IContentSnapshotProvider<TSnapshot>`、`IPlayerRepository<TSnapshot>`、`IWorldClock`、`IZoneEventSink`、`IChatTransport` 和运行时事件类型；`Crystal.ZoneServer` 只增加项目引用。
+- Agent 契约：新增 MIT `Crystal.Agent.Contracts`，定义注册、心跳、命令、命令结果、内容版本描述、稳定 JSON 字段和命令字符串 `content.stage`/`content.activate`/`content.rollback`/`content.reload`/`zone.stop`；本轮不注册 Control API Agent 路由。
+- 边界：新增 `Tests/ContractBoundary`、`scripts/check-boundaries.sh` 并接入 `scripts/build.sh`、`scripts/test.sh` 和 `scripts/ci.sh`；检查 Control API 不引用 GPL 项目，GameCore 只依赖 Shared，Agent 契约无项目依赖。
+- schema：新增 `db/migrations/0003_content_draft_schema.sql`，创建 `content_draft`、`content_draft_entity`、`content_draft_revision`，为 `content_release` 增加 `draft_id`、回滚时间/操作者/原因/目标，并用 `ux_content_release_single_active` 保证最多一个 `active` 版本。
+- 草稿 API：支持从已导入批次复制实体、分页查询、按实体读取、PUT 新增/更新、DELETE 删除、校验和修订查询；逐实体 `revision` 乐观并发，冲突返回 409；变更追加前后数据、操作者、原因和时间，校验结果持久化到 `last_validation`。
+- 发布/回滚：创建版本时 `importRunId` 与 `draftId` 恰好提供一个，创建时复制实体到不可变版本，并在同一事务内回读实体重算内容哈希，来源草稿被并发修改时返回 409；回滚只作用于 `published`/`active`，目标须为 `published`，事务锁定并重新验签，当前版本标记 `rolled_back`、目标版本标记 `active`，原因写入审计。
+- Control.Web：发布中心改为真实 API 数据，展示发布列表、KPI、状态链路、实体计数、manifest/签名、校验报告和回滚元数据；支持从导入批次/草稿创建版本、校验、编译、签名、发布和回滚；动作按 `release:*` 权限显隐，不再展示虚构区服灰度和 Ed25519。
+- 部署：新增根目录 `compose.yaml`、`.env.example`、`deploy/docker/control-api.Dockerfile`、`deploy/docker/control-web.Dockerfile`、`deploy/nginx/control-web.conf` 和 `scripts/test-compose.sh`。Compose 包含 PostgreSQL 16、Redis 7、MinIO、MinIO init、db-migrate、Control API 和 Nginx Web；Web 同源代理 `/api`/`/health`，数据、Redis、MinIO 和发布产物使用独立卷，签名私钥只运行时挂载，GPL 导入器不进入 Compose。
+- 验证：`./scripts/build.sh` 通过；`./scripts/test.sh` 通过 358 项物品安全回归、39 项内容快照检查和 Agent/GameCore 契约边界测试；`./scripts/check-boundaries.sh`、`./scripts/verify-content.sh`、`./scripts/inspect-db.sh`、`./scripts/zone-smoke.sh` 通过。
+- 验证：在一次性 PostgreSQL 16 数据库上运行 `./scripts/test-control-api.sh`，覆盖草稿复制/增改删、陈旧 revision 409、校验失败/成功、从草稿创建发布、完整发布链路、显式/默认双版本回滚、403、短原因 400、重复回滚 409 和审计事件，通过。
+- 验证：Node Playwright（playwright-core + Chromium）对真实 API/Web 运行发布中心冒烟，覆盖草稿发布、校验、编译、签名、manifest、权限动作和回滚；分别验证了存在 active 与无 active 的两条回滚分支。Python Playwright 在当前环境无法安装，`scripts/test-control-web.sh` 已同步修正回滚源/目标逻辑但未在本机执行。
+- 验证：`./scripts/test-compose.sh` 通过。当前沙箱无法使用 Docker 主机端口映射，脚本自动改用 Nginx 容器内同源代理验证健康、登录和内容查询，并用一次性 SDK/运行时容器在 Compose 网络内运行宿主机已构建的 GPL 导入器；CI 环境仍使用宿主机导入路径。
+- 验证：Shell `bash -n`、全部 Control.Web JavaScript `node --check`、`docker compose config` 和 `git diff --check` 通过。
+- 未验证：GitHub Actions 远端 PG16/Compose job、Windows 客户端登录/选角/进服、Windows 宿主编译运行、Ubuntu systemd 实际安装、真实 Zone Agent 热切换、KMS/HSM 密钥和素材授权。
+- 决策：新增 ADR 0006，记录草稿复制、逐实体 revision、发布时冻结实体、平台级单 active 和回滚状态切换模型。
+
 ## 4. 决策记录
 
 | 日期 | 决策 | ADR |
@@ -357,6 +376,7 @@
 | 2026-11-09 | 保留现有协议并引入边缘网关 | `docs/adr/0003-legacy-protocol-with-gateway.md` |
 | 2026-11-09 | GPL 边界与代码隔离 | `docs/adr/0004-gpl-boundary.md` |
 | 2026-11-11 | 内容快照签名格式 | `docs/adr/0005-content-signature-format.md` |
+| 2026-11-13 | 内容草稿、修订与发布回滚模型 | `docs/adr/0006-content-drafts-and-release-rollback.md` |
 
 ## 5. 阻塞与风险
 
@@ -365,21 +385,20 @@
 | 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
 | 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
 | 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
-| CI | CI 已覆盖 `main`/`master` push，但 PostgreSQL 16 job 尚未在远端实际运行验证 | 无法确认 GitHub Actions 环境与本地结果一致 | 推送后检查 Actions 结果并保留日志 |
-| 交付口径 | M1 计划中的 `Crystal.GameCore`、`Crystal.Agent.Contracts` 骨架和 Compose（PostgreSQL/Redis/MinIO/API/Web）尚未落地 | 内容链路虽接近完成，但按里程碑交付物口径仍不能判定 M1 完成 | 作为 M1/M2 收口项排期，并在进度表中区分功能链路与交付物完成度 |
+| CI | PostgreSQL 16 与 Compose job 尚未在远端实际运行验证 | 无法确认 GitHub Actions 环境与本地结果一致 | 推送后检查 Actions 结果并保留日志 |
+| 运行 | 当前环境是 Linux，未执行 Windows 客户端登录/进服和 WinForms 宿主冒烟 | M0 客户端验收仍不能闭环 | 准备 Windows runner 或测试机 |
 | 许可 | `Crystal.MapEditor` 未发现明确许可证 | 不能随发布包分发 | 联系维护者、确认许可证或替换工具 |
 | 许可 | 服务端 GPL-3.0-only、素材版权 | 分发和商业化受限 | M0 完成合规审查并保留源码归档流程 |
 | 技术 | `Envir`/`Map` 耦合高 | 迁移和热重载风险 | 绞杀者模式 + 黄金样本测试 |
 
 ## 6. 下一步
 
-1. 补齐 M1 交付物口径：`Crystal.GameCore`、`Crystal.Agent.Contracts` 骨架和 PostgreSQL/Redis/MinIO/API/Web Compose。
-2. 将 Control.Web 发布中心接入真实 `/releases` API，补发布列表、校验报告、manifest/签名详情和审批操作。
-3. 为 M2 设计可编辑内容草稿/修订模型和写入 API，明确草稿与已导入不可变批次的边界；涉及数据模型变更，先补 ADR。
-4. 在 PostgreSQL 16 staging 验证全量导入与发布链路，确认 GitHub Actions PG16 job 稳定，并补发布回滚路径。
-5. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
-6. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
-7. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单。
+1. 推送后确认 GitHub Actions 的 PostgreSQL 16、Compose 和边界检查 job 稳定，并保存失败日志。
+2. 进入 M2：为物品、怪物、地图、NPC、掉落、配方等域实现类型化编辑表单和可视化差异，复用现有草稿 API。
+3. 实现 M3 Zone Agent 服务：注册、心跳、命令队列、内容拉取、staging/activate/rollback 和真实区服热切换。
+4. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
+5. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+6. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单和 MapEditor 许可证结论。
 
 ## 7. 更新规则
 

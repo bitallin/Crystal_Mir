@@ -51,6 +51,17 @@ trap cleanup EXIT
 
 cd "$ROOT"
 mkdir -p "$ROOT/artifacts"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl is required to generate Control Web release signing keys." >&2
+  exit 2
+fi
+KEY_DIR="$ROOT/artifacts/control-web-signing"
+RELEASE_ROOT="$ROOT/artifacts/control-web-releases"
+mkdir -p "$KEY_DIR" "$RELEASE_ROOT"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+  -out "$KEY_DIR/private.pem" >/dev/null 2>&1
+openssl pkey -in "$KEY_DIR/private.pem" -pubout \
+  -out "$KEY_DIR/public.pem" >/dev/null 2>&1
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo >/dev/null
 
 ASPNETCORE_ENVIRONMENT=Production \
@@ -62,6 +73,10 @@ ControlApi__ApiRateLimitPermitLimit=5000 \
 ControlApi__CorsOrigins="$WEB" \
 ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
 ControlApi__AssetRoot="$ROOT/tests/fixtures/content" \
+ControlApi__ReleaseRoot="$RELEASE_ROOT" \
+ControlApi__ReleaseSigningPrivateKeyPath="$KEY_DIR/private.pem" \
+ControlApi__ReleaseSigningPublicKeyPath="$KEY_DIR/public.pem" \
+ControlApi__ReleaseSigningKeyId="control-web-test" \
 "$DOTNET" "$ROOT/src/Crystal.Control.Api/bin/$CONFIGURATION/net8.0/Crystal.Control.Api.dll" \
   >"$ROOT/artifacts/control-web-api.log" 2>&1 &
 API_PID=$!
@@ -99,7 +114,10 @@ curl -fsS --max-time 15 -X POST -H "Authorization: Bearer $ADMIN_ACCESS"   -H 'C
 
 python3 - "$WEB" "$BASE" "$ADMIN_PASSWORD" "$FINANCE_USER" "$FINANCE_PASSWORD" "$UI_USER" "$UI_PASSWORD" <<'PY'
 import hashlib
+import json
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -128,6 +146,17 @@ with sync_playwright() as playwright:
     page.wait_for_function("location.hash === '#/dashboard'", timeout=15000)
     page.wait_for_timeout(400)
     assert page.locator(".api-badge.success").count() >= 1
+
+    def api_request(method, path, body=None, token=None):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        request = urllib.request.Request(api + path, data=data, method=method)
+        request.add_header("Accept", "application/json")
+        if data is not None:
+            request.add_header("Content-Type", "application/json")
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     page.goto(f"{web}/?api={api}#/content-overview", wait_until="networkidle")
     page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,797')", timeout=15000)
@@ -251,6 +280,105 @@ with sync_playwright() as playwright:
     page.wait_for_function("document.querySelectorAll('#live-map-select option').length > 0 && document.querySelectorAll('#live-map-select option').length < 463", timeout=15000)
     assert page.locator('#live-map-select option[value="1"]').count() == 1
 
+    admin_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
+    runs = api_request("GET", "/api/v1/import-runs?limit=20", token=admin_token)
+    run_id = next(item["id"] for item in runs if item["status"] == "imported")
+    releases_before = api_request("GET", "/api/v1/releases?limit=200", token=admin_token)["items"]
+    active_before = next((item for item in releases_before if item["status"] == "active"), None)
+    web_suffix = str(time.time_ns())
+    draft = api_request("POST", "/api/v1/drafts", {
+        "baseImportRunId": run_id,
+        "name": f"web-draft-{web_suffix}"
+    }, admin_token)
+    version1 = f"web.draft.{web_suffix}"
+    version2 = f"web.rollback.{web_suffix}"
+
+    page.goto(f"{web}/?api={api}#/content-releases", wait_until="networkidle")
+    page.wait_for_selector("#release-table tbody tr", timeout=15000)
+
+    def release_row(version):
+        return page.locator("#release-table tbody tr", has_text=version)
+
+    def wait_release_status(version, label):
+        page.wait_for_function(
+            "([version, label]) => { const rows = [...document.querySelectorAll('#release-table tbody tr')]; const row = rows.find(item => item.innerText.includes(version)); return row && row.innerText.includes(label); }",
+            arg=[version, label],
+            timeout=30000)
+
+    page.click('[data-action="open-modal"][data-modal="create-release"]')
+    page.wait_for_selector('.modal select[name="source"]', timeout=5000)
+    page.fill('.modal input[name="version"]', version1)
+    page.select_option('.modal select[name="source"]', value=f"draft:{draft['id']}")
+    page.fill('.modal textarea[name="notes"]', "web integration draft release")
+    page.click('.modal [data-action="submit-release-create"]')
+    release_row(version1).wait_for(timeout=20000)
+
+    release_row(version1).locator('button[title="校验"]').click()
+    page.wait_for_function("document.body.innerText.includes('校验通过')", timeout=30000)
+    page.wait_for_timeout(800)
+    release_row(version1).locator('button[title="编译"]').click()
+    wait_release_status(version1, "已编译")
+    release_row(version1).locator('button[title="签名"]').click()
+    wait_release_status(version1, "已签名")
+    page.wait_for_function("document.querySelector('.main-content').innerText.includes('ecdsa-p256-sha256')", timeout=20000)
+    release_row(version1).locator('button[title="发布"]').click()
+    wait_release_status(version1, "已发布")
+
+    release_row(version1).locator('button[title="查看版本"]').click()
+    page.wait_for_selector('.modal', timeout=5000)
+    modal_text = page.locator('.modal').inner_text()
+    assert "ecdsa-p256-sha256" in modal_text, modal_text[:1200]
+    assert "control-web-test" in modal_text, modal_text[:1200]
+    page.click('.modal [data-action="close-modal"]')
+
+    release1 = next(
+        item for item in api_request("GET", "/api/v1/releases?limit=200", token=admin_token)["items"]
+        if item["version"] == version1)
+    assert release1["status"] == "published" and release1["draftId"] == draft["id"], release1
+
+    page.click('[data-action="open-modal"][data-modal="create-release"]')
+    page.wait_for_selector('.modal select[name="source"]', timeout=5000)
+    page.fill('.modal input[name="version"]', version2)
+    page.select_option('.modal select[name="source"]', value=f"import:{run_id}")
+    page.fill('.modal textarea[name="notes"]', "web integration rollback target")
+    page.click('.modal [data-action="submit-release-create"]')
+    release_row(version2).wait_for(timeout=20000)
+
+    release_row(version2).locator('button[title="校验"]').click()
+    page.wait_for_function("document.body.innerText.includes('校验通过')", timeout=30000)
+    page.wait_for_timeout(800)
+    release_row(version2).locator('button[title="编译"]').click()
+    wait_release_status(version2, "已编译")
+    release_row(version2).locator('button[title="签名"]').click()
+    wait_release_status(version2, "已签名")
+    release_row(version2).locator('button[title="发布"]').click()
+    wait_release_status(version2, "已发布")
+    release2 = next(
+        item for item in api_request("GET", "/api/v1/releases?limit=200", token=admin_token)["items"]
+        if item["version"] == version2)
+    assert release2["status"] == "published", release2
+
+    rollback_source = active_before["version"] if active_before else version2
+    rollback_target = release2["id"] if active_before else release1["id"]
+    active_version = version2 if active_before else version1
+    release_row(rollback_source).locator('button[title="回滚"]').click()
+    page.wait_for_selector('.modal select[name="targetReleaseId"]', timeout=5000)
+    page.select_option('.modal select[name="targetReleaseId"]', value=str(rollback_target))
+    page.fill('.modal textarea[name="reason"]', "web integration rollback reason")
+    page.click('.modal [data-action="submit-release-rollback"]')
+    wait_release_status(rollback_source, "已回滚")
+    wait_release_status(active_version, "生效中")
+    releases_after = api_request("GET", "/api/v1/releases?limit=200", token=admin_token)["items"]
+    rolled_back_release = next(item for item in releases_after if item["version"] == rollback_source)
+    activated_release = next(item for item in releases_after if item["version"] == active_version)
+    assert rolled_back_release["status"] == "rolled_back", rolled_back_release
+    assert activated_release["status"] == "active", activated_release
+    assert rolled_back_release["rollbackTargetId"] == activated_release["id"], (rolled_back_release, activated_release)
+    release_page_text = page.locator('.main-content').inner_text()
+    assert "Ed25519" not in release_page_text, release_page_text[:1200]
+    assert "区服灰度" not in release_page_text, release_page_text[:1200]
+    assert "已回滚版本" in release_page_text, release_page_text[:1200]
+
     page.goto(f"{web}/?api={api}#/accounts", wait_until="networkidle")
     page.wait_for_selector("#account-table tbody tr", timeout=15000)
     page.wait_for_function("!document.querySelector('#account-table tbody').innerText.includes('正在从 Control API')", timeout=15000)
@@ -354,9 +482,28 @@ with sync_playwright() as playwright:
     requested_paths = [url.split(api, 1)[-1] for url in finance_requests if url.startswith(api)]
     assert not any(path.startswith("/api/v1/content") or path.startswith("/api/v1/import-runs") or path.startswith("/api/v1/accounts") for path in requested_paths), requested_paths
 
+    auditor_page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    auditor_errors = []
+    auditor_page.on("pageerror", lambda exc: auditor_errors.append(str(exc)))
+    auditor_page.on("console", lambda msg: auditor_errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and "401" not in msg.text else None)
+    auditor_page.goto(login_url, wait_until="networkidle")
+    auditor_page.fill('input[name="username"]', ui_user)
+    auditor_page.fill('input[name="password"]', f"{ui_password}Reset")
+    auditor_page.click("button.login-submit")
+    auditor_page.wait_for_function("location.hash === '#/dashboard'", timeout=15000)
+    assert auditor_page.locator('[data-nav-item="content-releases"]').count() == 1
+    auditor_page.goto(f"{web}/?api={api}#/content-releases", wait_until="networkidle")
+    auditor_page.wait_for_selector("#release-table tbody tr", timeout=15000)
+    assert auditor_page.locator('[data-action="release-perform"]').count() == 0
+    assert auditor_page.locator('[data-action="open-modal"][data-modal="create-release"]').count() == 0
+    assert auditor_page.locator('button[title="回滚"]').count() == 0
+    assert auditor_page.locator('button[title="查看版本"]').count() >= 1
+    assert auditor_page.locator('.main-content').inner_text().find("只读") >= 0 or auditor_page.locator('button[title="查看版本"]').count() >= 1
+
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
-    print("Control Web integration verified: login, live overview, import runs, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    assert not auditor_errors, auditor_errors
+    print("Control Web integration verified: login, live overview, import runs, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only release permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY

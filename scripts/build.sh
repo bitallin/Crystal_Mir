@@ -26,6 +26,15 @@ echo "== Client (cross-build) =="
 echo "== Content =="
 "$DOTNET" build src/Crystal.Content/Crystal.Content.csproj -c "$CONFIGURATION" --nologo
 
+echo "== GameCore =="
+"$DOTNET" build src/Crystal.GameCore/Crystal.GameCore.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Agent Contracts =="
+"$DOTNET" build src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Contract boundary test =="
+"$DOTNET" build Tests/ContractBoundary/ContractBoundary.csproj -c "$CONFIGURATION" --nologo
+
 echo "== Control API =="
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo
 

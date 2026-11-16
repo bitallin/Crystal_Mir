@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Crystal.GameCore/Crystal.GameCore.csproj" />
     <ProjectReference Include="../../Server/Server.Library.csproj" />
     <ProjectReference Include="../../Shared/Shared.csproj" />
   </ItemGroup>

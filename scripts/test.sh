@@ -15,3 +15,4 @@ trap cleanup EXIT
 cd "$TMP"
 "$DOTNET" run --project "$ROOT/Tests/ItemSecurity/ItemSecurity.csproj" -c "$CONFIGURATION"
 "$DOTNET" run --project "$ROOT/Tests/ContentSnapshot/ContentSnapshot.csproj" -c "$CONFIGURATION"
+"$DOTNET" run --project "$ROOT/Tests/ContractBoundary/ContractBoundary.csproj" -c "$CONFIGURATION"

@@ -1,7 +1,7 @@
 # Control API 参考
 
-> 最后更新：2026-11-11
-> 状态：生效（M1 认证、账号生命周期与只读初版）
+> 最后更新：2026-11-13
+> 状态：生效（M1 草稿、发布与回滚闭环）
 
 ## 1. 位置与边界
 
@@ -19,8 +19,10 @@
 - Argon2id 密码、短时 JWT、刷新令牌轮换和会话撤销。
 - RBAC 权限校验、账号创建/停用/启用、密码修改/重置、角色调整和只读审计查询。
 - API key 机器到机器认证、登录限流和全局限流。
+- 从导入批次创建可编辑草稿、逐实体增改删、修订查询和草稿校验。
+- 从导入批次或草稿创建不可变发布版本，校验、编译、ECDSA 签名、发布和回滚。
 
-尚未实现：MFA/OIDC、账号删除、解锁接口、写入/发布 API、内容编辑和资源上传。
+尚未实现：MFA/OIDC、账号删除、解锁接口、完整类型化内容编辑器、Zone Agent 服务和真实区服热切换。
 
 ## 2. 配置
 
@@ -35,6 +37,10 @@
 | `ControlApi:AuthRateLimitPermitLimit` | 同左 | 登录/刷新每 IP 每分钟请求上限，默认 10 |
 | `ControlApi:BootstrapAdminPassword` | `CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD` | 空库首次创建管理员的密码 |
 | `ControlApi:AssetRoot` | `CRYSTAL_CONTROL_ASSET_ROOT` | 资源文件根目录；配置后 `asset` 下载端点才可用，路径相对于快照中的 `relativePath` |
+| `ControlApi:ReleaseRoot` | `CRYSTAL_CONTROL_RELEASE_ROOT` | 编译产物根目录，默认 `artifacts/releases` |
+| `ControlApi:ReleaseSigningPrivateKeyPath` | `CRYSTAL_CONTROL_RELEASE_SIGNING_PRIVATE_KEY_PATH` | ECDSA P-256 私钥 PEM；仅签名动作需要 |
+| `ControlApi:ReleaseSigningPublicKeyPath` | `CRYSTAL_CONTROL_RELEASE_SIGNING_PUBLIC_KEY_PATH` | 公钥 PEM；发布和回滚验签需要 |
+| `ControlApi:ReleaseSigningKeyId` | `CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID` | 写入 manifest 的密钥标识 |
 | `ASPNETCORE_URLS` | 同左 | 监听地址 |
 | `ASPNETCORE_ENVIRONMENT` | 同左 | Production 强制要求 JWT 签名密钥 |
 
@@ -337,6 +343,96 @@ GET  /api/v1/audit/events?limit=50&action=&result=&actorAccountId=
 - 审计动作：`account.create`、`account.status`、`account.password.reset`、`account.roles.update`、`auth.password.change`。
   审计元数据不记录密码或密码哈希。
 
+### 3.7 内容草稿
+
+```text
+GET    /api/v1/drafts?limit=50&status=
+POST   /api/v1/drafts
+GET    /api/v1/drafts/{id}
+GET    /api/v1/drafts/{id}/content?entityType=&page=1&pageSize=50&q=&sort=index|key|name&direction=asc|desc
+GET    /api/v1/drafts/{id}/content/{entityType}/{localIndex}
+PUT    /api/v1/drafts/{id}/content/{entityType}/{localIndex}
+DELETE /api/v1/drafts/{id}/content/{entityType}/{localIndex}
+POST   /api/v1/drafts/{id}/validate
+GET    /api/v1/drafts/{id}/revisions?entityType=&contentKey=&limit=100
+```
+
+读取要求 `content:read`，创建、写入、删除和校验要求 `content:write`。创建请求：
+
+```json
+{
+  "baseImportRunId": 1,
+  "name": "2026-11 平衡性调整"
+}
+```
+
+创建时在单个事务内复制该导入批次的全部实体。草稿实体更新请求：
+
+```json
+{
+  "contentKey": "item.1",
+  "schemaVersion": 1,
+  "expectedRevision": 1,
+  "reason": "调整价格用于测试",
+  "data": {
+    "Index": 1,
+    "Name": "SpiritBlade",
+    "Price": 12345
+  }
+}
+```
+
+- 新建实体使用 `expectedRevision: 0` 并提供 `contentKey`。
+- 更新必须匹配当前实体 `revision`；删除请求体为 `{ "expectedRevision": 1, "reason": "..." }`。
+- 版本不一致返回 409，响应为 `application/problem+json`。
+- `contentKey` 创建后不可修改。每次变更追加修订记录，包含操作者、原因、前后数据和时间。
+- `validate` 返回并持久化 `contentHash`、实体数、`valid` 和问题列表；结果同时写入 `content_draft.last_validation`。
+
+### 3.8 发布、回滚与 Manifest
+
+```text
+GET  /api/v1/releases?limit=50&status=
+GET  /api/v1/releases/{id}
+GET  /api/v1/releases/{id}/manifest
+POST /api/v1/releases
+POST /api/v1/releases/{id}/validate
+POST /api/v1/releases/{id}/compile
+POST /api/v1/releases/{id}/sign
+POST /api/v1/releases/{id}/publish
+POST /api/v1/releases/{id}/rollback
+```
+
+创建版本要求 `release:write`，且 `importRunId` 与 `draftId` 恰好提供一个：
+
+```json
+{
+  "draftId": 7,
+  "version": "2026.11.13.1",
+  "notes": "从草稿创建，包含价格调整"
+}
+```
+
+创建时把来源实体复制到不可变 `content_release_entity`，后续草稿修改不会影响该版本。`ReleaseDto`
+包含 `importRunId`、`draftId`、`status`、`contentHash`、`counts`，以及回滚时的
+`rolledBackAt`、`rollbackReason` 和 `rollbackTargetId`。
+
+回滚要求 `release:rollback`，请求体：
+
+```json
+{
+  "reason": "新版本出现物品价格异常，切回上一个稳定版本",
+  "targetReleaseId": 12
+}
+```
+
+- `reason` 长度 8～512 字符，写入 `release.rollback` 审计事件。
+- `targetReleaseId` 可省略，默认选择最新的其他 `published` 版本。
+- 只允许回滚 `published` 或 `active` 版本；目标必须是 `published` 且不同于当前版本。
+- 事务内锁定记录，重新校验目标 artifact、`contentHash` 和 ECDSA 签名；成功后当前版本变为
+  `rolled_back`，目标版本变为 `active`。
+- 同一时刻最多一个 `active` 版本，由部分唯一索引保证。重复回滚或状态已变化返回 409。
+- `publish` 只把签名版本标记为可用的 `published`，不会自行设置 `active`。
+
 ## 4. 集成验证
 
 ```bash
@@ -346,8 +442,19 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 
 脚本会执行真实 PostgreSQL 导入（含掉落、配方、脚本和资源元数据）、启动 API，验证登录、JWT、刷新令牌轮换、
 RBAC 403、登出撤销、账号创建、停用/启用、管理员重置密码、自助改密、角色调整、最后管理员保护、审计查询、健康检查、
-分页、详情、类型计数、地图关系、怪物掉落、配方关系、NPC 脚本关系与 AST、资源元数据、资源文件字节/SHA256
-和非法参数，并在 CI 中通过 PostgreSQL 16 service container 运行。测试库应为独立数据库；已有账号时不会再执行 bootstrap。
+分页、详情、类型计数、地图关系、怪物掉落、配方关系、NPC 脚本关系与 AST、资源元数据、资源文件字节/SHA256、
+草稿复制/增改删/陈旧 revision 409/校验失败与成功、从草稿创建发布、完整发布链路、默认和显式双版本回滚、
+回滚权限 403、短原因 400、重复回滚 409 和审计事件，并在 CI 中通过 PostgreSQL 16 service container 运行。
+测试库应为独立数据库；已有账号时不会再执行 bootstrap。
+
+Compose 栈验证使用：
+
+```bash
+./scripts/test-compose.sh
+```
+
+脚本会启动 PostgreSQL 16、Redis 7、MinIO、API 和 Nginx Web，等待健康检查，由宿主机运行
+`Crystal.LegacyImporter` 导入黄金样本，再通过 Web 同源代理登录、查询内容和打开后台。
 
 ## 5. 当前限制
 
@@ -359,3 +466,5 @@ RBAC 403、登出撤销、账号创建、停用/启用、管理员重置密码�
 - 关系查询直接解析 `data jsonb`，尚未建立规范化外键；大规模关系检索前需要评估专用索引或投影表。
 - 资源下载要求 API 进程能直接访问 `ControlApi:AssetRoot`；对象存储/CDN、资源上传和签名分发尚未实现。
 - 分页使用 offset，内容规模很大时需要评估 keyset pagination。
+- 草稿不提供 M2 的类型化编辑表单、批量操作或可视化差异；当前仅提供后端写入闭环。
+- Agent 契约已定义，但 Control API 不注册 Agent 路由，区服不会自动消费 `active` 版本。

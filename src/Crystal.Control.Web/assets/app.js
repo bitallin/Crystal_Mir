@@ -46,6 +46,11 @@
       audit: null,
       accounts: null,
       roles: null,
+      releases: null,
+      drafts: null,
+      selectedReleaseId: null,
+      releaseManifests: Object.create(null),
+      releaseReports: Object.create(null),
       relations: {
         catalog: null,
         catalogTotal: 0,
@@ -151,6 +156,7 @@
 
   const STATUS = {
     published: ["已发布", "success"], draft: ["草稿", "neutral"], validating: ["校验中", "warning"],
+    compiled: ["已编译", "info"],
     signed: ["已签名", "violet"], active: ["生效中", "success"], archived: ["已归档", "neutral"],
     rolled_back: ["已回滚", "danger"], failed: ["失败", "danger"], imported: ["已导入", "success"],
     running: ["执行中", "info"], waiting: ["等待中", "neutral"], preflight: ["预检中", "warning"],
@@ -1604,6 +1610,11 @@
         return;
       }
 
+      if (route === "content-releases") {
+        await loadReleaseCenterData();
+        return;
+      }
+
       if (route === "audit") {
         if (state.live.audit || state.inflight.has("audit") || state.failed.has("audit")) return;
         state.inflight.add("audit");
@@ -1926,7 +1937,246 @@
       </div>`;
   }
 
-  function renderReleases() {
+  function releaseItems() {
+    return state.live.releases?.items || [];
+  }
+
+  function releaseById(id) {
+    return releaseItems().find(release => Number(release.id) === Number(id)) || null;
+  }
+
+  function releaseEntityCount(release) {
+    return (release?.counts || []).reduce((sum, entry) => sum + Number(entry.count || 0), 0);
+  }
+
+  function releaseSourceLabel(release) {
+    if (release?.draftId) return `草稿 #${release.draftId}`;
+    if (release?.importRunId) return `导入批次 #${release.importRunId}`;
+    return "—";
+  }
+
+  function releaseStatusLabel(value) {
+    return STATUS[value]?.[0] || value || "未知";
+  }
+
+  function releaseStepRank(value) {
+    if (value === "compiled") return 2;
+    if (value === "signed") return 3;
+    if (["published", "active", "rolled_back", "archived"].includes(value)) return 4;
+    return 1;
+  }
+
+  function ensureReleaseManifest(id) {
+    if (!id || state.live.releaseManifests[id] !== undefined) return;
+    const key = `release-manifest:${id}`;
+    if (state.inflight.has(key)) return;
+    state.inflight.add(key);
+    API.getReleaseManifest(id)
+      .then(manifest => {
+        state.live.releaseManifests[id] = { manifest };
+      })
+      .catch(error => {
+        if (error?.status !== 401) state.live.releaseManifests[id] = { error };
+      })
+      .finally(() => {
+        state.inflight.delete(key);
+        if (state.route === "content-releases") render();
+      });
+  }
+
+  function releaseActionError(error) {
+    if (error?.status === 401) {
+      handleApiFailure(error);
+      return;
+    }
+    if (error?.status === 403) {
+      showToast("当前账号缺少执行该发布操作的权限。", "danger");
+      return;
+    }
+    const details = error?.problem?.errors;
+    const message = details
+      ? Object.values(details).flat().join(" ")
+      : error?.problem?.detail || error?.message || "发布操作失败。";
+    showToast(message, "danger");
+  }
+
+  async function loadReleaseCenterData(force = false) {
+    if (state.inflight.has("releases")) return;
+    if (!force && state.live.releases) return;
+    state.inflight.add("releases");
+    try {
+      const context = state.live.runs || !hasPermission("content:read")
+        ? Promise.resolve()
+        : ensureLiveContext().catch(error => {
+          if (error?.status === 401) throw error;
+        });
+      const draftsRequest = hasPermission("content:read")
+        ? API.listDrafts(100).catch(error => {
+          if (error?.status === 401) throw error;
+          return { items: [], error };
+        })
+        : Promise.resolve({ items: [] });
+      const [releases, drafts] = await Promise.all([API.listReleases(200), draftsRequest, context]);
+      state.live.releases = { ...releases, loadedAt: new Date().toISOString() };
+      state.live.drafts = { ...drafts, loadedAt: new Date().toISOString() };
+      const items = releases.items || [];
+      if (!state.live.selectedReleaseId || !items.some(release => Number(release.id) === Number(state.live.selectedReleaseId))) {
+        const preferred = items.find(release => release.status === "active")
+          || items.find(release => release.status === "published")
+          || items[0];
+        state.live.selectedReleaseId = preferred ? preferred.id : null;
+      }
+    } catch (error) {
+      if (error?.status === 401) throw error;
+      state.live.releases = { items: [], error };
+      if (!error?.status) state.apiStatus = "degraded";
+    } finally {
+      state.inflight.delete("releases");
+    }
+    if (state.route === "content-releases") render();
+  }
+
+  async function runReleaseAction(action, id) {
+    try {
+      let result;
+      if (action === "validate") {
+        result = await API.validateRelease(id);
+        state.live.releaseReports[id] = result;
+        showToast(result.valid ? `版本 ${result.version} 校验通过。` : `版本 ${result.version} 有 ${result.issues.length} 个校验问题。`, result.valid ? "success" : "danger");
+      } else if (action === "compile") {
+        result = await API.compileRelease(id);
+        showToast(`版本 ${result.version} 已编译。`);
+      } else if (action === "sign") {
+        result = await API.signRelease(id);
+        showToast(`版本 ${result.version} 已签名。`);
+      } else if (action === "publish") {
+        result = await API.publishRelease(id);
+        showToast(`版本 ${result.version} 已发布。`);
+      } else {
+        throw new Error(`Unknown release action '${action}'.`);
+      }
+      if (["compile", "sign", "publish"].includes(action)) delete state.live.releaseManifests[id];
+      if (result?.id) state.live.selectedReleaseId = result.id;
+      await loadReleaseCenterData(true);
+    } catch (error) {
+      if (action === "validate" || action === "compile") {
+        const report = error?.problem;
+        if (report && Array.isArray(report.issues)) state.live.releaseReports[id] = report;
+      }
+      releaseActionError(error);
+      if (state.route === "content-releases") render();
+    }
+  }
+
+  function openLiveReleaseDetail(id) {
+    const release = releaseById(id);
+    if (!release) return;
+    const cached = state.live.releaseManifests[release.id];
+    if (!cached && (release.manifestObjectKey || ["compiled", "signed", "published", "active", "rolled_back"].includes(release.status))) {
+      ensureReleaseManifest(release.id);
+    }
+    const manifest = cached?.manifest;
+    const signature = manifest?.signature;
+    const report = state.live.releaseReports[release.id];
+    const counts = (release.counts || []).map(entry => `<div class="data-row"><span>${esc(entityLabel(entry.entityType))}</span><strong>${formatNumber(entry.count)}</strong></div>`).join("") || `<div class="empty-inline">版本中没有实体。</div>`;
+    const issues = report?.issues?.length
+      ? report.issues.map(issue => `<div class="validation-item warn">${I("warning", 12)}<span>${esc(issue.message || issue.code)}${issue.contentKey ? ` · ${esc(issue.contentKey)}` : ""}</span></div>`).join("")
+      : `<div class="validation-item ok">${I("checkCircle", 12)}<span>${report?.valid ? "本会话校验通过，无问题。" : "尚未运行校验，或校验未返回问题。"}</span></div>`;
+    modalShell({
+      title: `发布版本 ${release.version}`,
+      desc: `${releaseSourceLabel(release)} · ${releaseStatusLabel(release.status)}`,
+      iconName: "rocket",
+      body: `<div class="data-list"><div class="data-row"><span>状态</span><strong>${status(release.status)}</strong></div><div class="data-row"><span>来源</span><strong>${esc(releaseSourceLabel(release))}</strong></div><div class="data-row"><span>内容哈希</span><strong class="mono" style="font-size:9px">${esc(release.contentHash || "—")}</strong></div><div class="data-row"><span>实体数量</span><strong>${formatNumber(releaseEntityCount(release))}</strong></div><div class="data-row"><span>创建时间</span><strong>${esc(formatDateTime(release.createdAt))}</strong></div><div class="data-row"><span>发布时间</span><strong>${esc(formatDateTime(release.publishedAt))}</strong></div><div class="data-row"><span>备注</span><strong>${esc(release.notes || "—")}</strong></div>${release.rolledBackAt ? `<div class="data-row"><span>回滚时间</span><strong>${esc(formatDateTime(release.rolledBackAt))}</strong></div><div class="data-row"><span>回滚原因</span><strong>${esc(release.rollbackReason || "—")}</strong></div><div class="data-row"><span>回滚目标</span><strong>#${esc(release.rollbackTargetId ?? "—")}</strong></div>` : ""}</div><div class="divider"></div><div class="grid grid-2"><div><div class="detail-section-title"><span>实体计数</span></div><div class="data-list">${counts}</div></div><div><div class="detail-section-title"><span>Manifest / 签名</span></div><div class="data-list"><div class="data-row"><span>签名算法</span><strong class="mono">${esc(signature?.algorithm || "未编译或未签名")}</strong></div><div class="data-row"><span>Key ID</span><strong class="mono">${esc(signature?.keyId || "—")}</strong></div><div class="data-row"><span>签名时间</span><strong>${esc(formatDateTime(signature?.signedAt))}</strong></div><div class="data-row"><span>签名值</span><strong class="mono" style="font-size:9px">${esc(signature?.value ? `${String(signature.value).slice(0, 24)}…` : "—")}</strong></div></div></div></div><div class="divider"></div><div class="detail-section-title"><span>校验报告</span></div><div class="validation-list">${issues}</div>`,
+      foot: `${btn("刷新详情", "refresh", "btn-secondary", `data-action="open-release-detail" data-id="${release.id}"`)}${btn("关闭", "", "btn-primary", 'data-action="close-modal"')}`
+    });
+  }
+
+  function openLiveCreateReleaseModal() {
+    const runs = (Array.isArray(state.live.runs) ? state.live.runs : state.live.runs?.items || [])
+      .filter(run => run.status === "imported");
+    const drafts = state.live.drafts?.items || [];
+    const options = [
+      ...runs.map(run => `<option value="import:${run.id}">导入批次 #${run.id} · ${formatNumber(run.entityCount)} 实体</option>`),
+      ...drafts.map(draft => `<option value="draft:${draft.id}">草稿 #${draft.id} · ${esc(draft.name)} · ${formatNumber(draft.entityCount)} 实体</option>`)
+    ];
+    if (!options.length) {
+      showToast("没有可用的导入批次或草稿，请先导入内容或创建草稿。", "danger");
+      return;
+    }
+    modalShell({
+      title: "创建内容版本",
+      desc: "从不可变导入批次或可编辑草稿复制实体，创建后版本内容即冻结。",
+      iconName: "plus",
+      body: `<form class="js-form"><div class="field"><label>版本号</label><input name="version" value="${esc(new Date().toISOString().slice(0, 10).replaceAll("-", "."))}.1" aria-label="版本号"><div class="field-hint">允许字母、数字、点、下划线和连字符。</div></div><div class="field"><label>内容来源</label><select name="source">${options.join("")}</select></div><div class="field"><label>发布备注</label><textarea name="notes" placeholder="说明本次变更范围、验证结果和已知风险"></textarea></div><div class="risk-box">${I("info", 15)}<span>发布版本的实体在创建时复制；后续草稿修改不会改变已创建版本。</span></div></form>`,
+      foot: `${btn("取消", "", "btn-secondary", 'data-action="close-modal"')}${btn("创建版本", "plus", "btn-primary", 'data-action="submit-release-create"')}`
+    });
+  }
+
+  function openLiveRollbackModal(id) {
+    const release = releaseById(id) || releaseItems()[0];
+    if (!release) return;
+    const candidates = releaseItems().filter(item => item.status === "published" && Number(item.id) !== Number(release.id));
+    const options = [`<option value="">自动选择最新其他已发布版本</option>`, ...candidates.map(item => `<option value="${item.id}">${esc(item.version)} · 发布 ${esc(formatDateTime(item.publishedAt))}</option>`)];
+    modalShell({
+      title: `回滚 ${release.version}`,
+      desc: "当前版本将被标记为已回滚，目标已发布版本恢复为 active；目标产物会重新验签。",
+      iconName: "rotate",
+      body: `<form class="js-form"><div class="field"><label>目标版本</label><select name="targetReleaseId">${options.join("")}</select></div><div class="field"><label>回滚原因</label><textarea name="reason" placeholder="至少 8 个字符，说明触发回滚的问题和影响范围"></textarea><div class="field-hint">原因将写入审计日志，长度 8–512 字符。</div></div><div class="risk-box">${I("alert", 15)}<span>回滚会改变当前生效版本，并在事务中锁定发布记录。</span></div></form>`,
+      foot: `${btn("取消", "", "btn-secondary", 'data-action="close-modal"')}${btn("确认回滚", "rotate", "btn-danger", `data-action="submit-release-rollback" data-id="${release.id}"`)}`
+    });
+  }
+
+  async function submitReleaseCreateFromModal() {
+    const form = modalForm();
+    const version = formValue(form, "version");
+    const source = formValue(form, "source");
+    const notes = formValue(form, "notes");
+    if (!version) {
+      showToast("请输入版本号。", "danger");
+      return;
+    }
+    const [kind, rawId] = source.split(":");
+    const sourceId = Number(rawId);
+    if (!Number.isFinite(sourceId) || sourceId <= 0 || !["import", "draft"].includes(kind)) {
+      showToast("请选择有效的内容来源。", "danger");
+      return;
+    }
+    try {
+      const release = kind === "draft"
+        ? await API.createRelease(null, sourceId, version, notes || null)
+        : await API.createRelease(sourceId, null, version, notes || null);
+      state.live.selectedReleaseId = release.id;
+      closeOverlays();
+      showToast(`版本 ${release.version} 已创建，状态为草稿。`);
+      await loadReleaseCenterData(true);
+    } catch (error) {
+      releaseActionError(error);
+    }
+  }
+
+  async function submitReleaseRollbackFromModal(actionEl) {
+    const form = modalForm();
+    const id = Number(actionEl.dataset.id);
+    const reason = formValue(form, "reason");
+    const rawTarget = formValue(form, "targetReleaseId");
+    if (reason.length < 8 || reason.length > 512) {
+      showToast("回滚原因必须为 8–512 个字符。", "danger");
+      return;
+    }
+    try {
+      const result = await API.rollbackRelease(id, reason, rawTarget ? Number(rawTarget) : undefined);
+      delete state.live.releaseManifests[id];
+      delete state.live.releaseManifests[result.active.id];
+      state.live.selectedReleaseId = result.active.id;
+      closeOverlays();
+      showToast(`版本 ${result.rolledBack.version} 已回滚，${result.active.version} 已生效。`);
+      await loadReleaseCenterData(true);
+    } catch (error) {
+      releaseActionError(error);
+    }
+  }
+
+  function renderDemoReleases() {
     return `
       <div class="page">
         ${pageHeader({ title: "发布中心", description: "内容从草稿、校验、签名到发布和回滚的完整流水线。发布包不可变，区服只消费已签名版本。", eyebrow: "RELEASE PIPELINE", actions: `${btn("版本对比", "gitBranch", "btn-secondary", 'data-action="open-modal" data-modal="release-diff"')}${btn("创建版本", "plus", "btn-primary", 'data-action="open-modal" data-modal="create-release"')}` })}
@@ -1970,6 +2220,99 @@
           </tbody></table></div>
         </section>
       </div>`;
+  }
+
+  function renderLiveReleases() {
+    const collection = state.live.releases;
+    if (!collection) {
+      return `<div class="page">${pageHeader({ title: "发布中心", description: "正在读取 Control API 发布数据...", eyebrow: "RELEASE PIPELINE" })}<section class="card"><div class="card-body"><div class="empty-inline">${I("refresh", 14)} 正在读取发布版本、草稿和 manifest...</div></div></section></div>`;
+    }
+    if (collection.error) {
+      return `<div class="page">${pageHeader({ title: "发布中心", description: "内容从草稿、校验、编译、签名到发布和回滚的完整流水线。", eyebrow: "RELEASE PIPELINE" })}<section class="card"><div class="card-body"><div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>发布数据读取失败</strong><span>${esc(collection.error.message || "Control API 请求失败")}</span></div><button class="btn btn-secondary btn-sm" data-action="refresh-releases">${I("refresh", 11)}重试</button></div></div></section></div>`;
+    }
+
+    const items = releaseItems();
+    const active = items.find(release => release.status === "active") || items.find(release => release.status === "published") || null;
+    const selected = releaseById(state.live.selectedReleaseId) || active || items[0] || null;
+    if (selected && Number(state.live.selectedReleaseId) !== Number(selected.id)) {
+      state.live.selectedReleaseId = selected.id;
+    }
+    if (selected && (selected.manifestObjectKey || ["compiled", "signed", "published", "active", "rolled_back"].includes(selected.status))) {
+      ensureReleaseManifest(selected.id);
+    }
+
+    const canWrite = hasPermission("release:write");
+    const canPublish = hasPermission("release:publish");
+    const canRollback = hasPermission("release:rollback");
+    const publishedCount = items.filter(release => ["published", "active"].includes(release.status)).length;
+    const signedCount = items.filter(release => release.status === "signed").length;
+    const rolledBackCount = items.filter(release => release.status === "rolled_back").length;
+    const report = selected ? state.live.releaseReports[selected.id] : null;
+    const manifestState = selected ? state.live.releaseManifests[selected.id] : null;
+    const manifest = manifestState?.manifest;
+    const signature = manifest?.signature;
+    const selectedRank = selected ? releaseStepRank(selected.status) : 0;
+    const validationDone = Boolean(report?.valid) || selectedRank >= 2;
+    const validationFailed = report?.valid === false;
+
+    const pipelineStep = (label, done, detail, failed = false) => `<div class="pipeline-step ${done ? "active" : ""}" style="${failed ? "border-color:var(--red)" : ""}"><div class="pipeline-label">${esc(label)}</div><div class="pipeline-value">${failed ? I("alert", 14) : done ? "✓" : "→"}</div><div class="small muted">${esc(detail)}</div></div>`;
+    const pipeline = selected
+      ? `<div class="pipeline">${pipelineStep("创建", true, releaseSourceLabel(selected))}${pipelineStep("校验", validationDone, validationFailed ? `${report.issues.length} 个问题` : validationDone ? "通过" : "待校验", validationFailed)}${pipelineStep("编译", selectedRank >= 2, selectedRank >= 2 ? `${formatNumber(releaseEntityCount(selected))} 实体` : "等待校验通过")}${pipelineStep("签名", selectedRank >= 3, signature ? `${signature.algorithm} · ${signature.keyId}` : "等待编译")}${pipelineStep("发布", selectedRank >= 4, selected.status === "rolled_back" ? "已回滚" : selectedRank >= 4 ? formatDateTime(selected.publishedAt) : "等待签名", selected.status === "rolled_back")}</div>`
+      : `<div class="empty-inline">还没有发布版本，先创建一个版本。</div>`;
+    const validationIssues = report?.issues?.length
+      ? report.issues.map(issue => `<div class="validation-item warn">${I("warning", 12)}<span>${esc(issue.message || issue.code)}${issue.contentKey ? ` · ${esc(issue.contentKey)}` : ""}</span></div>`).join("")
+      : `<div class="validation-item ${validationFailed ? "warn" : "ok"}">${I(validationFailed ? "warning" : "checkCircle", 12)}<span>${validationFailed ? `${report.issues.length} 个校验问题` : report?.valid ? "本会话校验通过" : "尚未在本会话运行校验"}</span></div>`;
+
+    const actionButtons = selected ? [
+      canWrite && ["draft", "failed"].includes(selected.status) ? btn("校验", "play", "btn-secondary btn-sm", `data-action="release-perform" data-op="validate" data-id="${selected.id}"`) : "",
+      canWrite && ["draft", "failed"].includes(selected.status) ? btn("编译", "package", "btn-primary btn-sm", `data-action="release-perform" data-op="compile" data-id="${selected.id}"`) : "",
+      canWrite && selected.status === "compiled" ? btn("签名", "shield", "btn-primary btn-sm", `data-action="release-perform" data-op="sign" data-id="${selected.id}"`) : "",
+      canPublish && selected.status === "signed" ? btn("发布", "rocket", "btn-primary btn-sm", `data-action="release-perform" data-op="publish" data-id="${selected.id}"`) : "",
+      canRollback && ["published", "active"].includes(selected.status) ? btn("回滚", "rotate", "btn-danger btn-sm", `data-action="open-modal" data-modal="rollback-release" data-id="${selected.id}"`) : ""
+    ].filter(Boolean).join("") : "";
+
+    const rows = items.map(release => {
+      const actions = [
+        iconButton("eye", "查看版本", `data-action="open-release-detail" data-id="${release.id}"`),
+        canWrite && ["draft", "failed"].includes(release.status) ? iconButton("play", "校验", `data-action="release-perform" data-op="validate" data-id="${release.id}"`) : "",
+        canWrite && ["draft", "failed"].includes(release.status) ? iconButton("package", "编译", `data-action="release-perform" data-op="compile" data-id="${release.id}"`) : "",
+        canWrite && release.status === "compiled" ? iconButton("shield", "签名", `data-action="release-perform" data-op="sign" data-id="${release.id}"`) : "",
+        canPublish && release.status === "signed" ? iconButton("rocket", "发布", `data-action="release-perform" data-op="publish" data-id="${release.id}"`) : "",
+        canRollback && ["published", "active"].includes(release.status) ? iconButton("rotate", "回滚", `data-action="open-modal" data-modal="rollback-release" data-id="${release.id}"`) : ""
+      ].filter(Boolean).join("");
+      return `<tr class="${selected && Number(selected.id) === Number(release.id) ? "selected" : ""}"><td><span class="cell-main mono">${esc(release.version)}</span><div class="cell-sub">${esc(releaseSourceLabel(release))}</div></td><td>${status(release.status)}</td><td><span class="cell-main">${formatNumber(releaseEntityCount(release))}</span><div class="cell-sub">${esc((release.counts || []).length)} 类实体</div></td><td class="mono small">${esc(String(release.contentHash || "—").slice(0, 16))}</td><td>${esc(release.publishedAt ? formatDateTime(release.publishedAt) : formatDateTime(release.createdAt))}</td><td><div class="table-actions">${actions || `<span class="muted small">只读</span>`}</div></td></tr>`;
+    }).join("");
+
+    return `
+      <div class="page">
+        ${pageHeader({ title: "发布中心", description: "内容从草稿、校验、编译、签名到发布和回滚的完整流水线。发布包不可变，动作受 release:* 权限和审计约束。", eyebrow: "RELEASE PIPELINE", actions: `${btn("刷新", "refresh", "btn-secondary", 'data-action="refresh-releases"')}${canWrite ? btn("创建版本", "plus", "btn-primary", 'data-action="open-modal" data-modal="create-release"') : ""}` })}
+        <section class="grid grid-4">
+          ${kpi({ label: "当前生效版本", value: active?.version || "—", icon: "rocket", tone: "green", meta: active ? releaseSourceLabel(active) : "暂无 active 或 published 版本" })}
+          ${kpi({ label: "已发布版本", value: formatNumber(publishedCount), icon: "checkCircle", tone: "blue", meta: `共 ${formatNumber(items.length)} 个版本` })}
+          ${kpi({ label: "已签名待发布", value: formatNumber(signedCount), icon: "shield", tone: "violet", meta: "签名后可发布" })}
+          ${kpi({ label: "已回滚版本", value: formatNumber(rolledBackCount), icon: "rotate", tone: "red", meta: "回滚记录保留原因和目标" })}
+        </section>
+        <section class="grid grid-3 mt-16">
+          <article class="card span-2">
+            <div class="card-head"><div><h2 class="card-title">当前发布链路</h2><p class="card-subtitle">${selected ? `${esc(selected.version)} · ${esc(releaseSourceLabel(selected))}` : "尚无发布版本"}</p></div>${selected ? status(selected.status) : ""}</div>
+            <div class="card-body">${pipeline}</div>
+            <div class="card-foot flex justify-between items-center"><span class="small muted">${selected ? `内容哈希 ${esc(String(selected.contentHash || "—").slice(0, 16))}…` : "创建版本后可执行校验、编译和签名。"}</span><div class="flex gap-6">${actionButtons || `<span class="small muted">当前账号或版本状态没有可执行动作。</span>`}</div></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><div><h2 class="card-title">Manifest 与校验</h2><p class="card-subtitle">真实产物与签名元数据</p></div></div>
+            <div class="card-body data-list"><div class="data-row"><span>签名算法</span><strong class="mono" style="font-size:9px">${esc(signature?.algorithm || (manifestState?.error ? "产物不可读" : "未编译或未签名"))}</strong></div><div class="data-row"><span>Key ID</span><strong class="mono" style="font-size:9px">${esc(signature?.keyId || "—")}</strong></div><div class="data-row"><span>签名时间</span><strong>${esc(formatDateTime(signature?.signedAt))}</strong></div><div class="data-row"><span>Manifest 对象</span><strong class="mono" style="font-size:9px">${esc(selected?.manifestObjectKey || (manifest ? "manifest.json" : "—"))}</strong></div></div><div class="divider"></div><div class="validation-list">${validationIssues}</div>
+            <div class="card-foot"><button class="btn btn-secondary" style="width:100%" data-action="open-release-detail" data-id="${selected?.id ?? ""}" ${selected ? "" : "disabled"}>${I("file", 13)}查看完整版本详情</button></div>
+          </article>
+        </section>
+        <section class="card mt-16">
+          <div class="card-head"><div><h2 class="card-title">版本历史</h2><p class="card-subtitle">不可变发布记录、真实状态与回滚入口</p></div><span class="tag">${formatNumber(items.length)} 个版本</span></div>
+          <div class="table-wrap"><table id="release-table"><thead><tr><th>版本</th><th>状态</th><th>实体</th><th>内容哈希</th><th>创建/发布时间</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="6"><div class="empty-inline">还没有发布版本。${canWrite ? "点击“创建版本”从导入批次或草稿开始。" : "请联系版本作者创建。"}</div></td></tr>`}</tbody></table></div>
+        </section>
+      </div>`;
+  }
+
+  function renderReleases() {
+    return isLive() ? renderLiveReleases() : renderDemoReleases();
   }
 
   function renderAssets() {
@@ -3103,6 +3446,12 @@
   }
 
   function openModal(name, dataset = {}) {
+    if (name === "create-release" && isLive()) {
+      return openLiveCreateReleaseModal();
+    }
+    if (name === "rollback-release" && isLive()) {
+      return openLiveRollbackModal(Number(dataset.id));
+    }
     if (name === "import") {
       return modalShell({ title: "导入旧版 MirDB", desc: "上传 Server.MirDB 并生成不可变导入批次。", iconName: "upload", body: `<form class="js-form"><div class="field"><label>数据库文件</label><input type="file" aria-label="数据库文件"><div class="field-hint">支持标准 Server.MirDB；导入前自动校验头部版本与哈希。</div></div><div class="field-row"><div class="field"><label>目标环境</label><select><option>staging</option><option>dev</option><option>prod</option></select></div><div class="field"><label>导入后动作</label><select><option>仅生成快照</option><option>生成快照并写入 PostgreSQL</option><option>生成快照并运行完整校验</option></select></div></div><div class="risk-box">${I("info", 15)}<span>导入不会直接修改运行中的区服；内容需要经过校验、签名和发布流程。</span></div></form>`, foot: `${btn("取消", "", "btn-secondary", 'data-action="close-modal"')}${btn("开始导入", "upload", "btn-primary", 'data-action="submit-import"')}` });
     }
@@ -3303,6 +3652,11 @@
       }
       if (action === "export-audit") { exportAuditCsv(); return; }
       if (action === "download-asset") { void downloadAssetFromDrawer(actionEl); return; }
+      if (action === "refresh-releases") { void loadReleaseCenterData(true).catch(handleApiFailure); return; }
+      if (action === "release-perform") { void runReleaseAction(actionEl.dataset.op, Number(actionEl.dataset.id)); return; }
+      if (action === "open-release-detail") { openLiveReleaseDetail(Number(actionEl.dataset.id)); return; }
+      if (action === "submit-release-create") { void submitReleaseCreateFromModal(); return; }
+      if (action === "submit-release-rollback") { void submitReleaseRollbackFromModal(actionEl); return; }
       if (action === "open-modal") { openModal(actionEl.dataset.modal, actionEl.dataset); return; }
       if (action === "close-modal" || action === "close-drawer" || action === "close-overlays") { closeOverlays(); return; }
       if (action === "login") { state.apiStatus = "demo"; state.user = null; navigate("dashboard"); setTimeout(() => showToast("已进入 MIR Control 高保真原型"), 80); return; }

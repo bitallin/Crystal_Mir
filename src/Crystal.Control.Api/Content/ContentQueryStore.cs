@@ -20,6 +20,9 @@ public sealed class ContentQueryStore
         await using var command = new NpgsqlCommand(
             """
             SELECT to_regclass('public.content_entity') IS NOT NULL
+               AND to_regclass('public.content_draft') IS NOT NULL
+               AND to_regclass('public.content_draft_entity') IS NOT NULL
+               AND to_regclass('public.content_draft_revision') IS NOT NULL
                AND to_regclass('public.control_account') IS NOT NULL
                AND to_regclass('public.control_session') IS NOT NULL
                AND to_regclass('public.audit_event') IS NOT NULL;

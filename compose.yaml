@@ -1,0 +1,149 @@
+name: ${CRYSTAL_COMPOSE_PROJECT:-crystal}
+
+services:
+  postgres:
+    image: ${CRYSTAL_POSTGRES_IMAGE:-postgres:16}
+    environment:
+      POSTGRES_DB: crystal
+      POSTGRES_USER: crystal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${CRYSTAL_COMPOSE_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crystal -d crystal"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: ${CRYSTAL_REDIS_IMAGE:-redis:7-alpine}
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: ${CRYSTAL_MINIO_IMAGE:-minio/minio:RELEASE.2024-12-18T13-15-44Z}
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: ${CRYSTAL_MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-12-18T13-15-44Z}
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing local/crystal-content &&
+        mc anonymous set none local/crystal-content
+    restart: "no"
+
+  db-migrate:
+    image: ${CRYSTAL_POSTGRES_IMAGE:-postgres:16}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: crystal
+      PGUSER: crystal
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        for migration in /migrations/*.sql; do
+          echo "Applying $$migration"
+          psql -v ON_ERROR_STOP=1 -f "$$migration"
+        done
+    restart: "no"
+
+  control-api:
+    image: ${CRYSTAL_CONTROL_API_IMAGE:-crystal/control-api:dev}
+    build:
+      context: .
+      dockerfile: deploy/docker/control-api.Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Crystal: Host=postgres;Port=5432;Database=crystal;Username=crystal;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      CRYSTAL_CONTROL_JWT_SIGNING_KEY: ${CRYSTAL_CONTROL_JWT_SIGNING_KEY:?set CRYSTAL_CONTROL_JWT_SIGNING_KEY in .env}
+      CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD: ${CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD:?set CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD in .env}
+      ControlApi__AssetRoot: /var/lib/crystal/assets
+      ControlApi__ReleaseRoot: /var/lib/crystal/releases
+      CRYSTAL_CONTROL_RELEASE_SIGNING_PRIVATE_KEY_PATH: /run/crystal-signing/private.pem
+      CRYSTAL_CONTROL_RELEASE_SIGNING_PUBLIC_KEY_PATH: /run/crystal-signing/public.pem
+      CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID: ${CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID:-local-dev}
+      ControlApi__ApiRateLimitPermitLimit: ${CRYSTAL_CONTROL_API_RATE_LIMIT:-2000}
+      ControlApi__AuthRateLimitPermitLimit: ${CRYSTAL_CONTROL_AUTH_RATE_LIMIT:-100}
+    volumes:
+      - release-artifacts:/var/lib/crystal/releases
+      - ${CRYSTAL_CONTROL_ASSET_ROOT:-./tests/fixtures/content}:/var/lib/crystal/assets:ro
+      - ${CRYSTAL_CONTROL_SIGNING_DIR:-./artifacts/control-signing}:/run/crystal-signing:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080; printf \"GET /health/ready HTTP/1.0\\r\\n\\r\\n\" >&3; head -n 1 <&3 | grep -q \"200\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  control-web:
+    image: ${CRYSTAL_CONTROL_WEB_IMAGE:-crystal/control-web:dev}
+    build:
+      context: .
+      dockerfile: deploy/docker/control-web.Dockerfile
+    depends_on:
+      control-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${CRYSTAL_COMPOSE_WEB_PORT:-18088}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  release-artifacts:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${CRYSTAL_COMPOSE_SUBNET:-172.28.0.0/16}

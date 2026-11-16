@@ -32,6 +32,9 @@ jobs:
       - name: Verify golden content import
         run: ./scripts/verify-content.sh
 
+      - name: Check dependency boundaries
+        run: ./scripts/check-boundaries.sh
+
       - name: Check Control Web JavaScript
         run: |
           for script in src/Crystal.Control.Web/assets/*.js; do
@@ -68,3 +71,19 @@ jobs:
 
       - name: Control API integration on PostgreSQL 16
         run: ./scripts/test-control-api.sh
+
+  compose-stack:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET: dotnet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Compose deployment smoke test
+        run: ./scripts/test-compose.sh

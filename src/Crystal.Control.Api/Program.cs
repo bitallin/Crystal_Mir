@@ -20,6 +20,8 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(options.DatabaseConne
 builder.Services.AddSingleton<ContentQueryStore>();
 builder.Services.AddSingleton<ContentRelationStore>();
 builder.Services.AddSingleton<ContentAssetService>();
+builder.Services.AddSingleton<ContentDraftStore>();
+builder.Services.AddSingleton<ContentDraftService>();
 builder.Services.AddSingleton<ContentReleaseStore>();
 builder.Services.AddSingleton<ContentReleaseService>();
 builder.Services.AddSingleton<PasswordHasher>();
@@ -163,6 +165,7 @@ app.MapHealthEndpoints();
 var api = app.MapGroup("/api/v1").RequireRateLimiting("api");
 api.MapAuthEndpoints();
 api.MapContentEndpoints();
+api.MapDraftEndpoints();
 api.MapReleaseEndpoints();
 api.MapAccountEndpoints();
 api.MapAuditEndpoints();

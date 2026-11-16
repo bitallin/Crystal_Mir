@@ -1,6 +1,6 @@
 # 部署与可观测性
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-13
 > 状态：生效
 
 ## 0. 当前实现（2026-11-10）
@@ -15,6 +15,48 @@
 - 内容引用统一处理 Windows 反斜杠和大小写差异，适配 Linux 大小写敏感文件系统。
 
 运维步骤见 `docs/runbooks/zone-server-linux.md`。Content Agent、热更新和 Prometheus 指标尚未接入。
+
+### 0.1 控制面 Compose 栈（2026-11-13）
+
+根目录 `compose.yaml` 提供可在 Linux 容器中验证的 M1 控制面栈：
+
+```text
+control-web (Nginx, 同源 /api 与 /health 代理)
+  -> control-api (.NET 8, 内部 8080)
+       -> postgres 16
+       -> db-migrate（一次性，按顺序执行 db/migrations/*.sql）
+       -> release-artifacts 卷
+       -> signing key 只读挂载
+redis 7
+minio + minio-init
+```
+
+- `deploy/docker/control-api.Dockerfile` 使用 .NET 8 多阶段构建，运行用户为非 root 的 `app`。
+- `deploy/docker/control-web.Dockerfile` 用 Nginx 托管静态后台；`/api/` 和 `/health/` 反向代理到
+  `control-api:8080`，浏览器默认使用同源 API，不再需要 CORS。
+- PostgreSQL 数据、Redis 数据、MinIO 数据和发布产物分别使用独立命名卷；资源目录以只读 bind mount 提供。
+- JWT、数据库、MinIO 和 bootstrap 密码通过 `.env` 注入；`.env` 不提交仓库。示例见 `.env.example`。
+- ECDSA 发布私钥只通过运行时只读目录挂载（`CRYSTAL_CONTROL_SIGNING_DIR`），不进入镜像或数据库。
+  可用 `scripts/generate-release-keys.sh` 生成 `private.pem` 和 `public.pem`。
+- Compose 不启动 GPL 的 `Crystal.LegacyImporter`。示例内容由宿主机导入，测试脚本 `scripts/test-compose.sh`
+  会启动栈、等待健康检查、在宿主机导入黄金样本，再通过 Web 同源代理登录并查询内容。
+- 默认 Compose 网络为 `172.28.0.0/16`，可用 `CRYSTAL_COMPOSE_SUBNET` 覆盖。若运行环境无法使用
+  主机端口映射，测试脚本会改用 Nginx 容器内同源代理，并用一次性运行时容器在 Compose 网络内执行
+  宿主机已构建的导入器；这不会把 GPL 代码加入控制面镜像。
+- 启动时 `db-migrate` 先于 API 完成；迁移脚本是幂等的，导入器仍可按校验和重复应用。
+
+常用命令：
+
+```bash
+cp .env.example .env
+./scripts/generate-release-keys.sh
+docker compose up -d --build
+docker compose ps
+docker compose logs -f control-api
+```
+
+Compose 是开发/集成环境基线，不等同于生产编排；生产仍需外部负载均衡、TLS、对象存储、
+密钥管理、数据库备份和区服 Agent。
 
 ## 1. 环境
 

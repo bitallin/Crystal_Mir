@@ -490,6 +490,169 @@ if [ "$INVALID_VERSION_STATUS" != "400" ]; then
   exit 1
 fi
 
+APPROVER_DRAFT_CREATE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"baseImportRunId":%s,"name":"denied draft"}' "$RUN_ID")" \
+  "$BASE/api/v1/drafts")"
+if [ "$APPROVER_DRAFT_CREATE_STATUS" != "403" ]; then
+  echo "Expected release approver draft create to return 403, got $APPROVER_DRAFT_CREATE_STATUS." >&2
+  exit 1
+fi
+
+DRAFT_NAME="integration-draft-${SUFFIX}"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"baseImportRunId":%s,"name":"%s"}' "$RUN_ID" "$DRAFT_NAME")" \
+  "$BASE/api/v1/drafts" >"$TMP/draft-created.json"
+DRAFT_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/draft-created.json")"
+
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts?limit=20" >"$TMP/drafts-list.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID" >"$TMP/draft.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content?entityType=item&page=1&pageSize=5" >"$TMP/draft-items.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item.json"
+
+DRAFT_UPDATE_BODY='{"contentKey":"item.1","schemaVersion":1,"expectedRevision":1,"reason":"integration draft update","data":{"Index":1,"Name":"SpiritBladeDraft","Price":12345}}'
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' --data "$DRAFT_UPDATE_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item-updated.json"
+
+STALE_REVISION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data "$DRAFT_UPDATE_BODY" "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$STALE_REVISION_STATUS" != "409" ]; then
+  echo "Expected stale draft revision update to return 409, got $STALE_REVISION_STATUS." >&2
+  exit 1
+fi
+
+ADDED_ITEM_KEY="item.draft.${SUFFIX}"
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"contentKey":"%s","schemaVersion":1,"expectedRevision":0,"reason":"integration draft add","data":{"Index":999999,"Name":"DraftAddedItem","Price":1}}' "$ADDED_ITEM_KEY")" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/999999" >"$TMP/draft-item-added.json"
+
+curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"integration draft delete"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/999999"
+
+STALE_DELETE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X DELETE \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"stale delete"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
+if [ "$STALE_DELETE_STATUS" != "409" ]; then
+  echo "Expected stale draft revision delete to return 409, got $STALE_DELETE_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"contentKey":"script.invalid.%s","schemaVersion":1,"expectedRevision":0,"reason":"create invalid script","data":{"validation":{"errorCount":1}}}' "$SUFFIX")" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/script/999998" >"$TMP/draft-invalid-script.json"
+
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/validate" >"$TMP/draft-invalid-report.json"
+
+curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"remove invalid script"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/script/999998"
+
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/validate" >"$TMP/draft-valid-report.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/revisions?limit=50" >"$TMP/draft-revisions.json"
+
+DRAFT_RELEASE_VERSION="api.draft.${SUFFIX}"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"draftId":%s,"version":"%s","notes":"release from editable draft"}' "$DRAFT_ID" "$DRAFT_RELEASE_VERSION")" \
+  "$BASE/api/v1/releases" >"$TMP/draft-release-created.json"
+DRAFT_RELEASE_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/draft-release-created.json")"
+
+BOTH_RELEASE_SOURCES_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data "$(printf '{"importRunId":%s,"draftId":%s,"version":"%s.both"}' "$RUN_ID" "$DRAFT_ID" "$DRAFT_RELEASE_VERSION")" \
+  "$BASE/api/v1/releases")"
+if [ "$BOTH_RELEASE_SOURCES_STATUS" != "400" ]; then
+  echo "Expected release with both sources to return 400, got $BOTH_RELEASE_SOURCES_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/validate" >"$TMP/draft-release-validated.json"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/compile" >"$TMP/draft-release-compiled.json"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/sign" >"$TMP/draft-release-signed.json"
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/publish" >"$TMP/draft-release-published.json"
+
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"contentKey":"item.1","schemaVersion":1,"expectedRevision":2,"reason":"mutate draft after release","data":{"Index":1,"Name":"SpiritBladeAfterRelease","Price":54321}}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item-after-release.json"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$DRAFT_RELEASE_ID/validate" >"$TMP/draft-release-validated-after-change.json"
+
+ROLLBACK_RELEASE_VERSION="api.rollback.${SUFFIX}"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"importRunId":%s,"version":"%s","notes":"explicit rollback target test"}' "$RUN_ID" "$ROLLBACK_RELEASE_VERSION")" \
+  "$BASE/api/v1/releases" >"$TMP/rollback-release-created.json"
+ROLLBACK_RELEASE_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TMP/rollback-release-created.json")"
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/validate" >/dev/null
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/compile" >/dev/null
+curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/sign" >/dev/null
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/publish" >/dev/null
+
+SHORT_ROLLBACK_REASON_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"reason":"short"}' "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback")"
+if [ "$SHORT_ROLLBACK_REASON_STATUS" != "400" ]; then
+  echo "Expected short rollback reason to return 400, got $SHORT_ROLLBACK_REASON_STATUS." >&2
+  exit 1
+fi
+
+AUTHOR_ROLLBACK_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"reason":"author cannot rollback releases"}' \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback")"
+if [ "$AUTHOR_ROLLBACK_STATUS" != "403" ]; then
+  echo "Expected content author rollback to return 403, got $AUTHOR_ROLLBACK_STATUS." >&2
+  exit 1
+fi
+
+ROLLBACK_REASON="integration rollback ${SUFFIX}"
+curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"reason":"%s","targetReleaseId":%s}' "$ROLLBACK_REASON" "$RELEASE_ID")" \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback" >"$TMP/rollback-explicit.json"
+
+curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$(printf '{"reason":"%s default target"}' "$ROLLBACK_REASON")" \
+  "$BASE/api/v1/releases/$RELEASE_ID/rollback" >"$TMP/rollback-default.json"
+
+REPEAT_ROLLBACK_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"reason":"repeat rollback should conflict"}' \
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback")"
+if [ "$REPEAT_ROLLBACK_STATUS" != "409" ]; then
+  echo "Expected repeated rollback to return 409, got $REPEAT_ROLLBACK_STATUS." >&2
+  exit 1
+fi
+
+curl -fsS --max-time 20 -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases?limit=200" >"$TMP/release-final-list.json"
+
 FINANCE_LOGIN="$(printf '{"username":"%s","password":"%s"}' "$FINANCE_USER" "$TEST_PASSWORD")"
 curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
   --data "$FINANCE_LOGIN" "$BASE/api/v1/auth/login" >"$TMP/finance-login.json"
@@ -811,6 +974,84 @@ published_again = load("release-published-again.json")
 assert published_again["status"] == "published", published_again
 release_list = load("release-list.json")
 assert any(release["id"] == created["id"] for release in release_list["items"]), release_list
+
+draft_created = load("draft-created.json")
+assert draft_created["status"] == "editing", draft_created
+assert draft_created["baseImportRunId"] is not None, draft_created
+assert draft_created["entityCount"] == 9797, draft_created
+assert {entry["entityType"]: entry["count"] for entry in draft_created["counts"]} == expected_counts, draft_created["counts"]
+assert any(draft["id"] == draft_created["id"] for draft in load("drafts-list.json")["items"]), load("drafts-list.json")
+
+draft_items = load("draft-items.json")
+assert draft_items["entityType"] == "item", draft_items
+assert draft_items["total"] == 1628, draft_items
+assert len(draft_items["items"]) == 5, draft_items
+draft_item = load("draft-item.json")
+assert draft_item["contentKey"] == "item.1", draft_item
+assert draft_item["data"]["Name"] == "SpiritBlade", draft_item
+
+draft_item_updated = load("draft-item-updated.json")
+assert draft_item_updated["revision"] == 2, draft_item_updated
+assert draft_item_updated["data"]["Name"] == "SpiritBladeDraft", draft_item_updated
+draft_item_added = load("draft-item-added.json")
+assert draft_item_added["revision"] == 1, draft_item_added
+assert draft_item_added["contentKey"].startswith("item.draft."), draft_item_added
+
+invalid_report = load("draft-invalid-report.json")
+assert invalid_report["valid"] is False, invalid_report
+assert any(issue["code"] == "script-validation-error" for issue in invalid_report["issues"]), invalid_report
+valid_report = load("draft-valid-report.json")
+assert valid_report["valid"] is True, valid_report
+assert valid_report["issues"] == [], valid_report
+assert valid_report["entityCount"] == 9797, valid_report
+
+revisions = load("draft-revisions.json")["items"]
+assert any(revision["action"] == "update" and revision["contentKey"] == "item.1" and revision["reason"] == "integration draft update" for revision in revisions), revisions
+assert any(revision["action"] == "create" and revision["contentKey"].startswith("item.draft.") for revision in revisions), revisions
+assert any(revision["action"] == "delete" and revision["contentKey"].startswith("item.draft.") for revision in revisions), revisions
+assert any(revision["beforeData"] is not None and revision["afterData"] is not None for revision in revisions), revisions
+
+draft_release_created = load("draft-release-created.json")
+assert draft_release_created["status"] == "draft", draft_release_created
+assert draft_release_created["draftId"] == draft_created["id"], draft_release_created
+assert draft_release_created["importRunId"] == draft_created["baseImportRunId"], draft_release_created
+assert {entry["entityType"]: entry["count"] for entry in draft_release_created["counts"]} == expected_counts, draft_release_created["counts"]
+draft_release_validated = load("draft-release-validated.json")
+assert draft_release_validated["valid"] is True, draft_release_validated
+draft_release_published = load("draft-release-published.json")
+assert draft_release_published["status"] == "published", draft_release_published
+
+after_release = load("draft-item-after-release.json")
+assert after_release["revision"] == 3, after_release
+assert after_release["data"]["Name"] == "SpiritBladeAfterRelease", after_release
+release_validated_after_change = load("draft-release-validated-after-change.json")
+assert release_validated_after_change["valid"] is True, release_validated_after_change
+assert release_validated_after_change["contentHash"] == draft_release_created["contentHash"], release_validated_after_change
+
+rollback_release_created = load("rollback-release-created.json")
+explicit_rollback = load("rollback-explicit.json")
+assert explicit_rollback["rolledBack"]["id"] == rollback_release_created["id"], explicit_rollback
+assert explicit_rollback["active"]["id"] == created["id"], explicit_rollback
+assert explicit_rollback["rolledBack"]["status"] == "rolled_back", explicit_rollback
+assert explicit_rollback["rolledBack"]["rollbackTargetId"] == created["id"], explicit_rollback
+assert explicit_rollback["reason"].startswith("integration rollback"), explicit_rollback
+
+default_rollback = load("rollback-default.json")
+assert default_rollback["rolledBack"]["id"] == created["id"], default_rollback
+assert default_rollback["active"]["id"] == draft_release_created["id"], default_rollback
+assert default_rollback["active"]["status"] == "active", default_rollback
+
+final_releases = {release["id"]: release for release in load("release-final-list.json")["items"]}
+assert final_releases[rollback_release_created["id"]]["status"] == "rolled_back", final_releases
+assert final_releases[created["id"]]["status"] == "rolled_back", final_releases
+assert final_releases[draft_release_created["id"]]["status"] == "active", final_releases
+
+assert any(e["action"] == "draft.create" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "draft.update" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "draft.delete" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "draft.validate" and e["result"] == "success" for e in events), events
+assert any(e["action"] == "draft.validate" and e["result"] == "failure" for e in events), events
+assert any(e["action"] == "release.rollback" and e["result"] == "success" and e["metadata"].get("targetReleaseId") == created["id"] for e in events), events
 PY
 
-echo "Control API integration verified (run $RUN_ID, 15 entity types, auth/RBAC/audit/relations/release lifecycle)."
+echo "Control API integration verified (run $RUN_ID, 15 entity types, drafts/revisions, auth/RBAC/audit/relations/release lifecycle, explicit/default rollback)."

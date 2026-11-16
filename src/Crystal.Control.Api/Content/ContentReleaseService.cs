@@ -16,15 +16,18 @@ public sealed partial class ContentReleaseService
     ];
 
     private readonly ContentReleaseStore _store;
+    private readonly ContentDraftStore _draftStore;
     private readonly ContentQueryStore _queryStore;
     private readonly ControlApiOptions _options;
 
     public ContentReleaseService(
         ContentReleaseStore store,
+        ContentDraftStore draftStore,
         ContentQueryStore queryStore,
         ControlApiOptions options)
     {
         _store = store;
+        _draftStore = draftStore;
         _queryStore = queryStore;
         _options = options;
     }
@@ -50,6 +53,7 @@ public sealed partial class ContentReleaseService
 
     public async Task<ReleaseDto> CreateAsync(
         long? importRunId,
+        long? draftId,
         string version,
         string? notes,
         long? createdBy,
@@ -60,22 +64,50 @@ public sealed partial class ContentReleaseService
             throw new ReleaseConflictException($"Invalid release version '{version}'.");
         }
 
-        var resolvedRunId = await _queryStore.ResolveImportRunIdAsync(importRunId, cancellationToken);
-        if (resolvedRunId is null)
+        if ((importRunId is null) == (draftId is null))
         {
-            throw importRunId is null
-                ? new ReleaseConflictException("No imported content run is available to create a release.")
-                : new ReleaseNotFoundException($"Import run {importRunId} does not exist or is not imported.");
+            throw new ReleaseConflictException("Exactly one of importRunId or draftId must be supplied.");
         }
 
-        var run = await _queryStore.GetImportRunAsync(resolvedRunId.Value, cancellationToken)
-                  ?? throw new ReleaseNotFoundException($"Import run {resolvedRunId} does not exist.");
-        var entities = await _store.GetImportEntitiesAsync(run.Id, cancellationToken);
+        long resolvedRunId;
+        IReadOnlyList<ContentEntity> entities;
+        string snapshotSource;
+        if (draftId is long sourceDraftId)
+        {
+            var draft = await _draftStore.GetAsync(sourceDraftId, cancellationToken)
+                        ?? throw new ReleaseNotFoundException($"Draft {sourceDraftId} does not exist.");
+            if (draft.Status == "archived")
+            {
+                throw new ReleaseConflictException($"Draft {sourceDraftId} is archived.");
+            }
+
+            resolvedRunId = draft.BaseImportRunId;
+            entities = await _draftStore.GetEntitiesAsync(sourceDraftId, cancellationToken);
+            snapshotSource = $"content_draft:{sourceDraftId}";
+        }
+        else
+        {
+            var requestedRunId = importRunId!.Value;
+            var run = await _queryStore.GetImportRunAsync(requestedRunId, cancellationToken)
+                      ?? throw new ReleaseNotFoundException($"Import run {requestedRunId} does not exist.");
+            if (!string.Equals(run.Status, "imported", StringComparison.Ordinal))
+            {
+                throw new ReleaseConflictException(
+                    $"Import run {requestedRunId} is '{run.Status}', only imported runs can create releases.");
+            }
+
+            resolvedRunId = run.Id;
+            entities = await _store.GetImportEntitiesAsync(run.Id, cancellationToken);
+            snapshotSource = $"content_import_run:{run.Id}";
+        }
+
+        var runForHash = await _queryStore.GetImportRunAsync(resolvedRunId, cancellationToken)
+                         ?? throw new ReleaseNotFoundException($"Import run {resolvedRunId} does not exist.");
         var createdAt = DateTimeOffset.UtcNow;
         ContentSnapshotBuild build;
         try
         {
-            build = BuildSnapshot(run, entities, version, createdAt);
+            build = BuildSnapshot(snapshotSource, runForHash.SourceHash, entities, version, createdAt);
         }
         catch (InvalidDataException exception)
         {
@@ -91,7 +123,8 @@ public sealed partial class ContentReleaseService
         var expectedEntityCount = build.Manifest.Counts.Values.Sum();
 
         return await _store.CreateAsync(
-            run.Id,
+            resolvedRunId,
+            draftId,
             version,
             notes,
             createdBy,
@@ -151,7 +184,7 @@ public sealed partial class ContentReleaseService
                 issues.Add(new ReleaseValidationIssueDto(issue.Code, issue.Message, issue.ContentKey));
             }
 
-            issues.AddRange(ValidateEntitySemantics(entities));
+            issues.AddRange(ContentValidationRules.ValidateEntitySemantics(entities));
         }
 
         return new ReleaseValidationReportDto(
@@ -314,6 +347,52 @@ public sealed partial class ContentReleaseService
             $"Release {id} changed to '{current.Status}' while publishing.");
     }
 
+    public async Task<ReleaseRollbackDto> RollbackAsync(
+        long id,
+        long? targetReleaseId,
+        string reason,
+        long? actorAccountId,
+        CancellationToken cancellationToken)
+    {
+        var release = await GetAsync(id, cancellationToken);
+        if (release.Status is not ("published" or "active"))
+        {
+            throw new ReleaseConflictException(
+                $"Release {id} is '{release.Status}', only published or active releases can be rolled back.");
+        }
+
+        ReleaseDto target;
+        if (targetReleaseId is long requestedTargetId)
+        {
+            target = await GetAsync(requestedTargetId, cancellationToken);
+        }
+        else
+        {
+            var candidates = await ListAsync(200, "published", cancellationToken);
+            target = candidates
+                .Where(candidate => candidate.Id != id)
+                .OrderByDescending(candidate => candidate.PublishedAt)
+                .ThenByDescending(candidate => candidate.Id)
+                .FirstOrDefault()
+                ?? throw new ReleaseConflictException("No previous published release is available to roll back to.");
+        }
+
+        if (target.Status != "published")
+        {
+            throw new ReleaseConflictException(
+                $"Target release {target.Id} is '{target.Status}', expected 'published'.");
+        }
+
+        await EnsureSignatureAsync(target, cancellationToken);
+        return await _store.RollbackAsync(
+            id,
+            target.Id,
+            reason,
+            actorAccountId,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+    }
+
     public async Task<string> GetManifestJsonAsync(long id, CancellationToken cancellationToken)
     {
         var release = await GetAsync(id, cancellationToken);
@@ -328,7 +407,8 @@ public sealed partial class ContentReleaseService
     }
 
     private ContentSnapshotBuild BuildSnapshot(
-        ImportRunDto run,
+        string source,
+        string? sourceHash,
         IReadOnlyList<ContentEntity> entities,
         string version,
         DateTimeOffset createdAt)
@@ -337,8 +417,8 @@ public sealed partial class ContentReleaseService
         {
             OutputDirectory = GetReleaseDirectory(version),
             ReleaseVersion = version,
-            Source = $"content_import_run:{run.Id}",
-            SourceHash = run.SourceHash,
+            Source = source,
+            SourceHash = sourceHash,
             CreatedAt = createdAt
         }, entities);
     }
@@ -356,7 +436,11 @@ public sealed partial class ContentReleaseService
         {
             OutputDirectory = GetReleaseDirectory(release.Version),
             ReleaseVersion = release.Version,
-            Source = release.ImportRunId is long id ? $"content_import_run:{id}" : $"content_release:{release.Id}",
+            Source = release.DraftId is long draftId
+                ? $"content_draft:{draftId}"
+                : release.ImportRunId is long id
+                    ? $"content_import_run:{id}"
+                    : $"content_release:{release.Id}",
             SourceHash = run?.SourceHash,
             CreatedAt = createdAt
         }, entities);
@@ -505,45 +589,6 @@ public sealed partial class ContentReleaseService
     private string GetManifestPath(ReleaseDto release)
     {
         return Path.Combine(GetReleaseDirectory(release.Version), "manifest.json");
-    }
-
-    private static IEnumerable<ReleaseValidationIssueDto> ValidateEntitySemantics(
-        IReadOnlyList<ContentEntity> entities)
-    {
-        foreach (var entity in entities)
-        {
-            if (entity.Data.ValueKind != JsonValueKind.Object) continue;
-
-            if (entity.EntityType == ContentEntityTypes.Script &&
-                entity.Data.TryGetProperty("validation", out var validation))
-            {
-                if (validation.ValueKind == JsonValueKind.Object &&
-                    validation.TryGetProperty("errorCount", out var errorCount) &&
-                    errorCount.TryGetInt32(out var errors) &&
-                    errors > 0)
-                {
-                    yield return new ReleaseValidationIssueDto(
-                        "script-validation-error",
-                        $"NPC script has {errors} parse error(s).",
-                        entity.ContentKey);
-                }
-            }
-
-            if (entity.EntityType == ContentEntityTypes.Asset &&
-                entity.Data.TryGetProperty("assetType", out var assetType) &&
-                assetType.ValueKind == JsonValueKind.String &&
-                string.Equals(assetType.GetString(), "map", StringComparison.Ordinal) &&
-                entity.Data.TryGetProperty("map", out var map) &&
-                map.ValueKind == JsonValueKind.Object &&
-                map.TryGetProperty("valid", out var valid) &&
-                valid.ValueKind == JsonValueKind.False)
-            {
-                yield return new ReleaseValidationIssueDto(
-                    "map-asset-invalid",
-                    "Map asset metadata is marked invalid.",
-                    entity.ContentKey);
-            }
-        }
     }
 
     private static DateTimeOffset ToUtcOffset(DateTime value)

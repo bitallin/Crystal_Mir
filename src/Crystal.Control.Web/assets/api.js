@@ -178,6 +178,61 @@
     return request(`/api/v1/import-runs/${encodeURIComponent(id)}`);
   }
 
+  function listDrafts(limit = 50) {
+    return request(`/api/v1/drafts?limit=${encodeURIComponent(limit)}`);
+  }
+
+  function createDraft(baseImportRunId, name) {
+    return request("/api/v1/drafts", {
+      method: "POST",
+      body: { baseImportRunId, name }
+    });
+  }
+
+  function listReleases(limit = 50, status) {
+    const params = new URLSearchParams({ limit });
+    if (status) params.set("status", status);
+    return request(`/api/v1/releases?${params}`);
+  }
+
+  function getRelease(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}`);
+  }
+
+  function getReleaseManifest(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/manifest`);
+  }
+
+  function createRelease(importRunId, draftId, version, notes) {
+    return request("/api/v1/releases", {
+      method: "POST",
+      body: { importRunId, draftId, version, notes }
+    });
+  }
+
+  function validateRelease(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/validate`, { method: "POST" });
+  }
+
+  function compileRelease(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/compile`, { method: "POST" });
+  }
+
+  function signRelease(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/sign`, { method: "POST" });
+  }
+
+  function publishRelease(id) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/publish`, { method: "POST" });
+  }
+
+  function rollbackRelease(id, reason, targetReleaseId) {
+    return request(`/api/v1/releases/${encodeURIComponent(id)}/rollback`, {
+      method: "POST",
+      body: { reason, targetReleaseId }
+    });
+  }
+
   function getContentTypes(importRunId) {
     return request(`/api/v1/import-runs/${encodeURIComponent(importRunId)}/content-types`);
   }
@@ -314,29 +369,40 @@
     baseUrl,
     changePassword,
     clearSession,
+    compileRelease,
     createAccount,
+    createDraft,
+    createRelease,
     getContentByKey,
     getContentTypes,
     getImportRun,
     getMapRelations,
     getMonsterDrops,
     getRecipeRelations,
+    getRelease,
+    getReleaseManifest,
     getScriptValidation,
     getUser,
     isAuthenticated,
     listAccounts,
     listAuditEvents,
+    listDrafts,
     listImportRuns,
     listMapCatalog,
     listRoles,
+    listReleases,
     login,
     logout,
     me,
     queryContent,
+    publishRelease,
     downloadAsset,
     resetAccountPassword,
+    rollbackRelease,
     restoreSession,
     setAccountStatus,
+    signRelease,
+    validateRelease,
     updateAccountRoles,
     setBaseUrl
   };

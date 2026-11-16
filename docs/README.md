@@ -1,6 +1,6 @@
 # Crystal 通用传奇引擎：技术文档
 
-> 最后更新：2026-11-11
+> 最后更新：2026-11-13
 > 文档状态：生效
 
 ## 1. 文档目标
@@ -48,7 +48,8 @@ docs/
 │   ├── 0002-postgresql-and-content-snapshots.md
 │   ├── 0003-legacy-protocol-with-gateway.md
 │   ├── 0004-gpl-boundary.md
-│   └── 0005-content-signature-format.md
+│   ├── 0005-content-signature-format.md
+│   └── 0006-content-drafts-and-release-rollback.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源

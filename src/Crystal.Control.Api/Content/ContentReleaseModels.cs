@@ -1,10 +1,13 @@
 namespace Crystal.Control.Api.Content;
 
-public sealed record CreateReleaseRequest(long? ImportRunId, string? Version, string? Notes);
+public sealed record CreateReleaseRequest(long? ImportRunId, long? DraftId, string? Version, string? Notes);
+
+public sealed record RollbackReleaseRequest(string? Reason, long? TargetReleaseId);
 
 public sealed record ReleaseDto(
     long Id,
     long? ImportRunId,
+    long? DraftId,
     string Version,
     string Status,
     int SchemaVersion,
@@ -15,7 +18,16 @@ public sealed record ReleaseDto(
     DateTime CreatedAt,
     DateTime? PublishedAt,
     string? Notes,
+    DateTime? RolledBackAt,
+    string? RollbackReason,
+    long? RollbackTargetId,
     IReadOnlyList<ContentTypeCountDto> Counts);
+
+public sealed record ReleaseRollbackDto(
+    ReleaseDto RolledBack,
+    ReleaseDto Active,
+    string Reason,
+    DateTime RolledBackAt);
 
 public sealed record ReleaseValidationIssueDto(string Code, string Message, string? ContentKey);
 

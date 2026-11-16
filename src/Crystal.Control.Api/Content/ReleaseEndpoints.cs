@@ -37,6 +37,8 @@ public static class ReleaseEndpoints
             .RequireAuthorization(Permissions.ReleaseWrite);
         api.MapPost("/releases/{id:long}/publish", PublishReleaseAsync)
             .RequireAuthorization(Permissions.ReleasePublish);
+        api.MapPost("/releases/{id:long}/rollback", RollbackReleaseAsync)
+            .RequireAuthorization(Permissions.ReleaseRollback);
         return api;
     }
 
@@ -125,12 +127,23 @@ public static class ReleaseEndpoints
             errors["importRunId"] = ["importRunId must be a positive integer when supplied."];
         }
 
+        if (request.DraftId is <= 0)
+        {
+            errors["draftId"] = ["draftId must be a positive integer when supplied."];
+        }
+
+        if ((request.ImportRunId is null) == (request.DraftId is null))
+        {
+            errors["source"] = ["Exactly one of importRunId or draftId must be supplied."];
+        }
+
         if (errors.Count > 0) return Results.ValidationProblem(errors);
 
         try
         {
             var release = await service.CreateAsync(
                 request.ImportRunId,
+                request.DraftId,
                 version!,
                 notes,
                 RequestMetadata.AccountId(context.User),
@@ -325,6 +338,78 @@ public static class ReleaseEndpoints
         }
     }
 
+    private static async Task<IResult> RollbackReleaseAsync(
+        long id,
+        RollbackReleaseRequest request,
+        ContentReleaseService service,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var reason = request.Reason?.Trim();
+        if (reason is null || reason.Length is < 8 or > 512)
+        {
+            errors["reason"] = ["reason must be between 8 and 512 characters."];
+        }
+
+        if (request.TargetReleaseId is <= 0)
+        {
+            errors["targetReleaseId"] = ["targetReleaseId must be a positive integer when supplied."];
+        }
+
+        if (errors.Count > 0) return Results.ValidationProblem(errors);
+
+        try
+        {
+            var result = await service.RollbackAsync(
+                id,
+                request.TargetReleaseId,
+                reason!,
+                RequestMetadata.AccountId(context.User),
+                cancellationToken);
+            await auditStore.WriteAsync(new AuditEventWrite(
+                RequestMetadata.AccountId(context.User),
+                context.User.Identity?.Name,
+                RequestMetadata.ClientIp(context),
+                "release.rollback",
+                "content_release",
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                result.RolledBack.ContentHash,
+                result.Active.ContentHash,
+                RequestMetadata.RequestId(context),
+                "success",
+                reason,
+                RequestMetadata.UserAgent(context),
+                new
+                {
+                    rolledBackVersion = result.RolledBack.Version,
+                    activeVersion = result.Active.Version,
+                    targetReleaseId = result.Active.Id
+                }), cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (ReleaseNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (ReleaseSigningNotConfiguredException exception)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Release signing is not configured",
+                detail: exception.Message);
+        }
+        catch (ReleaseConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (InvalidDataException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
     private static async Task WriteAuditAsync(
         AuditStore auditStore,
         HttpContext context,
@@ -353,6 +438,7 @@ public static class ReleaseEndpoints
                     release.Version,
                     release.Status,
                     release.ImportRunId,
+                    release.DraftId,
                     release.ContentHash,
                     entityCount = release.Counts.Sum(count => count.Count)
                 }),

@@ -1,6 +1,6 @@
 # 运行时与模块边界
 
-> 最后更新：2026-11-11
+> 最后更新：2026-11-13
 > 状态：生效
 
 ## 1. 当前运行时事实
@@ -35,6 +35,8 @@ Crystal.Cli                   运维与开发 CLI
 ```text
 src/Crystal.Content           内容快照、哈希、校验（MIT）
 tools/Crystal.ContentTool     内容快照签名与验证 CLI，仅依赖 Crystal.Content（MIT）
+src/Crystal.GameCore          运行时抽象骨架，只依赖 BCL + Shared（M1 不迁移游戏逻辑）
+src/Crystal.Agent.Contracts   Agent 注册、心跳、命令和内容版本契约（MIT，无项目依赖）
 src/Crystal.Control.Api       内容、账号、RBAC 和审计 API，ASP.NET Core + Npgsql
 src/Crystal.ZoneServer        Linux 区服控制台宿主，加载旧数据库和内容并监听游戏端口（GPL 边界）
 tools/Crystal.LegacyImporter  二进制导入、快照/PostgreSQL 重建和 PostgreSQL 写入（GPL 边界工具）
@@ -46,17 +48,25 @@ db/migrations                 PostgreSQL schema
 生命周期（停用/启用、重置/自助改密、角色调整）。内容接口暴露 15 类实体（含掉落、配方、Buff、脚本和资源元数据）；
 `Crystal.Control.Web` 已通过受控 CORS 接入登录、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次）、
 全量地图目录、地图/NPC 脚本/怪物掉落/配方/资源关系、账号管理、角色和审计，并按 JWT 权限点过滤导航与直达路由。
-内容写入/发布 API 尚未实现；地图关系页已可检索当前批次全部地图，配方、Buff 和脚本已读取真实批次，
-脚本抽屉已读取 AST/编译校验，资源域已展示地图格式、尺寸、可走/阻挡/门格，并可通过受权限保护的文件端点下载
-经路径、大小和 SHA256 校验的资源；内容快照支持 ECDSA P-256 签名与验证，坐标画布仍使用原型尺寸，
-其他资源二进制和内容写入/发布 API 尚未接入。
+M1 已补齐可编辑内容草稿、逐实体乐观并发、修订记录、草稿校验和发布回滚；发布中心使用真实
+`GET /releases`、manifest、校验报告和回滚元数据，不再展示虚构的区服灰度或 Ed25519 信息。
+地图关系页已可检索当前批次全部地图，配方、Buff 和脚本已读取真实批次，脚本抽屉已读取 AST/编译校验，
+资源域已展示地图格式、尺寸、可走/阻挡/门格，并可通过受权限保护的文件端点下载经路径、大小和 SHA256 校验的资源；
+内容快照支持 ECDSA P-256 签名与验证，坐标画布仍使用原型尺寸，其他资源二进制和真实区服热切换尚未接入。
+
+`Crystal.GameCore` 在 M1 只提供运行时边界契约（`IContentSnapshotProvider<TSnapshot>`、
+`IPlayerRepository<TSnapshot>`、`IWorldClock`、`IZoneEventSink`、`IChatTransport` 和运行时事件类型），
+`Crystal.ZoneServer` 只增加项目引用，现有 `Envir`/`Map` 逻辑没有迁移。`Crystal.Agent.Contracts`
+定义稳定的 JSON 字段和命令字符串（`content.stage`、`content.activate`、`content.rollback`、
+`content.reload`、`zone.stop`），但 Control API 在本轮不注册 Agent 路由，Agent 服务属于 M3。
 
 ## 3. 依赖规则
 
 ```text
-Control.Web -> Control.Api -> Content / Agent.Contracts / Shared
+Control.Web -> Control.Api -> Content / Shared
 ZoneServer  -> GameCore -> Shared
 ZoneServer  -> Content / Agent.Contracts
+Control.Api -> Agent.Contracts（仅允许 MIT 契约，M1 尚未引用）
 Patcher     -> Shared / Content.Contracts
 
 禁止：

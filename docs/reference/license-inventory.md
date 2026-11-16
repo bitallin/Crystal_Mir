@@ -1,6 +1,6 @@
 # 许可证与资源清单
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-13
 > 状态：生效
 
 ## 1. 本仓库代码
@@ -9,9 +9,19 @@
 | --- | --- | --- |
 | `Client/` | MIT | 保留版权和许可声明 |
 | `Shared/` | MIT | 保留版权和许可声明 |
+| `src/Crystal.Content/` | MIT | 保留版权和许可声明 |
+| `src/Crystal.GameCore/` | GPL-3.0-only | 作为未来游戏模拟核心的 GPL 边界；当前仅包含契约，不链接控制面 |
+| `src/Crystal.Agent.Contracts/` | MIT | 保留版权和许可声明；不得引用 GPL 或控制面实现 |
+| `src/Crystal.Control.Api/` | MIT | 保留版权和许可声明；不得链接 GPL 项目 |
+| `src/Crystal.Control.Web/` | MIT | 保留版权和许可声明 |
+| `src/Crystal.ZoneServer/` | GPL-3.0-only | 分发二进制需提供完整对应源码 |
+| `tools/Crystal.ContentTool/` | MIT | 只依赖 `Crystal.Content` |
+| `tools/Crystal.LegacyImporter/` | GPL-3.0-only | 引用 `Server.Library`；可在宿主机运行，但不进入控制面镜像 |
+| `tools/Crystal.DbInspector/`、`tools/Crystal.FieldInventory/` | GPL-3.0-only | 引用 `Server.Library` |
 | `Server/` | GPL-3.0-only | 分发二进制需提供完整对应源码 |
 | `Server.MirForms/` | GPL-3.0-only | 同上 |
 | `Tests/` | GPL-3.0-only | 同上 |
+| 部署文件（`compose.yaml`、`deploy/`） | MIT | 保留声明；示例密钥不得提交 |
 | 其他原始工具和文档 | 默认 MIT，除非另有说明 | 保留声明 |
 
 控制面与 GPL 服务端代码隔离，详见 `docs/adr/0004-gpl-boundary.md`。
@@ -31,6 +41,9 @@
 | --- | --- | --- |
 | `Microsoft.AspNetCore.Authentication.JwtBearer` 8.0.6 | MIT | JWT 认证 |
 | `Konscious.Security.Cryptography.Argon2` 1.3.1 | MIT | Argon2id 密码哈希 |
+
+Compose 引用的镜像（PostgreSQL、Redis、MinIO、MinIO Client、Nginx、.NET 运行时）按其各自许可证分发；
+仓库只引用镜像标签，不包含这些镜像的二进制。
 
 ## 3. 素材分类
 
