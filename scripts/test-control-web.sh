@@ -125,7 +125,7 @@ web, api, password, finance_user, finance_password, ui_user, ui_password = sys.a
 login_url = f"{web}/?api={api}#/login"
 
 def is_expected_console_error(text):
-    return any(f"status of {status}" in text for status in ("400", "401", "409"))
+    return any(f"status of {status}" in text for status in ("400", "401", "404", "409"))
 
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
@@ -224,21 +224,21 @@ with sync_playwright() as playwright:
     page.wait_for_timeout(1400)
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
-    assert page.locator("#item-editor .editor-field").count() >= 100
-    assert page.locator('#item-editor [data-edit-path^="RandomStats."]').count() == 70
-    page.fill('#item-editor [data-edit-path="Name"]', "SpiritBladeUI")
-    page.fill('#item-editor [data-edit-path="Price"]', "23456")
-    page.fill('#item-editor [data-edit-path="RandomStats.AccuracyChance"]', "42")
-    page.click('#item-editor [data-action="editor-add-stat"]')
-    stat_row = page.locator("#item-editor .editor-stat-row").last
+    page.wait_for_selector('#content-editor[data-editor-entity-type="item"] .js-content-editor', timeout=15000)
+    assert page.locator("#content-editor .editor-field").count() >= 100
+    assert page.locator('#content-editor [data-edit-path^="RandomStats."]').count() == 70
+    page.fill('#content-editor [data-edit-path="Name"]', "SpiritBladeUI")
+    page.fill('#content-editor [data-edit-path="Price"]', "23456")
+    page.fill('#content-editor [data-edit-path="RandomStats.AccuracyChance"]', "42")
+    page.click('#content-editor [data-action="editor-add-stat"]')
+    stat_row = page.locator("#content-editor .editor-stat-row").last
     stat_row.locator("[data-stat-key]").select_option("Luck")
     stat_row.locator("[data-stat-value]").fill("7")
     page.fill("#editor-reason", "Web UI item editor full-field update")
     page.wait_for_function("document.querySelector('#editor-diff')?.innerText.includes('SpiritBladeUI')", timeout=5000)
     assert "Price" in page.locator("#editor-diff").inner_text()
-    page.click('#item-editor [data-action="editor-save"]')
-    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('SpiritBladeUI')", timeout=15000)
 
     edited_entity = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/1", token=admin_token)
@@ -249,10 +249,10 @@ with sync_playwright() as playwright:
     assert edited_entity["data"]["Stats"]["Values"]["Luck"] == 7, edited_entity["data"]["Stats"]
 
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
-    page.click('#item-editor [data-action="editor-validate"]')
-    page.wait_for_selector("#item-editor [data-editor-validation]", timeout=60000)
-    validation_text = page.locator("#item-editor [data-editor-validation]").inner_text()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="item"] .js-content-editor', timeout=15000)
+    page.click('#content-editor [data-action="editor-validate"]')
+    page.wait_for_selector("#content-editor [data-editor-validation]", timeout=60000)
+    validation_text = page.locator("#content-editor [data-editor-validation]").inner_text()
     assert "通过" in validation_text, validation_text[:1200]
 
     concurrent = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/1", token=admin_token)
@@ -265,38 +265,38 @@ with sync_playwright() as playwright:
         "expectedRevision": concurrent["revision"],
         "reason": "Web UI simulate concurrent edit"
     }, admin_token)
-    page.fill('#item-editor [data-edit-path="Name"]', "SpiritBladeConflictSave")
-    page.click('#item-editor [data-action="editor-save"]')
-    page.wait_for_selector("#item-editor [data-editor-conflict]", timeout=15000)
-    assert page.locator('#item-editor [data-edit-path="Name"]').input_value() == "SpiritBladeConflictSave"
-    page.click('#item-editor [data-action="editor-reload"]')
+    page.fill('#content-editor [data-edit-path="Name"]', "SpiritBladeConflictSave")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector("#content-editor [data-editor-conflict]", timeout=15000)
+    assert page.locator('#content-editor [data-edit-path="Name"]').input_value() == "SpiritBladeConflictSave"
+    page.click('#content-editor [data-action="editor-reload"]')
     page.wait_for_function(
-        "() => document.querySelector('#item-editor [data-edit-path=Name]')?.value === 'SpiritBladeConcurrent'",
+        "() => document.querySelector('#content-editor [data-edit-path=Name]')?.value === 'SpiritBladeConcurrent'",
         timeout=15000)
 
-    page.fill('#item-editor [data-edit-path="Price"]', "-1")
-    page.click('#item-editor [data-action="editor-save"]')
-    page.wait_for_selector('#item-editor .editor-field[data-field-path="Price"].has-error', timeout=15000)
-    assert "between" in page.locator('#item-editor .editor-field[data-field-path="Price"]').inner_text()
-    page.fill('#item-editor [data-edit-path="Price"]', "20000")
-    page.click('#item-editor [data-action="editor-save"]')
-    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.fill('#content-editor [data-edit-path="Price"]', "-1")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector('#content-editor .editor-field[data-field-path="Price"].has-error', timeout=15000)
+    assert "between" in page.locator('#content-editor .editor-field[data-field-path="Price"]').inner_text()
+    page.fill('#content-editor [data-edit-path="Price"]', "20000")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
 
     page.fill("#content-search-items", "UITempItem")
     page.wait_for_timeout(1200)
-    page.click('[data-action="open-item-editor-new"]')
-    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
-    page.fill('#item-editor [data-edit-path="Name"]', "UITempItem")
+    page.click('[data-action="open-content-editor-new"][data-entity-type="item"]')
+    page.wait_for_selector('#content-editor[data-editor-entity-type="item"] .js-content-editor', timeout=15000)
+    page.fill('#content-editor [data-edit-path="Name"]', "UITempItem")
     page.fill("#editor-reason", "Web UI create temporary item")
-    page.click('#item-editor [data-action="editor-save"]')
-    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('UITempItem')", timeout=15000)
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_selector("#item-editor .js-item-editor", timeout=15000)
-    page.click('#item-editor [data-action="editor-delete-request"]')
-    page.wait_for_selector('#item-editor [data-action="editor-delete-confirm"]', timeout=5000)
-    page.click('#item-editor [data-action="editor-delete-confirm"]')
-    page.wait_for_function("!document.querySelector('#item-editor')", timeout=30000)
+    page.wait_for_selector('#content-editor[data-editor-entity-type="item"] .js-content-editor', timeout=15000)
+    page.click('#content-editor [data-action="editor-delete-request"]')
+    page.wait_for_selector('#content-editor [data-action="editor-delete-confirm"]', timeout=5000)
+    page.click('#content-editor [data-action="editor-delete-confirm"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempItem')", timeout=15000)
 
     page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
@@ -311,11 +311,89 @@ with sync_playwright() as playwright:
 
     page.goto(f"{web}/?api={api}#/content/monsters", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.fill("#content-search-monsters", "Archer")
+    page.wait_for_timeout(1200)
+    assert "ArcherGuard" in page.locator("#content-table tbody").inner_text()
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实掉落关系')", timeout=15000)
-    monster_drawer_text = page.locator("#live-drawer-relations").inner_text()
-    assert "GreenPoison" in monster_drawer_text and "drop.monster.1" in monster_drawer_text.lower(), monster_drawer_text[:1200]
-    page.click('[data-action="close-drawer"]')
+    page.wait_for_selector('#content-editor[data-editor-entity-type="monster"] .js-content-editor', timeout=15000)
+    assert page.locator('#content-editor .editor-field').count() == 19
+    assert page.locator('#content-editor [data-stat-map="Stats"]').count() == 1
+    assert page.locator('#content-editor [data-edit-path="Image"]').count() == 1
+    assert page.locator('#content-editor [data-edit-path="CanTame"]').count() == 1
+    page.wait_for_function("document.querySelector('#content-editor')?.innerText.includes('掉落关系（只读）')", timeout=15000)
+    page.wait_for_function("document.querySelector('#content-editor')?.innerText.toLowerCase().includes('drop.monster.1')", timeout=15000)
+    page.fill('#content-editor [data-edit-path="Name"]', "ArcherGuardUI")
+    page.fill('#content-editor [data-edit-path="AI"]', "58")
+    page.locator('#content-editor .editor-stat-row:has([data-stat-key] option[value="HP"]:checked) [data-stat-value]').fill("8888")
+    page.locator('#content-editor [data-edit-path="CanTame"]').check()
+    page.fill("#editor-reason", "Web UI monster editor update")
+    page.wait_for_function("document.querySelector('#editor-diff')?.innerText.includes('ArcherGuardUI')", timeout=5000)
+    diff_text = page.locator("#editor-diff").inner_text()
+    assert "HP" in diff_text and "CanTame" in diff_text, diff_text[:1200]
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('ArcherGuardUI')", timeout=15000)
+
+    edited_monster = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/monster/1", token=admin_token)
+    assert edited_monster["revision"] == 2, edited_monster
+    assert edited_monster["data"]["Name"] == "ArcherGuardUI", edited_monster["data"]
+    assert edited_monster["data"]["AI"] == 58, edited_monster["data"]
+    assert edited_monster["data"]["Stats"]["Values"]["HP"] == 8888, edited_monster["data"]["Stats"]
+    assert edited_monster["data"]["CanTame"] is True, edited_monster["data"]
+
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="monster"] .js-content-editor', timeout=15000)
+    page.click('#content-editor [data-action="editor-validate"]')
+    page.wait_for_selector("#content-editor [data-editor-validation]", timeout=60000)
+    monster_validation_text = page.locator("#content-editor [data-editor-validation]").inner_text()
+    assert "通过" in monster_validation_text, monster_validation_text[:1200]
+
+    concurrent_monster = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/monster/1", token=admin_token)
+    concurrent_monster_data = concurrent_monster["data"]
+    concurrent_monster_data["Name"] = "ArcherGuardConcurrent"
+    api_request("PUT", f"/api/v1/drafts/{draft_ui_id}/content/monster/1", {
+        "contentKey": concurrent_monster["contentKey"],
+        "schemaVersion": concurrent_monster["schemaVersion"],
+        "data": concurrent_monster_data,
+        "expectedRevision": concurrent_monster["revision"],
+        "reason": "Web UI simulate concurrent monster edit"
+    }, admin_token)
+    page.fill('#content-editor [data-edit-path="Name"]', "ArcherGuardConflictSave")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector("#content-editor [data-editor-conflict]", timeout=15000)
+    assert page.locator('#content-editor [data-edit-path="Name"]').input_value() == "ArcherGuardConflictSave"
+    page.click('#content-editor [data-action="editor-reload"]')
+    page.wait_for_function(
+        "() => document.querySelector('#content-editor [data-edit-path=Name]')?.value === 'ArcherGuardConcurrent'",
+        timeout=15000)
+
+    page.fill('#content-editor [data-edit-path="Level"]', "65536")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector('#content-editor .editor-field[data-field-path="Level"].has-error', timeout=15000)
+    assert "between" in page.locator('#content-editor .editor-field[data-field-path="Level"]').inner_text()
+    page.fill('#content-editor [data-edit-path="Level"]', "65")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+
+    page.fill("#content-search-monsters", "UITempMonster")
+    page.wait_for_timeout(1200)
+    page.click('[data-action="open-content-editor-new"][data-entity-type="monster"]')
+    page.wait_for_selector('#content-editor[data-editor-entity-type="monster"] .js-content-editor', timeout=15000)
+    assert "保存时自动分配本地索引" in page.locator("#content-editor").inner_text()
+    page.fill('#content-editor [data-edit-path="Name"]', "UITempMonster")
+    page.fill("#editor-reason", "Web UI create temporary monster")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('UITempMonster')", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="monster"] .js-content-editor', timeout=15000)
+    assert "掉落关系（只读）" in page.locator("#content-editor").inner_text()
+    assert "掉落关系读取失败" not in page.locator("#content-editor").inner_text()
+    page.click('#content-editor [data-action="editor-delete-request"]')
+    page.wait_for_selector('#content-editor [data-action="editor-delete-confirm"]', timeout=5000)
+    page.click('#content-editor [data-action="editor-delete-confirm"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempMonster')", timeout=15000)
 
     page.goto(f"{web}/?api={api}#/content/recipes", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
@@ -603,17 +681,27 @@ with sync_playwright() as playwright:
 
     auditor_page.goto(f"{web}/?api={api}#/content/items", wait_until="networkidle")
     auditor_page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
-    assert auditor_page.locator('[data-action="open-item-editor-new"]').count() == 0
+    assert auditor_page.locator('[data-action="open-content-editor-new"][data-entity-type="item"]').count() == 0
     assert auditor_page.locator('[data-action="open-modal"][data-modal="create-draft"]').count() == 0
     auditor_page.locator("#content-table tbody tr.content-row").first.click()
     auditor_page.wait_for_selector(".drawer", timeout=10000)
-    assert auditor_page.locator("#item-editor").count() == 0
+    assert auditor_page.locator("#content-editor").count() == 0
+    assert auditor_page.locator('[data-action="editor-save"]').count() == 0
+
+    auditor_page.goto(f"{web}/?api={api}#/content/monsters", wait_until="networkidle")
+    auditor_page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    assert auditor_page.locator('[data-action="open-content-editor-new"][data-entity-type="monster"]').count() == 0
+    assert auditor_page.locator('[data-action="open-modal"][data-modal="create-draft"]').count() == 0
+    auditor_page.locator("#content-table tbody tr.content-row").first.click()
+    auditor_page.wait_for_selector("#live-drawer-relations", timeout=10000)
+    auditor_page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实掉落关系')", timeout=15000)
+    assert auditor_page.locator("#content-editor").count() == 0
     assert auditor_page.locator('[data-action="editor-save"]').count() == 0
 
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
     assert not auditor_errors, auditor_errors
-    print("Control Web integration verified: login, live overview, import runs, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only release permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, item/monster draft editors, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY

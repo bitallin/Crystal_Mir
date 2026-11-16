@@ -50,7 +50,8 @@ docs/
 │   ├── 0004-gpl-boundary.md
 │   ├── 0005-content-signature-format.md
 │   ├── 0006-content-drafts-and-release-rollback.md
-│   └── 0007-item-editor-schema-and-validation.md
+│   ├── 0007-item-editor-schema-and-validation.md
+│   └── 0008-multi-content-editor-registry.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源

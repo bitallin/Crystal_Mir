@@ -160,7 +160,8 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script/1/validation" 
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset/1/file" >"$TMP/asset-file.bin"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/npc/1/script" >"$TMP/npc-script.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/item" >"$TMP/item-schema.json"
-UNKNOWN_SCHEMA_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "X-Api-Key: $API_KEY" "$BASE/api/v1/editor-schemas/monster")"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/monster" >"$TMP/monster-schema.json"
+UNKNOWN_SCHEMA_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "X-Api-Key: $API_KEY" "$BASE/api/v1/editor-schemas/unknown")"
 if [ "$UNKNOWN_SCHEMA_STATUS" != "404" ]; then
   echo "Expected unknown editor schema to return 404, got $UNKNOWN_SCHEMA_STATUS." >&2
   exit 1
@@ -215,6 +216,35 @@ monster = load("monster.json")
 assert monster["entityType"] == "monster", monster
 assert monster["total"] == 555, monster["total"]
 assert len(monster["items"]) == 1, monster
+
+monster_schema = load("monster-schema.json")
+assert monster_schema["entityType"] == "monster", monster_schema
+assert monster_schema["schemaVersion"] == 1, monster_schema
+monster_sections = {section["id"]: section for section in monster_schema["sections"]}
+assert set(monster_sections) == {"identity", "basics", "combat", "behavior", "stats"}, monster_schema["sections"]
+monster_fields = [field for section in monster_schema["sections"] for field in section.get("fields", [])]
+monster_paths = {field["path"] for field in monster_fields}
+assert len(monster_fields) == 20, monster_fields
+assert monster_paths == {
+    "Index", "Name", "Image", "DropPath",
+    "AI", "Effect", "Level", "ViewRange", "CoolEye", "Light",
+    "AttackSpeed", "MoveSpeed", "Experience",
+    "CanTame", "CanPush", "AutoRev", "Undead", "CanRecall", "IsBoss",
+    "Stats",
+}, monster_paths
+assert {"Drops", "HasSpawnScript", "HasDieScript"}.isdisjoint(monster_paths), monster_paths
+image_field = next(field for field in monster_fields if field["path"] == "Image")
+assert image_field["kind"] == "enum" and len(image_field.get("options", [])) >= 296, image_field
+assert any(option["value"] == "ArcherGuard" for option in image_field["options"]), image_field
+stats_field = next(field for field in monster_fields if field["path"] == "Stats")
+assert stats_field["kind"] == "stat-map", stats_field
+assert {option["value"] for option in stats_field["options"]} == {
+    "MinAC", "MaxAC", "MinMAC", "MaxMAC", "MinDC", "MaxDC",
+    "MinMC", "MaxMC", "MinSC", "MaxSC", "HP", "Accuracy", "Agility",
+}, stats_field["options"]
+assert all(next(field for field in monster_fields if field["path"] == path)["kind"] == "boolean" for path in (
+    "CanTame", "CanPush", "AutoRev", "Undead", "CanRecall", "IsBoss"
+))
 
 map_catalog = load("map-catalog.json")
 assert map_catalog["entityType"] == "map", map_catalog
@@ -562,6 +592,8 @@ curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content?entityType=item&page=1&pageSize=5" >"$TMP/draft-items.json"
 curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1" >"$TMP/draft-monster.json"
 
 python3 - "$TMP/draft-item.json" "$TMP/draft-update-body.json" <<'PY'
 import json, sys
@@ -588,6 +620,95 @@ STALE_REVISION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -
   --data "$DRAFT_UPDATE_BODY" "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1")"
 if [ "$STALE_REVISION_STATUS" != "409" ]; then
   echo "Expected stale draft revision update to return 409, got $STALE_REVISION_STATUS." >&2
+  exit 1
+fi
+
+python3 - "$TMP/draft-monster.json" "$TMP/draft-monster-update-body.json" <<'PY'
+import json, sys
+entity = json.load(open(sys.argv[1]))
+data = entity["data"]
+data["Name"] = "ArcherGuardDraft"
+data["AI"] = 58
+data["CanTame"] = True
+data["Stats"]["Values"]["HP"] = 8888
+data["LegacyEditorNote"] = {"source": "integration"}
+body = {
+    "contentKey": entity["contentKey"],
+    "schemaVersion": 1,
+    "expectedRevision": entity["revision"],
+    "reason": "integration monster draft update",
+    "data": data,
+}
+json.dump(body, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY
+DRAFT_MONSTER_UPDATE_BODY="$(cat "$TMP/draft-monster-update-body.json")"
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' --data "$DRAFT_MONSTER_UPDATE_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1" >"$TMP/draft-monster-updated.json"
+
+STALE_MONSTER_REVISION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data "$DRAFT_MONSTER_UPDATE_BODY" "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1")"
+if [ "$STALE_MONSTER_REVISION_STATUS" != "409" ]; then
+  echo "Expected stale monster revision update to return 409, got $STALE_MONSTER_REVISION_STATUS." >&2
+  exit 1
+fi
+
+put_invalid_monster() {
+  local output="$1"
+  local data="$2"
+  local content_key="${3:-monster.1}"
+  curl -sS --max-time 20 -o "$output" -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+    --data "$(printf '{"contentKey":"%s","schemaVersion":1,"expectedRevision":2,"data":%s}' "$content_key" "$data")" \
+    "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1"
+}
+
+INVALID_MONSTER_AI_STATUS="$(put_invalid_monster "$TMP/invalid-monster-ai-error.json" '{"Index":1,"AI":"fast"}')"
+if [ "$INVALID_MONSTER_AI_STATUS" != "400" ]; then
+  echo "Expected invalid monster AI type to return 400, got $INVALID_MONSTER_AI_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_IMAGE_STATUS="$(put_invalid_monster "$TMP/invalid-monster-image-error.json" '{"Index":1,"Image":"NotAMonsterImage"}')"
+if [ "$INVALID_MONSTER_IMAGE_STATUS" != "400" ]; then
+  echo "Expected invalid monster image enum to return 400, got $INVALID_MONSTER_IMAGE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_LEVEL_STATUS="$(put_invalid_monster "$TMP/invalid-monster-level-error.json" '{"Index":1,"Level":65536}')"
+if [ "$INVALID_MONSTER_LEVEL_STATUS" != "400" ]; then
+  echo "Expected out-of-range monster level to return 400, got $INVALID_MONSTER_LEVEL_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_BOOLEAN_STATUS="$(put_invalid_monster "$TMP/invalid-monster-boolean-error.json" '{"Index":1,"CanTame":"yes"}')"
+if [ "$INVALID_MONSTER_BOOLEAN_STATUS" != "400" ]; then
+  echo "Expected invalid monster boolean to return 400, got $INVALID_MONSTER_BOOLEAN_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_STAT_KEY_STATUS="$(put_invalid_monster "$TMP/invalid-monster-stat-key-error.json" '{"Index":1,"Stats":{"Values":{"NotAStat":1}}}')"
+if [ "$INVALID_MONSTER_STAT_KEY_STATUS" != "400" ]; then
+  echo "Expected unknown monster stat key to return 400, got $INVALID_MONSTER_STAT_KEY_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_STAT_RANGE_STATUS="$(put_invalid_monster "$TMP/invalid-monster-stat-range-error.json" '{"Index":1,"Stats":{"Values":{"HP":2147483648}}}')"
+if [ "$INVALID_MONSTER_STAT_RANGE_STATUS" != "400" ]; then
+  echo "Expected out-of-range monster stat to return 400, got $INVALID_MONSTER_STAT_RANGE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_INDEX_STATUS="$(put_invalid_monster "$TMP/invalid-monster-index-error.json" '{"Index":2,"Name":"WrongMonsterIndex"}')"
+if [ "$INVALID_MONSTER_INDEX_STATUS" != "400" ]; then
+  echo "Expected mismatched monster Index to return 400, got $INVALID_MONSTER_INDEX_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MONSTER_KEY_STATUS="$(put_invalid_monster "$TMP/invalid-monster-key-error.json" '{"Index":1,"Name":"WrongMonsterKey"}' 'monster.999999')"
+if [ "$INVALID_MONSTER_KEY_STATUS" != "400" ]; then
+  echo "Expected mismatched monster contentKey to return 400, got $INVALID_MONSTER_KEY_STATUS." >&2
   exit 1
 fi
 
@@ -662,8 +783,21 @@ curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
 ADDED_ITEM_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-item-added.json")"
 ADDED_ITEM_KEY="item.${ADDED_ITEM_INDEX}"
 
+ADDED_MONSTER_BODY='{"schemaVersion":1,"reason":"integration draft add monster","data":{"Name":"DraftIncompleteMonster","Stats":{}}}'
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$ADDED_MONSTER_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/monster" >"$TMP/draft-monster-added.json"
+ADDED_MONSTER_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-monster-added.json")"
+ADDED_MONSTER_KEY="monster.${ADDED_MONSTER_INDEX}"
+
 curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/validate" >"$TMP/draft-incomplete-report.json"
+
+curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"integration monster draft delete"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/$ADDED_MONSTER_INDEX"
 
 curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
@@ -1155,10 +1289,37 @@ assert "StartItem" in load("invalid-item-boolean-error.json")["errors"], load("i
 assert "Index" in load("invalid-item-index-error.json")["errors"], load("invalid-item-index-error.json")
 assert "contentKey" in load("invalid-item-key-error.json")["errors"], load("invalid-item-key-error.json")
 
+draft_monster = load("draft-monster.json")
+assert draft_monster["contentKey"] == "monster.1", draft_monster
+assert draft_monster["data"]["Name"] == "ArcherGuard", draft_monster["data"]
+draft_monster_updated = load("draft-monster-updated.json")
+assert draft_monster_updated["revision"] == 2, draft_monster_updated
+assert draft_monster_updated["data"]["Name"] == "ArcherGuardDraft", draft_monster_updated
+assert draft_monster_updated["data"]["AI"] == 58, draft_monster_updated["data"]
+assert draft_monster_updated["data"]["Stats"]["Values"]["HP"] == 8888, draft_monster_updated["data"]
+assert draft_monster_updated["data"]["CanTame"] is True, draft_monster_updated["data"]
+assert draft_monster_updated["data"]["LegacyEditorNote"] == {"source": "integration"}, draft_monster_updated["data"]
+draft_monster_added = load("draft-monster-added.json")
+assert draft_monster_added["revision"] == 1, draft_monster_added
+assert draft_monster_added["contentKey"] == f"monster.{draft_monster_added['localIndex']}", draft_monster_added
+assert draft_monster_added["data"]["Index"] == draft_monster_added["localIndex"], draft_monster_added
+assert draft_monster_added["data"]["Name"] == "DraftIncompleteMonster", draft_monster_added
+
+assert "AI" in load("invalid-monster-ai-error.json")["errors"], load("invalid-monster-ai-error.json")
+assert "Image" in load("invalid-monster-image-error.json")["errors"], load("invalid-monster-image-error.json")
+assert "Level" in load("invalid-monster-level-error.json")["errors"], load("invalid-monster-level-error.json")
+assert "CanTame" in load("invalid-monster-boolean-error.json")["errors"], load("invalid-monster-boolean-error.json")
+assert "Stats.Values.NotAStat" in load("invalid-monster-stat-key-error.json")["errors"], load("invalid-monster-stat-key-error.json")
+assert "Stats.Values.HP" in load("invalid-monster-stat-range-error.json")["errors"], load("invalid-monster-stat-range-error.json")
+assert "Index" in load("invalid-monster-index-error.json")["errors"], load("invalid-monster-index-error.json")
+assert "contentKey" in load("invalid-monster-key-error.json")["errors"], load("invalid-monster-key-error.json")
+
 incomplete_report = load("draft-incomplete-report.json")
 assert incomplete_report["valid"] is False, incomplete_report
 assert any(issue["code"] == "item-completeness" and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 assert any(issue["message"] == "Missing required item field 'Stats.Values'." and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["code"] == "monster-completeness" and issue["contentKey"] == draft_monster_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["message"] == "Missing required monster field 'Stats.Values'." and issue["contentKey"] == draft_monster_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 
 invalid_report = load("draft-invalid-report.json")
 assert invalid_report["valid"] is False, invalid_report
@@ -1172,6 +1333,9 @@ revisions = load("draft-revisions.json")["items"]
 assert any(revision["action"] == "update" and revision["contentKey"] == "item.1" and revision["reason"] == "integration draft update" for revision in revisions), revisions
 assert any(revision["action"] == "create" and revision["contentKey"] == draft_item_added["contentKey"] for revision in revisions), revisions
 assert any(revision["action"] == "delete" and revision["contentKey"] == draft_item_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "update" and revision["contentKey"] == "monster.1" and revision["reason"] == "integration monster draft update" for revision in revisions), revisions
+assert any(revision["action"] == "create" and revision["contentKey"] == draft_monster_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "delete" and revision["contentKey"] == draft_monster_added["contentKey"] for revision in revisions), revisions
 assert any(revision["beforeData"] is not None and revision["afterData"] is not None for revision in revisions), revisions
 
 draft_release_created = load("draft-release-created.json")
@@ -1217,4 +1381,4 @@ assert any(e["action"] == "draft.validate" and e["result"] == "failure" for e in
 assert any(e["action"] == "release.rollback" and e["result"] == "success" and e["metadata"].get("targetReleaseId") == created["id"] for e in events), events
 PY
 
-echo "Control API integration verified (run $RUN_ID, 15 entity types, drafts/revisions, auth/RBAC/audit/relations/release lifecycle, explicit/default rollback)."
+echo "Control API integration verified (run $RUN_ID, 15 entity types, item/monster editors, drafts/revisions, auth/RBAC/audit/relations/release lifecycle, explicit/default rollback)."

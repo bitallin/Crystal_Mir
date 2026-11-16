@@ -12,21 +12,22 @@ public static class ContentValidationRules
         {
             if (entity.Data.ValueKind != JsonValueKind.Object) continue;
 
-            if (entity.EntityType == ContentEntityTypes.Item)
+            if (ContentEditorSchemas.TryGet(entity.EntityType, out var editorSchema))
             {
-                foreach (var message in ContentItemEditorSchema.ValidateCompleteness(entity.Data))
+                foreach (var message in editorSchema.ValidateCompleteness(entity.Data))
                 {
                     yield return new ReleaseValidationIssueDto(
-                        "item-completeness",
+                        $"{entity.EntityType}-completeness",
                         message,
                         entity.ContentKey);
                 }
 
-                if (!string.Equals(entity.ContentKey, $"item.{entity.LocalIndex}", StringComparison.Ordinal))
+                var expectedContentKey = $"{entity.EntityType}.{entity.LocalIndex}";
+                if (!string.Equals(entity.ContentKey, expectedContentKey, StringComparison.Ordinal))
                 {
                     yield return new ReleaseValidationIssueDto(
-                        "item-content-key",
-                        $"Item content key must be 'item.{entity.LocalIndex}'.",
+                        $"{entity.EntityType}-content-key",
+                        $"Content key for '{entity.EntityType}' must be '{expectedContentKey}'.",
                         entity.ContentKey);
                 }
             }

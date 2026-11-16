@@ -132,7 +132,7 @@ public sealed partial class ContentDraftService
             throw new DraftConflictException("schemaVersion must be a positive integer.");
         }
 
-        ValidateItemStructure(entityType, localIndex, contentKey, request.Data.Value);
+        ValidateStructure(entityType, localIndex, contentKey, request.Data.Value);
 
         var reason = NormalizeReason(request.Reason);
         return await _store.UpsertEntityAsync(
@@ -158,7 +158,7 @@ public sealed partial class ContentDraftService
     {
         _ = await GetAsync(draftId, cancellationToken);
         ValidateEntityType(entityType);
-        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        if (!ContentEditorSchemas.TryGet(entityType, out var editorSchema))
         {
             throw new DraftConflictException(
                 $"Typed creation is not available for entity type '{entityType}'.");
@@ -169,11 +169,11 @@ public sealed partial class ContentDraftService
             throw new DraftConflictException("data must be a JSON object.");
         }
 
-        var schemaVersion = request.SchemaVersion ?? ContentItemEditorSchema.SchemaVersion;
-        if (schemaVersion != ContentItemEditorSchema.SchemaVersion)
+        var schemaVersion = request.SchemaVersion ?? editorSchema.SchemaVersion;
+        if (schemaVersion != editorSchema.SchemaVersion)
         {
             throw new DraftConflictException(
-                $"Unsupported item schemaVersion {schemaVersion}; expected {ContentItemEditorSchema.SchemaVersion}.");
+                $"Unsupported {entityType} schemaVersion {schemaVersion}; expected {editorSchema.SchemaVersion}.");
         }
 
         return await _store.CreateEntityAsync(
@@ -306,18 +306,18 @@ public sealed partial class ContentDraftService
         }
     }
 
-    private static void ValidateItemStructure(
+    private static void ValidateStructure(
         string entityType,
         long localIndex,
         string? contentKey,
         JsonElement data)
     {
-        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        if (!ContentEditorSchemas.TryGet(entityType, out var editorSchema))
         {
             return;
         }
 
-        var errors = ContentItemEditorSchema.ValidateStructure(data, localIndex, contentKey);
+        var errors = editorSchema.ValidateStructure(data, localIndex, contentKey);
         if (errors.Count > 0)
         {
             throw new DraftInputValidationException(errors);

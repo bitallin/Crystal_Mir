@@ -329,14 +329,14 @@ public sealed class ContentDraftStore
         if (localIndex > int.MaxValue)
         {
             throw new DraftConflictException(
-                $"No item local index is available in draft {draftId}.");
+                $"No {entityType} local index is available in draft {draftId}.");
         }
 
         JsonObject payload;
         try
         {
             payload = JsonNode.Parse(data.GetRawText())?.AsObject()
-                      ?? throw new JsonException("Item data must be a JSON object.");
+                      ?? throw new JsonException($"{entityType} data must be a JSON object.");
         }
         catch (JsonException exception)
         {
@@ -349,7 +349,13 @@ public sealed class ContentDraftStore
         payload["Index"] = localIndex;
         var normalizedData = JsonSerializer.SerializeToElement(payload, ContentJson.CompactOptions);
         var contentKey = $"{entityType}.{localIndex}";
-        var validationErrors = ContentItemEditorSchema.ValidateStructure(normalizedData, localIndex, contentKey);
+        if (!ContentEditorSchemas.TryGet(entityType, out var editorSchema))
+        {
+            throw new DraftConflictException(
+                $"Typed creation is not available for entity type '{entityType}'.");
+        }
+
+        var validationErrors = editorSchema.ValidateStructure(normalizedData, localIndex, contentKey);
         if (validationErrors.Count > 0)
         {
             throw new DraftInputValidationException(validationErrors);

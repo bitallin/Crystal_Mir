@@ -6,6 +6,22 @@
 
 本文件由反射生成，用于迁移和后台建模参考。字段名和类型以当前代码为准；修改实体后重新生成。
 
+## 编辑器 Schema 摘要（手工维护）
+
+以下摘要来自 Control API 的 MIT 侧编辑器注册表，不属于反射生成内容；修改编辑器字段时需要同步更新本节。
+
+| 内容域 | Schema 版本 | 可编辑字段 |
+| --- | --- | --- |
+| `item` | 1 | 33 个顶层字段、`Stats.Values` 动态属性、`RandomStats` 下 70 个 0～255 字节字段 |
+| `monster` | 1 | `Index`、`Name`、`Image`、`DropPath`、`AI`、`Effect`、`Level`、`ViewRange`、`CoolEye`、`Light`、`AttackSpeed`、`MoveSpeed`、`Experience`、`CanTame`、`CanPush`、`AutoRev`、`Undead`、`CanRecall`、`IsBoss`、`Stats` |
+
+怪物 `Stats.Values` 只允许 `MinAC`、`MaxAC`、`MinMAC`、`MaxMAC`、`MinDC`、`MaxDC`、`MinMC`、`MaxMC`、
+`MinSC`、`MaxSC`、`HP`、`Accuracy`、`Agility`，值为 32 位整数。`Image` 枚举和所有选项由 Control API
+手工清单维护，不引用 `Shared`/`Server` 程序集。
+
+`Drops`、`HasSpawnScript`、`HasDieScript` 属于运行时派生数据，不进入怪物编辑器；未知顶层字段在草稿保存时原样透传。
+保存阶段只阻断结构错误，草稿/发布校验负责报告 `<entityType>-completeness` 和 `<entityType>-content-key` 问题。
+
 ## 实体
 
 ## `ItemInfo`

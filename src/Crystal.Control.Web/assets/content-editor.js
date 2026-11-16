@@ -54,7 +54,7 @@
 
   function renderForm(schema, data, options = {}) {
     const errors = options.errors || {};
-    return `<form class="js-item-editor editor-form" data-schema-path="${esc(options.schemaPath || "item")}">
+    return `<form class="js-content-editor editor-form" data-schema-path="${esc(options.schemaPath || "content")}">
       ${(schema.sections || []).map(section => `
         <section class="editor-section">
           <div class="editor-section-head"><div><strong>${esc(section.label)}</strong><span>${esc(section.description || "")}</span></div><span class="tag">${(section.fields || []).length} 项</span></div>

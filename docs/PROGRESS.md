@@ -1,14 +1,14 @@
 # 项目进度台账
 
 > 最后更新：2026-11-16
-> 当前阶段：M1 已完成；M2 已启动并完成物品编辑器垂直切片（Schema、草稿全字段编辑、两级校验和 Web 闭环）；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
+> 当前阶段：M1 已完成；M2 已进入多内容编辑框架阶段，物品与怪物垂直切片已打通 Schema、类型化创建、两级校验、字段差异和 Web 闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0007 |
+| 架构决策 | 已完成初版 | ADR 0001～0008 |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts 构建成功；安全回归与内容快照检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
@@ -17,7 +17,7 @@
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job |
-| 控制面 | 已完成初版并进入 M2 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持复制、增改删、revision 乐观并发、修订和校验；新增 `item` 编辑器 Schema、类型化自动索引创建和结构校验；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接物品全字段草稿编辑、字段差异、发布中心、账号和审计页面 |
+| 控制面 | 已完成初版并进入 M2 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持复制、增改删、revision 乐观并发、修订和校验；`entityType` 编辑器注册表已注册 `item`、`monster`，支持类型化自动索引创建和两级校验；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接物品/怪物草稿编辑、字段差异、发布中心、账号和审计页面 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 未开始 | `Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实区服热切换尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
@@ -29,13 +29,26 @@
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
-| M2 内容后台 MVP | 进行中 | 15% | 物品编辑器垂直切片已完成；怪物/地图/NPC/掉落等写操作、资源预览和批量导入导出待做 |
+| M2 内容后台 MVP | 进行中 | 25% | 多内容编辑器注册表、物品和怪物垂直切片已完成；地图/NPC/掉落等专用编辑器、资源预览和批量导入导出待做 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-16（M2 怪物编辑器垂直切片与多内容编辑框架）
+
+- 范围：在 `item` 垂直切片基础上先消除类型硬编码，建立按 `entityType` 注册 Schema、结构校验和完整性校验的多内容编辑框架，并以 `monster` 作为第二个垂直切片；不新增数据库迁移，不改变快照/发布格式、客户端协议或旧服务端行为。
+- 后端：新增 `ContentEditorSchemas.cs` 和 `ContentMonsterEditorSchema.cs`；`GET /api/v1/editor-schemas/{entityType}` 查询注册表，未注册类型返回 404；`item` 保持 `schemaVersion=1`、字段、响应和问题码不变。
+- 怪物 Schema：5 个分组、20 个可编辑字段，覆盖身份、基础行为、战斗参数、布尔开关和 `Stats.Values`；图像枚举由 MIT 控制面手工维护，`Stats.Values` 仅允许 13 个固定键且值为 32 位整数。`Drops`、`HasSpawnScript`、`HasDieScript` 保持运行时派生，不进入编辑字段。
+- 写入：类型化创建对所有已注册类型生效，服务端事务内分配下一个 `localIndex`、覆盖 `Index`、生成 `<entityType>.<localIndex>` 并写 `create` 修订；保存只阻断类型、范围、枚举、布尔、`Index`、`contentKey` 和 `Stats.Values` 等结构错误，未知顶层字段原样透传。
+- 校验：草稿/发布校验统一生成 `<entityType>-completeness` 和 `<entityType>-content-key`；怪物允许保存不完整草稿，校验会报告缺失字段、空名称和缺少 `Stats.Values`。物品问题码保持 `item-completeness`、`item-content-key`。
+- 前端：编辑状态、Schema 缓存、抽屉、差异、保存、删除、校验、400 映射和 409 恢复改为通用 `entityType` 驱动，启用 `item`、`monster`；草稿激活时物品/怪物列表读取草稿数据，可写用户点击进入编辑器，只读用户保留详情抽屉。怪物编辑器展示只读掉落关系；草稿新建怪物无导入掉落时显示空关系而非读取失败。
+- 文档：新增 ADR 0008，并同步 ADR 索引、文档地图、Control API/Web README、Control API 参考、内容 schema 参考、能力矩阵、里程碑和本进度台账。
+- 验证：`DOTNET=/root/.dotnet/dotnet ./scripts/ci.sh` 通过，包含全量构建、358 项服务端安全回归、39 项内容快照检查、边界检查、黄金内容导入/签名/往返和区服冒烟（463 张地图、1628 件物品、555 个怪物）；在全新 PostgreSQL 16.16 数据库上运行 `scripts/test-control-api.sh` 通过，覆盖怪物 Schema、合法更新、未知字段透传、类型/范围/枚举/布尔/Stats/Index/contentKey 400、stale revision 409、自动索引创建、不完整草稿问题码、删除、修订和从草稿发布；随后运行 `SKIP_API_SETUP=1 scripts/test-control-web.sh` 通过，覆盖物品回归、怪物草稿列表/编辑/差异/保存/校验/409 恢复、新建/删除和只读抽屉。全部 Web JavaScript `node --check`、Shell `bash -n` 和 `git diff --check` 通过。
+- 未验证/范围外：地图、NPC、掉落、技能、任务等专用编辑器；掉落 CRUD、资源预览、批量导入导出、真实区服消费；Windows 客户端冒烟。授权、许可证和素材合规按本轮范围未处理。
+- 下一步：复用注册表接入地图元数据或 NPC 脚本编辑器，并补引用选择器和资源预览；掉落继续保留只读关系，直到确定独立掉落模型和概率校验。
 
 ### 2026-11-16（M2 物品编辑器垂直切片）
 

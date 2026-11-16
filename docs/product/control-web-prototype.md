@@ -1,7 +1,7 @@
 # Crystal.Control.Web 信息架构与高保真原型
 
 > 最后更新：2026-11-16
-> 状态：生效（内容只读 + 物品草稿编辑 + 关系/账号生命周期联调版）
+> 状态：生效（内容只读 + 物品/怪物草稿编辑 + 关系/账号生命周期联调版）
 
 ## 1. 目标与边界
 
@@ -14,7 +14,7 @@
 - 高风险操作是否具有明确的确认、原因、审批和审计入口。
 - 哪些页面可以在 M1 先做只读版本，哪些依赖 M2 以后的写入/发布 API。
 
-当前版本已接入真实账号登录、JWT/刷新令牌、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次，含 `drop`、`recipe`、`buff`、`script` 和 `asset`）、地图/NPC 脚本/怪物/配方/资源关系、脚本 AST 与编译校验、资源完整性下载、账号生命周期、角色和审计查询，并按权限点过滤导航、直达路由和页面动作。物品已支持真实草稿创建、全字段编辑、差异、校验、保存和删除；发布中心也已接真实 API。其他内容写入、脚本编辑、资源上传、GM、支付和审批仍为前端模拟；API 不可用时保留演示模式。
+当前版本已接入真实账号登录、JWT/刷新令牌、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次，含 `drop`、`recipe`、`buff`、`script` 和 `asset`）、地图/NPC 脚本/怪物/配方/资源关系、脚本 AST 与编译校验、资源完整性下载、账号生命周期、角色和审计查询，并按权限点过滤导航、直达路由和页面动作。物品与怪物已支持真实草稿创建、编辑、差异、校验、保存和删除；发布中心也已接真实 API。其他内容写入、脚本编辑、资源上传、GM、支付和审批仍为前端模拟；API 不可用时保留演示模式。
 
 ### 1.1 实时联调边界
 
@@ -23,8 +23,8 @@
 | 登录、刷新、登出、自助改密、当前身份 | `POST /api/v1/auth/login`、`/auth/refresh`、`/auth/logout`、`/auth/change-password`、`GET /auth/me` | 管理端账号 |
 | 内容总览与实体计数 | `GET /api/v1/import-runs`、`/import-runs/{id}/content-types` | `content:read` |
 | 内容库分页、搜索、详情 | `GET /api/v1/content/{entityType}` | `content:read` |
-| 物品编辑器 Schema | `GET /api/v1/editor-schemas/item` | `content:read` |
-| 草稿与物品编辑 | `GET/POST /api/v1/drafts`、`GET /drafts/{id}/content`、`POST /drafts/{id}/content/item`、`PUT/DELETE /drafts/{id}/content/item/{index}`、`POST /drafts/{id}/validate` | `content:read` / `content:write` |
+| 内容编辑器 Schema | `GET /api/v1/editor-schemas/{entityType}`（当前 `item`、`monster`） | `content:read` |
+| 草稿与内容编辑 | `GET/POST /api/v1/drafts`、`GET /drafts/{id}/content`、`POST /drafts/{id}/content/{entityType}`、`PUT/DELETE /drafts/{id}/content/{entityType}/{index}`、`POST /drafts/{id}/validate`（当前 `item`、`monster`） | `content:read` / `content:write` |
 | 地图关系、刷新点与怪物掉落 | `GET /api/v1/content/map/{localIndex}/relations`、`GET /api/v1/content/monster/{localIndex}/drops` | `content:read` |
 | 脚本 AST 与静态校验 | `GET /api/v1/content/script/{localIndex}/validation` | `content:read` |
 | 资源元数据与文件下载 | `GET /api/v1/content/{entityType}`、`GET /api/v1/content/asset/{localIndex}/file` | `content:read` / `asset:read` |

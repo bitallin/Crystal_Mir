@@ -44,7 +44,7 @@ public static class ContentEndpoints
 
     private static IResult GetEditorSchemaAsync(string entityType)
     {
-        if (!string.Equals(entityType, ContentItemEditorSchema.EntityType, StringComparison.Ordinal))
+        if (!ContentEditorSchemas.TryGet(entityType, out var editorSchema))
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
@@ -52,7 +52,7 @@ public static class ContentEndpoints
                 detail: $"No typed editor schema is available for '{entityType}'.");
         }
 
-        return Results.Ok(ContentItemEditorSchema.Schema);
+        return Results.Ok(editorSchema.Schema);
     }
 
     private static async Task<IResult> GetImportRunsAsync(

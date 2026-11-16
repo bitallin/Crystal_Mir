@@ -53,8 +53,8 @@
       draftsPromise: null,
       activeDraftId: null,
       draftContent: Object.create(null),
-      editorSchema: null,
-      editorSchemaPromise: null,
+      editorSchemas: Object.create(null),
+      editorSchemaPromises: Object.create(null),
       editor: null,
       editorValidation: null,
       selectedReleaseId: null,
@@ -78,6 +78,11 @@
   }
 
   const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop", "recipe", "buff", "script", "asset"]);
+  const EDITABLE_ENTITY_TYPES = new Set(["item", "monster"]);
+  const EDITOR_META = Object.freeze({
+    item: { typeId: "items", singular: "物品", eyebrow: "ITEM", icon: "sword" },
+    monster: { typeId: "monsters", singular: "怪物", eyebrow: "MONSTER", icon: "monster" }
+  });
 
   const ROUTE_PERMISSIONS = Object.freeze({
     "content-overview": "content:read",
@@ -1015,8 +1020,16 @@
     return state.contentQueries[type.id];
   }
 
-  function isItemDraftEditing(type) {
-    return isLive() && type?.entity === "item";
+  function isEditableEntityType(entityType) {
+    return EDITABLE_ENTITY_TYPES.has(entityType);
+  }
+
+  function editorMeta(entityType) {
+    return EDITOR_META[entityType] || null;
+  }
+
+  function isDraftEditing(type) {
+    return isLive() && isEditableEntityType(type?.entity);
   }
 
   function draftStorageKey() {
@@ -1051,14 +1064,14 @@
     return state.live.draftsPromise;
   }
 
-  async function ensureEditorSchema() {
-    if (state.live.editorSchema) return state.live.editorSchema;
-    if (state.live.editorSchemaPromise) return state.live.editorSchemaPromise;
-    state.live.editorSchemaPromise = (async () => {
-      state.live.editorSchema = await API.getEditorSchema("item");
-      return state.live.editorSchema;
-    })().finally(() => { state.live.editorSchemaPromise = null; });
-    return state.live.editorSchemaPromise;
+  async function ensureEditorSchema(entityType) {
+    if (state.live.editorSchemas[entityType]) return state.live.editorSchemas[entityType];
+    if (state.live.editorSchemaPromises[entityType]) return state.live.editorSchemaPromises[entityType];
+    state.live.editorSchemaPromises[entityType] = (async () => {
+      state.live.editorSchemas[entityType] = await API.getEditorSchema(entityType);
+      return state.live.editorSchemas[entityType];
+    })().finally(() => { delete state.live.editorSchemaPromises[entityType]; });
+    return state.live.editorSchemaPromises[entityType];
   }
 
   function selectDraft(draftId) {
@@ -1090,7 +1103,7 @@
 
   function contentCacheKey(type) {
     const query = contentQueryState(type);
-    if (isItemDraftEditing(type) && state.live.activeDraftId) {
+    if (isDraftEditing(type) && state.live.activeDraftId) {
       return activeDraftContentKey(type);
     }
     const runId = state.live.run?.id || "latest";
@@ -1335,7 +1348,7 @@
     if (!isLive() || !LIVE_ENTITY_TYPES.has(type.entity)) {
       return { rows: type.rows, total: type.total, live: false, loading: false };
     }
-    const draft = isItemDraftEditing(type) && Boolean(state.live.activeDraftId);
+    const draft = isDraftEditing(type) && Boolean(state.live.activeDraftId);
     const key = contentCacheKey(type);
     const result = state.live.content[key];
     if (!result) {
@@ -1650,7 +1663,7 @@
         const type = CONTENT_BY_ID[typeId];
         if (!type || !LIVE_ENTITY_TYPES.has(type.entity)) return;
         await ensureLiveContext();
-        if (type.entity === "item") {
+        if (isEditableEntityType(type.entity)) {
           await ensureDrafts();
         }
         const key = contentCacheKey(type);
@@ -1658,7 +1671,7 @@
         state.inflight.add(key);
         const query = contentQueryState(type);
         try {
-          state.live.content[key] = type.entity === "item" && state.live.activeDraftId
+          state.live.content[key] = isDraftEditing(type) && state.live.activeDraftId
             ? await API.queryDraftContent(state.live.activeDraftId, type.entity, {
               page: query.page,
               pageSize: 50,
@@ -1919,7 +1932,7 @@
   function renderContentLibrary(type) {
     const query = contentQueryState(type);
     const view = contentView(type);
-    const itemDraft = isLive() && type.entity === "item";
+    const editable = isDraftEditing(type);
     const canWrite = hasPermission("content:write");
     const drafts = (state.live.drafts?.items || []).filter(draft => draft.status !== "archived");
     const active = activeDraft();
@@ -1932,20 +1945,20 @@
     const batchLabel = view.live ? `批次 #${run?.id ?? "—"}` : "批次 #32";
     const sourceLabel = view.live ? (String(state.live.run?.source || "").split(/[\\/]/).pop() || type.source) : type.source;
     const loadingRow = `<tr><td colspan="${type.columns.length + 2}"><div class="empty-inline">${I("refresh", 14)} 正在从 Control API 读取 ${esc(type.label)}...</div></td></tr>`;
-    const newAction = itemDraft
-      ? (canWrite ? btn(`新建${type.singular}`, "plus", "btn-primary", `data-action="open-item-editor-new" data-type="${type.id}"`) : "")
+    const newAction = editable
+      ? (canWrite ? btn(`新建${type.singular}`, "plus", "btn-primary", `data-action="open-content-editor-new" data-entity-type="${type.entity}" data-type="${type.id}"`) : "")
       : btn(`新建${type.singular}`, "plus", "btn-primary", `data-action="open-modal" data-modal="create-content" data-type="${type.id}"`);
     const actions = `${btn("导出", "download", "btn-secondary", 'data-action="toast" data-message="已创建内容导出任务"')}${newAction}`;
     const draftOptions = drafts.length
       ? drafts.map(draft => `<option value="${draft.id}"${Number(active?.id) === Number(draft.id) ? " selected" : ""}>草稿 #${draft.id} · ${esc(draft.name)} · ${esc(draft.status)} · ${formatNumber(draft.entityCount)} 实体</option>`).join("")
       : `<option value="">无可用草稿</option>`;
-    const draftPicker = itemDraft ? `<label class="draft-picker"><span>编辑草稿</span><select class="select" data-live-draft-select${drafts.length ? "" : " disabled"}>${draftOptions}</select></label>${canWrite ? `<button class="btn btn-ghost btn-sm" data-action="open-modal" data-modal="create-draft" data-run-id="${esc(run?.id ?? "")}">${I("plus", 12)}创建草稿</button>` : ""}` : "";
+    const draftPicker = editable ? `<label class="draft-picker"><span>编辑草稿</span><select class="select" data-live-draft-select${drafts.length ? "" : " disabled"}>${draftOptions}</select></label>${canWrite ? `<button class="btn btn-ghost btn-sm" data-action="open-modal" data-modal="create-draft" data-run-id="${esc(run?.id ?? "")}">${I("plus", 12)}创建草稿</button>` : ""}` : "";
     return `
       <div class="page">
         ${pageHeader({ title: type.label, description: esc(type.description), eyebrow: "CONTENT DOMAIN", actions })}
         <section>${contentTypeStrip(type.id)}</section>
         ${!LIVE_ENTITY_TYPES.has(type.entity) && isLive() ? `<div class="api-notice warning">${I("info", 14)}<span>${esc(type.label)} 尚未进入 MirDB 只读快照，当前展示原型样本；正式导入后可切换为批次数据。</span></div>` : ""}
-        ${itemDraft && view.live && !drafts.length ? `<div class="api-notice warning">${I("info", 14)}<span>物品写入需要草稿上下文。${canWrite ? "请创建草稿后再编辑。" : "请联系版本作者创建草稿。"}</span></div>` : ""}
+        ${editable && view.live && !drafts.length ? `<div class="api-notice warning">${I("info", 14)}<span>${esc(type.singular)}写入需要草稿上下文。${canWrite ? "请创建草稿后再编辑。" : "请联系版本作者创建草稿。"}</span></div>` : ""}
         ${view.error ? `<div class="api-notice warning">${I("alert", 14)}<span>读取批次内容失败，已回退原型样本：${esc(view.error.message || "未知错误")}</span></div>` : ""}
         <section class="split mt-16">
           <div class="split-main stack">
@@ -1986,7 +1999,7 @@
                 <div class="data-row"><span>导入批次</span><strong>${view.live ? `#${run?.id} · ${esc(run?.status)}` : "#32 · imported"}</strong></div>
                 <div class="data-row"><span>来源</span><strong>${esc(sourceLabel)}</strong></div>
                 <div class="data-row"><span>实体数量</span><strong>${formatNumber(total)}</strong></div>
-                <div class="data-row"><span>草稿</span><strong>${itemDraft && active ? `#${active.id} · ${esc(active.status)}` : view.live ? "未选择" : type.draft}</strong></div>
+                <div class="data-row"><span>草稿</span><strong>${editable && active ? `#${active.id} · ${esc(active.status)}` : view.live ? "未选择" : type.draft}</strong></div>
                 <div class="data-row"><span>校验问题</span><strong class="${issueCount ? "warning-text" : "success-text"}">${issueCount}</strong></div>
                 <div class="data-row"><span>内容键</span><strong class="mono">${esc(type.entity)}.*</strong></div>
               </div>
@@ -3523,8 +3536,8 @@
     const rows = isLive() && LIVE_ENTITY_TYPES.has(type.entity) ? contentView(type).rows : type.rows;
     const row = rows.find(item => String(item.key || item.index) === String(key)) || rows[0] || type.rows[0];
     if (!row) return;
-    if (isLive() && type.entity === "item" && hasPermission("content:write")) {
-      void openItemEditorDrawer(Number(row.index), row.key);
+    if (isLive() && isEditableEntityType(type.entity) && hasPermission("content:write")) {
+      void openContentEditorDrawer(type.entity, Number(row.index), row.key);
       return;
     }
     modalRoot.innerHTML = `
@@ -3563,7 +3576,7 @@
     return detail || error?.problem?.detail || error?.message || "草稿操作失败。";
   }
 
-  function itemEditorValidationMarkup(report) {
+  function contentEditorValidationMarkup(report) {
     if (!report) return "";
     const issues = Array.isArray(report.issues) ? report.issues : [];
     return `<div class="detail-section editor-validation-report" data-editor-validation>
@@ -3572,21 +3585,34 @@
         <div class="data-row"><span>实体数量</span><strong>${formatNumber(report.entityCount)}</strong></div>
         <div class="data-row"><span>内容哈希</span><strong class="mono">${esc(report.contentHash || "—")}</strong></div>
       </div>
-      ${issues.length ? `<div class="editor-issue-list">${issues.slice(0, 30).map(issue => `<div class="editor-issue"><span class="tag ${issue.code === "item-completeness" ? "danger" : "gold"}">${esc(issue.code)}</span><div><strong>${esc(issue.message)}</strong><span class="mono">${esc(issue.contentKey || "draft")}</span></div></div>`).join("")}</div>${issues.length > 30 ? `<div class="editor-hint">仅显示前 30 个问题，共 ${issues.length} 个。</div>` : ""}` : ""}
+      ${issues.length ? `<div class="editor-issue-list">${issues.slice(0, 30).map(issue => `<div class="editor-issue"><span class="tag ${String(issue.code || "").endsWith("-completeness") ? "danger" : "gold"}">${esc(issue.code)}</span><div><strong>${esc(issue.message)}</strong><span class="mono">${esc(issue.contentKey || "draft")}</span></div></div>`).join("")}</div>${issues.length > 30 ? `<div class="editor-hint">仅显示前 30 个问题，共 ${issues.length} 个。</div>` : ""}` : ""}
     </div>`;
   }
 
-  function renderItemEditorDrawer() {
+  function contentEditorDropsMarkup(editor) {
+    if (editor.entityType !== "monster" || editor.mode === "create") return "";
+    const body = editor.dropsLoading
+      ? `<div class="empty-inline">${I("refresh", 14)} 正在读取只读掉落关系...</div>`
+      : editor.dropsError
+        ? `<div class="empty-inline">掉落关系读取失败：${esc(editor.dropsError)}</div>`
+        : editor.drops
+          ? dropTableHtml(editor.drops.drops)
+          : `<div class="empty-inline">尚未读取掉落关系。</div>`;
+    return `<div class="detail-section"><div class="detail-section-title"><span>掉落关系（只读）</span><span class="tag gold">${esc(editor.drops?.dropContentKey || "当前批次")}</span></div>${body}</div>`;
+  }
+
+  function renderContentEditorDrawer() {
     const editor = state.live.editor;
     if (!editor) {
       closeOverlays();
       return;
     }
-    const schema = state.live.editorSchema;
-    const title = editor.mode === "create" ? "新建物品" : (editor.data?.Name || editor.contentKey || "编辑物品");
-    const contentKey = editor.contentKey || "item.自动分配";
+    const meta = editorMeta(editor.entityType) || { singular: editor.entityType, eyebrow: editor.entityType.toUpperCase(), icon: "file" };
+    const schema = editor.schema;
+    const title = editor.mode === "create" ? `新建${meta.singular}` : (editor.data?.Name || editor.contentKey || `编辑${meta.singular}`);
+    const contentKey = editor.contentKey || `${editor.entityType}.自动分配`;
     if (editor.loading || !schema) {
-      modalRoot.innerHTML = `<div class="drawer-backdrop"><aside class="drawer drawer-wide"><div class="drawer-head"><span class="cell-icon" style="width:38px;height:38px">${I("sword", 18)}</span><div class="drawer-head-copy"><div class="eyebrow">ITEM · DRAFT</div><h2>${esc(title)}</h2><p>草稿 #${esc(editor.draftId)} · ${esc(contentKey)}</p></div>${iconButton("close", "关闭", 'data-action="close-drawer"')}</div><div class="drawer-body"><div class="empty-inline">${I("refresh", 14)} 正在读取 Schema 与草稿实体...</div></div></aside></div>`;
+      modalRoot.innerHTML = `<div class="drawer-backdrop"><aside class="drawer drawer-wide"><div class="drawer-head"><span class="cell-icon" style="width:38px;height:38px">${I(meta.icon, 18)}</span><div class="drawer-head-copy"><div class="eyebrow">${esc(meta.eyebrow)} · DRAFT</div><h2>${esc(title)}</h2><p>草稿 #${esc(editor.draftId)} · ${esc(contentKey)}</p></div>${iconButton("close", "关闭", 'data-action="close-drawer"')}</div><div class="drawer-body"><div class="empty-inline">${I("refresh", 14)} 正在读取 Schema 与草稿实体...</div></div></aside></div>`;
       return;
     }
 
@@ -3605,8 +3631,8 @@
 
     modalRoot.innerHTML = `
       <div class="drawer-backdrop">
-        <aside class="drawer drawer-wide" id="item-editor">
-          <div class="drawer-head"><span class="cell-icon" style="width:38px;height:38px;color:var(--gold);background:var(--gold-soft)">${I("sword", 18)}</span><div class="drawer-head-copy"><div class="eyebrow">ITEM · DRAFT #${esc(editor.draftId)}</div><h2>${esc(title)}</h2><p>${esc(contentKey)} · ${isCreate ? "保存时自动分配本地索引" : `revision ${esc(editor.revision)}`} · 不直接影响运行区服</p></div>${iconButton("close", "关闭", 'data-action="close-drawer"')}</div>
+        <aside class="drawer drawer-wide" id="content-editor" data-editor-entity-type="${esc(editor.entityType)}">
+          <div class="drawer-head"><span class="cell-icon" style="width:38px;height:38px;color:var(--gold);background:var(--gold-soft)">${I(meta.icon, 18)}</span><div class="drawer-head-copy"><div class="eyebrow">${esc(meta.eyebrow)} · DRAFT #${esc(editor.draftId)}</div><h2>${esc(title)}</h2><p>${esc(contentKey)} · ${isCreate ? "保存时自动分配本地索引" : `revision ${esc(editor.revision)}`} · 不直接影响运行区服</p></div>${iconButton("close", "关闭", 'data-action="close-drawer"')}</div>
           <div class="drawer-body editor-drawer-body">
             ${conflict}${general}${deleteConfirm}
             <div class="editor-workspace">
@@ -3615,14 +3641,15 @@
                 <section class="editor-section editor-save-panel">
                   <div class="editor-section-head"><div><strong>保存说明</strong><span>变更原因会写入草稿修订与审计日志。</span></div></div>
                   <div class="editor-section-body">
-                    <div class="field"><label for="editor-reason">变更原因</label><textarea id="editor-reason" placeholder="例如：修复物品需求等级并调整售价">${esc(editor.reason || "")}</textarea><div class="field-hint">可选；留空时使用“物品编辑器保存”。</div></div>
+                    <div class="field"><label for="editor-reason">变更原因</label><textarea id="editor-reason" placeholder="例如：调整${esc(meta.singular)}属性并修复关联配置">${esc(editor.reason || "")}</textarea><div class="field-hint">可选；留空时使用“${esc(meta.singular)}编辑器保存”。</div></div>
                   </div>
                 </section>
               </div>
               <aside class="editor-preview-pane">
                 <div class="editor-preview-head"><div><strong>字段变更预览</strong><span id="editor-change-count">${E.diff(editor.originalData, editor.data, schema).length} 个字段</span></div><span class="tag gold">前后对比</span></div>
                 <div id="editor-diff">${E.renderDiff(editor.originalData, editor.data, schema)}</div>
-                ${itemEditorValidationMarkup(editor.validation)}
+                ${contentEditorValidationMarkup(editor.validation)}
+                ${contentEditorDropsMarkup(editor)}
               </aside>
             </div>
           </div>
@@ -3631,32 +3658,70 @@
             ${!isCreate ? btn("删除", "trash", "btn-danger btn-sm", 'data-action="editor-delete-request"') : ""}
             ${!isCreate ? btn("校验草稿", "play", "btn-secondary btn-sm", 'data-action="editor-validate"') : ""}
             ${btn("关闭", "", "btn-secondary", 'data-action="close-drawer"')}
-            ${btn(isCreate ? "创建物品" : "保存物品", "save", "btn-primary", 'data-action="editor-save"')}
+            ${btn(isCreate ? `创建${meta.singular}` : `保存${meta.singular}`, "save", "btn-primary", 'data-action="editor-save"')}
           </div>
         </aside>
       </div>`;
   }
 
-  function readItemEditorData() {
+  function readContentEditorData() {
     const editor = state.live.editor;
-    const form = document.querySelector(".js-item-editor");
-    if (!editor || !form || !state.live.editorSchema) return null;
-    return E.readForm(form, state.live.editorSchema, editor.originalData);
+    const form = document.querySelector(".js-content-editor");
+    if (!editor || !form || !editor.schema) return null;
+    return E.readForm(form, editor.schema, editor.originalData);
   }
 
-  function updateItemEditorPreview() {
+  function updateContentEditorPreview() {
     const editor = state.live.editor;
-    const data = readItemEditorData();
+    const data = readContentEditorData();
     if (!editor || !data) return;
     editor.data = data;
     editor.reason = document.getElementById("editor-reason")?.value || "";
     const diff = document.getElementById("editor-diff");
-    if (diff) diff.innerHTML = E.renderDiff(editor.originalData, data, state.live.editorSchema);
+    if (diff) diff.innerHTML = E.renderDiff(editor.originalData, data, editor.schema);
     const count = document.getElementById("editor-change-count");
-    if (count) count.textContent = `${E.diff(editor.originalData, data, state.live.editorSchema).length} 个字段`;
+    if (count) count.textContent = `${E.diff(editor.originalData, data, editor.schema).length} 个字段`;
   }
 
-  async function openItemEditorDrawer(localIndex, key, options = {}) {
+  async function hydrateContentEditorDrops() {
+    const editor = state.live.editor;
+    if (!editor || editor.entityType !== "monster" || editor.mode === "create") return;
+    editor.dropsLoading = true;
+    editor.dropsError = null;
+    renderContentEditorDrawer();
+    try {
+      const drops = await API.getMonsterDrops(editor.localIndex, state.live.run?.id);
+      if (state.live.editor !== editor) return;
+      editor.drops = drops;
+    } catch (error) {
+      if (state.live.editor !== editor) return;
+      if (error?.status === 404) {
+        editor.drops = {
+          importRunId: state.live.run?.id,
+          localIndex: editor.localIndex,
+          contentKey: `monster.${editor.localIndex}`,
+          name: editor.data?.Name,
+          dropPath: editor.data?.DropPath,
+          dropContentKey: null,
+          drops: []
+        };
+      } else {
+        editor.dropsError = draftErrorMessage(error);
+      }
+    } finally {
+      if (state.live.editor === editor) {
+        editor.dropsLoading = false;
+        renderContentEditorDrawer();
+      }
+    }
+  }
+
+  async function openContentEditorDrawer(entityType, localIndex, key, options = {}) {
+    const meta = editorMeta(entityType);
+    if (!meta) {
+      showToast(`内容类型 ${entityType} 暂无类型化编辑器。`, "danger");
+      return;
+    }
     if (!isLive() || !hasPermission("content:write")) {
       showToast("当前账号没有内容写入权限。", "danger");
       return;
@@ -3664,10 +3729,10 @@
     try {
       await ensureLiveContext();
       await ensureDrafts();
-      const schema = await ensureEditorSchema();
+      const schema = await ensureEditorSchema(entityType);
       const draftId = state.live.activeDraftId;
       if (!draftId) {
-        showToast("请先创建或选择草稿，再编辑物品。", "danger");
+        showToast(`请先创建或选择草稿，再编辑${meta.singular}。`, "danger");
         openModal("create-draft", { runId: state.live.run?.id });
         return;
       }
@@ -3675,10 +3740,13 @@
       const isCreate = Boolean(options.create);
       state.live.editor = {
         mode: isCreate ? "create" : "edit",
+        entityType,
+        typeId: meta.typeId,
+        schema,
         draftId,
         loading: !isCreate,
         localIndex: isCreate ? null : Number(localIndex),
-        contentKey: isCreate ? null : (key || `item.${localIndex}`),
+        contentKey: isCreate ? null : (key || `${entityType}.${localIndex}`),
         schemaVersion: schema.schemaVersion,
         revision: 0,
         originalData: isCreate ? E.defaultData(schema) : null,
@@ -3689,12 +3757,15 @@
         confirmDelete: false,
         saving: false,
         validationLoading: false,
-        validation: null
+        validation: null,
+        drops: null,
+        dropsLoading: false,
+        dropsError: null
       };
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
       if (isCreate) return;
 
-      const entity = await API.getDraftEntity(draftId, "item", localIndex);
+      const entity = await API.getDraftEntity(draftId, entityType, localIndex);
       state.live.editor = {
         ...state.live.editor,
         loading: false,
@@ -3705,7 +3776,8 @@
         originalData: cloneData(entity.data || {}),
         data: cloneData(entity.data || {})
       };
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
+      void hydrateContentEditorDrops();
     } catch (error) {
       if (error?.status === 401) {
         handleApiFailure(error);
@@ -3713,7 +3785,7 @@
       }
       state.live.editor = null;
       closeOverlays();
-      showToast(`读取物品草稿失败：${draftErrorMessage(error)}`, "danger");
+      showToast(`读取${meta.singular}草稿失败：${draftErrorMessage(error)}`, "danger");
     }
   }
 
@@ -3721,7 +3793,7 @@
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   }
 
-  async function refreshAfterItemEditorWrite(message) {
+  async function refreshAfterContentEditorWrite(message) {
     const draftId = state.live.editor?.draftId || state.live.activeDraftId;
     invalidateDraftContent(draftId);
     state.live.editor = null;
@@ -3737,30 +3809,31 @@
     showToast(message);
   }
 
-  async function saveItemEditor() {
+  async function saveContentEditor() {
     const editor = state.live.editor;
-    const data = readItemEditorData();
+    const data = readContentEditorData();
     if (!editor || !data || editor.saving) return;
+    const meta = editorMeta(editor.entityType) || { singular: editor.entityType };
     editor.data = data;
     editor.reason = document.getElementById("editor-reason")?.value.trim() || "";
     editor.errors = {};
     editor.conflict = null;
     editor.saving = true;
-    renderItemEditorDrawer();
-    const reason = editor.reason || "物品编辑器保存";
+    renderContentEditorDrawer();
+    const reason = editor.reason || `${meta.singular}编辑器保存`;
     try {
       if (editor.mode === "create") {
-        const created = await API.createDraftEntity(editor.draftId, "item", data, reason);
-        await refreshAfterItemEditorWrite(`物品 ${created.contentKey} 已创建`);
+        const created = await API.createDraftEntity(editor.draftId, editor.entityType, data, reason);
+        await refreshAfterContentEditorWrite(`${meta.singular} ${created.contentKey} 已创建`);
       } else {
-        const updated = await API.updateDraftEntity(editor.draftId, "item", editor.localIndex, {
+        const updated = await API.updateDraftEntity(editor.draftId, editor.entityType, editor.localIndex, {
           contentKey: editor.contentKey,
           schemaVersion: editor.schemaVersion,
           data,
           expectedRevision: editor.revision,
           reason
         });
-        await refreshAfterItemEditorWrite(`${updated.contentKey} 已保存为 revision ${updated.revision}`);
+        await refreshAfterContentEditorWrite(`${updated.contentKey} 已保存为 revision ${updated.revision}`);
       }
     } catch (error) {
       if (error?.status === 401) {
@@ -3775,16 +3848,16 @@
       } else {
         editor.conflict = draftErrorMessage(error);
       }
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
       showToast(draftErrorMessage(error), "danger");
     }
   }
 
-  async function reloadItemEditor() {
+  async function reloadContentEditor() {
     const editor = state.live.editor;
     if (!editor || editor.mode === "create") return;
     try {
-      const entity = await API.getDraftEntity(editor.draftId, "item", editor.localIndex);
+      const entity = await API.getDraftEntity(editor.draftId, editor.entityType, editor.localIndex);
       state.live.editor = {
         ...editor,
         revision: entity.revision,
@@ -3795,9 +3868,13 @@
         errors: {},
         conflict: null,
         confirmDelete: false,
-        reason: ""
+        reason: "",
+        drops: null,
+        dropsLoading: false,
+        dropsError: null
       };
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
+      void hydrateContentEditorDrops();
       showToast(`已载入 revision ${entity.revision}`);
     } catch (error) {
       if (error?.status === 401) handleApiFailure(error);
@@ -3805,20 +3882,21 @@
     }
   }
 
-  async function deleteItemEditor() {
+  async function deleteContentEditor() {
     const editor = state.live.editor;
     if (!editor || editor.mode === "create" || editor.saving) return;
     editor.saving = true;
-    renderItemEditorDrawer();
+    renderContentEditorDrawer();
+    const meta = editorMeta(editor.entityType) || { singular: editor.entityType };
     try {
       await API.deleteDraftEntity(
         editor.draftId,
-        "item",
+        editor.entityType,
         editor.localIndex,
         editor.revision,
-        document.getElementById("editor-reason")?.value.trim() || "物品编辑器删除"
+        document.getElementById("editor-reason")?.value.trim() || `${meta.singular}编辑器删除`
       );
-      await refreshAfterItemEditorWrite(`物品 ${editor.contentKey} 已从草稿删除`);
+      await refreshAfterContentEditorWrite(`${meta.singular} ${editor.contentKey} 已从草稿删除`);
     } catch (error) {
       if (error?.status === 401) {
         handleApiFailure(error);
@@ -3828,7 +3906,7 @@
       editor.confirmDelete = false;
       if (error?.status === 409) editor.conflict = draftErrorMessage(error);
       else editor.errors = draftErrorDetails(error);
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
       showToast(draftErrorMessage(error), "danger");
     }
   }
@@ -3841,7 +3919,7 @@
     }
     if (state.live.editor) {
       state.live.editor.validationLoading = true;
-      renderItemEditorDrawer();
+      renderContentEditorDrawer();
     }
     try {
       const report = await API.validateDraft(draftId);
@@ -3849,7 +3927,7 @@
       if (state.live.editor?.draftId === draftId) {
         state.live.editor.validation = report;
         state.live.editor.validationLoading = false;
-        renderItemEditorDrawer();
+        renderContentEditorDrawer();
       } else if (!fromEditor) {
         render();
       }
@@ -3861,13 +3939,13 @@
       }
       if (state.live.editor) {
         state.live.editor.validationLoading = false;
-        renderItemEditorDrawer();
+        renderContentEditorDrawer();
       }
       showToast(`草稿校验失败：${draftErrorMessage(error)}`, "danger");
     }
   }
 
-  function openNewItemEditor() {
+  function openNewContentEditor(entityType) {
     if (!isLive() || !hasPermission("content:write")) {
       showToast("当前账号没有内容写入权限。", "danger");
       return;
@@ -3877,7 +3955,7 @@
       openModal("create-draft", { runId: state.live.run?.id });
       return;
     }
-    void openItemEditorDrawer(null, null, { create: true });
+    void openContentEditorDrawer(entityType, null, null, { create: true });
   }
 
   async function createDraftFromModal() {
@@ -3917,8 +3995,9 @@
   }
 
   function openModal(name, dataset = {}) {
-    if (name === "create-content" && isLive() && CONTENT_BY_ID[dataset.type]?.entity === "item") {
-      return openNewItemEditor();
+    if (name === "create-content" && isLive()) {
+      const entityType = CONTENT_BY_ID[dataset.type]?.entity;
+      if (isEditableEntityType(entityType)) return openNewContentEditor(entityType);
     }
     if (name === "create-draft" && isLive()) {
       const requestedRunId = Number(dataset.runId);
@@ -4037,12 +4116,12 @@
       showToast(event.target.value ? "已切换编辑草稿" : "已切换为导入批次只读视图");
       return;
     }
-    if (event.target.closest(".js-item-editor")) {
+    if (event.target.closest(".js-content-editor")) {
       if (event.target.matches('input[type="checkbox"][data-edit-path]')) {
         const label = event.target.closest(".editor-check")?.querySelector("[data-boolean-label]");
         if (label) label.textContent = event.target.checked ? "已启用" : "未启用";
       }
-      updateItemEditorPreview();
+      updateContentEditorPreview();
     }
   });
   document.addEventListener("click", event => {
@@ -4098,14 +4177,14 @@
       }
       if (action === "select-relation") { state.relationScenario = actionEl.dataset.scenario; render(); return; }
       if (action === "open-content") { openContentDrawer(actionEl.dataset.type, actionEl.dataset.key); return; }
-      if (action === "open-item-editor-new") { openNewItemEditor(); return; }
-      if (action === "editor-add-stat") { E.addStatRow(actionEl.closest(".editor-stats")); updateItemEditorPreview(); return; }
-      if (action === "editor-remove-stat") { actionEl.closest(".editor-stat-row")?.remove(); updateItemEditorPreview(); return; }
-      if (action === "editor-save") { void saveItemEditor(); return; }
-      if (action === "editor-reload") { void reloadItemEditor(); return; }
-      if (action === "editor-delete-request") { if (state.live.editor) state.live.editor.confirmDelete = true; renderItemEditorDrawer(); return; }
-      if (action === "editor-delete-cancel") { if (state.live.editor) state.live.editor.confirmDelete = false; renderItemEditorDrawer(); return; }
-      if (action === "editor-delete-confirm") { void deleteItemEditor(); return; }
+      if (action === "open-content-editor-new") { openNewContentEditor(actionEl.dataset.entityType); return; }
+      if (action === "editor-add-stat") { E.addStatRow(actionEl.closest(".editor-stats")); updateContentEditorPreview(); return; }
+      if (action === "editor-remove-stat") { actionEl.closest(".editor-stat-row")?.remove(); updateContentEditorPreview(); return; }
+      if (action === "editor-save") { void saveContentEditor(); return; }
+      if (action === "editor-reload") { void reloadContentEditor(); return; }
+      if (action === "editor-delete-request") { if (state.live.editor) state.live.editor.confirmDelete = true; renderContentEditorDrawer(); return; }
+      if (action === "editor-delete-cancel") { if (state.live.editor) state.live.editor.confirmDelete = false; renderContentEditorDrawer(); return; }
+      if (action === "editor-delete-confirm") { void deleteContentEditor(); return; }
       if (action === "editor-validate") { void validateActiveDraft(true); return; }
       if (action === "validate-active-draft") { void validateActiveDraft(false); return; }
       if (action === "submit-draft-create") { void createDraftFromModal(); return; }
@@ -4245,8 +4324,8 @@
       }
       return;
     }
-    if (event.target.closest(".js-item-editor") || event.target.id === "editor-reason") {
-      updateItemEditorPreview();
+    if (event.target.closest(".js-content-editor") || event.target.id === "editor-reason") {
+      updateContentEditorPreview();
       return;
     }
     if (event.target.matches("[data-table-filter]")) {
@@ -4261,9 +4340,9 @@
   });
 
   document.addEventListener("submit", event => {
-    if (event.target.matches(".js-item-editor")) {
+    if (event.target.matches(".js-content-editor")) {
       event.preventDefault();
-      void saveItemEditor();
+      void saveContentEditor();
       return;
     }
     if (event.target.matches(".js-login")) {

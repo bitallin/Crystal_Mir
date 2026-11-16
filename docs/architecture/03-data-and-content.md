@@ -174,12 +174,14 @@ content_draft_revision(
 `expectedRevision`，不一致返回 409。每次变更追加不可修改的修订记录，保存操作者、原因、前后数据和时间。
 校验结果持久化到 `content_draft.last_validation`，发布时从草稿当前实体复制到不可变发布版本。
 
-M2 的物品编辑器垂直切片复用上述草稿表，不新增迁移。Control API 手工维护 `item` 的版本化 Schema，
-覆盖 33 个顶层字段、`Stats.Values` 和 70 个随机属性字段；字段枚举、flags 和属性键不引用 GPL 程序集。
-类型化创建在事务内为草稿分配下一个 `local_index`，覆盖 `Index` 并生成 `item.<localIndex>`。
-保存只阻断字段类型、范围、枚举、`Index`/内容键一致性等结构错误；缺失字段和空名称由草稿/发布校验报告。
-旧内容省略 `RandomStats` 表示全零随机属性，视为合法；未知字段在编辑保存时原样保留。
-详见 `adr/0007-item-editor-schema-and-validation.md`。
+M2 的内容编辑器复用上述草稿表，不新增迁移。Control API 按 `entityType` 维护版本化 Schema 注册表，当前注册
+`item` 和 `monster`：物品覆盖 33 个顶层字段、`Stats.Values` 和 70 个随机属性字段；怪物覆盖身份、基础行为、
+战斗参数、布尔开关以及 13 个固定属性键。字段枚举、图像清单和属性键均不引用 GPL 程序集。
+类型化创建在事务内为草稿分配下一个 `local_index`，覆盖 `Index` 并生成 `<entityType>.<localIndex>`。
+保存只阻断字段类型、范围、枚举、`Index`/内容键一致性等结构错误；缺失字段、空名称和
+`<entityType>-content-key` 由草稿/发布校验报告。旧物品内容省略 `RandomStats` 表示全零随机属性，视为合法；
+未知字段在编辑保存时原样保留。详见 `adr/0007-item-editor-schema-and-validation.md` 和
+`adr/0008-multi-content-editor-registry.md`。
 
 专用表用于需要索引、关联约束和后台筛选的字段；`data jsonb` 保存完整实体。
 
