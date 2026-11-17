@@ -17,8 +17,9 @@ require_file src/Crystal.GameCore/Crystal.GameCore.csproj
 require_file src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj
 require_file src/Crystal.Control.Api/Crystal.Control.Api.csproj
 require_file src/Crystal.Content/Crystal.Content.csproj
+require_file src/Crystal.LegacyRuntime/Crystal.LegacyRuntime.csproj
 
-if rg -n 'ProjectReference[^>]*(Server\.Library|Server\.MirForms|Crystal\.GameCore|Crystal\.ZoneServer)' \
+if rg -n 'ProjectReference[^>]*(Server\.Library|Server\.MirForms|Crystal\.GameCore|Crystal\.ZoneServer|Crystal\.LegacyRuntime)' \
   src/Crystal.Control.Api/Crystal.Control.Api.csproj src/Crystal.Content/Crystal.Content.csproj >/dev/null; then
   fail "control-plane or content project references GPL game projects"
 fi

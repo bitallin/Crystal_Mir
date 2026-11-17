@@ -1,7 +1,7 @@
 # Control API 参考
 
-> 最后更新：2026-11-16
-> 状态：生效（M1 草稿/发布闭环 + M2 多内容编辑器框架，已接入 `item`/`monster`/`map`）
+> 最后更新：2026-11-17
+> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、引用、批量导入导出、地图关系与地图预览）
 
 ## 1. 位置与边界
 
@@ -13,17 +13,20 @@
 - 健康检查。
 - 导入批次查询。
 - 内容实体分页查询、按旧索引查询、按内容键查询。
+- 按活动草稿或导入批次搜索引用目标。
 - 地图目录、地图拓扑、安全区、NPC、刷新点、传送门、怪物掉落、配方和 NPC 脚本关系查询。
 - NPC 脚本 AST、静态编译校验和稳定编译哈希查询。
-- 地图资源格式、尺寸、可走/阻挡/门格元数据，以及经路径/大小/SHA256 校验的资源文件下载。
+- 地图资源格式、尺寸、可走/阻挡/门格元数据、降采样预览，以及经路径/大小/SHA256 校验的资源文件下载。
 - Argon2id 密码、短时 JWT、刷新令牌轮换和会话撤销。
 - RBAC 权限校验、账号创建/停用/启用、密码修改/重置、角色调整和只读审计查询。
 - API key 机器到机器认证、登录限流和全局限流。
 - 从导入批次创建可编辑草稿、逐实体增改删、修订查询和草稿校验。
-- `item`/`monster`/`map` 编辑器 Schema、类型化自动索引创建、全字段结构校验和字段级错误。
+- 十类编辑器 Schema、服务端身份解析、保存前规范化、结构/完整性/引用校验和字段级错误。
+- 草稿脚本源码校验，以及地图关系数组整体替换和刷新点/NPC 行级 CRUD。
+- 草稿 JSONL dry-run、事务应用导入和稳定排序导出。
 - 从导入批次或草稿创建不可变发布版本，校验、编译、ECDSA 签名、发布和回滚。
 
-尚未实现：MFA/OIDC、账号删除、解锁接口、NPC/掉落等其余内容域的专用编辑器、地图嵌套关系 CRUD、
+尚未实现：MFA/OIDC、账号删除、解锁接口、CSV 导入、NPC 语句块结构化编辑、`.lib` 图库解析、资源上传、
 Zone Agent 服务和真实区服热切换。
 
 ## 2. 配置
@@ -146,12 +149,15 @@ GET /api/v1/content/{entityType}
 
 GET /api/v1/content/{entityType}/{localIndex}
 GET /api/v1/content/{entityType}/key/{contentKey}
+GET /api/v1/content/{entityType}/options?draftId=&importRunId=&q=&limit=
 ```
 
 - `importRunId` 省略时使用最新 `imported` 批次。
 - `entityType`：`item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn`、`drop`、`recipe`、`buff`、`script`、`asset` 等。
 - `localIndex` 是旧数据库 `Index`，`contentKey` 例如 `item.1`。
-- `q` 对 `data.Name`、`data.Title`、`data.FileName` 和内容键做模糊匹配。
+- `q` 按 Schema 声明的标签和搜索字段做模糊匹配；未声明时回退到常见名称、标题、文件名和内容键字段。
+- `options` 的 `draftId` 与 `importRunId` 最多提供一个；省略时使用最新 imported 批次。响应项包含
+  `localIndex`、`contentKey`、`label` 和 `summary`，用于 Web 引用选择器。`limit` 默认 20，范围 1～100。
 
 列表响应：
 
@@ -186,9 +192,12 @@ POST /api/v1/drafts/{id}/content/{entityType}
 ```
 
 `GET /editor-schemas/{entityType}` 要求 `content:read`，从 Control API 的 `entityType` 注册表返回分组字段定义；
-当前注册 `item`、`monster` 和 `map`，均为 `schemaVersion=1`，未注册类型返回 404。Schema 由 Control API 手工维护，
-不引用 GPL 覆盖的 `Shared`/`Server` 程序集。字段包含
-`path`、`label`、`kind`、`required`、`readOnly`、`defaultValue`、`min`、`max`、`options` 和复合字段定义。
+当前注册 `item`、`monster`、`map`、`npc`、`script`、`drop`、`magic`、`quest`、`gameshop` 和 `recipe`，
+均为 `schemaVersion=1`，未注册类型返回 404。Schema 由 Control API 手工维护，不引用 GPL 覆盖的
+`Shared`/`Server` 程序集。字段包含 `path`、`label`、`kind`、`required`、`readOnly`、`defaultValue`、
+`min`、`max`、`options` 和复合字段定义；M2 新增 `referenceType`、`nullable`、`multiline`、`minItems`、
+`maxItems`，均为可选字段，旧客户端可忽略。字段种类支持 `number`、`array`、`reference`、`code`、`color`
+和 `readonly`。
 
 - `item` 覆盖 33 个顶层字段、`Stats.Values` 动态属性表，以及 `RandomStats` 下的 70 个 0～255 字节字段。
 - `monster` 覆盖 `identity`、`basics`、`combat`、`behavior`、`stats` 五组共 20 个字段：
@@ -198,12 +207,15 @@ POST /api/v1/drafts/{id}/content/{entityType}
 - 怪物 `Image` 是手工维护在 MIT 控制面侧的字符串枚举。`Stats.Values` 只允许 `MinAC`、`MaxAC`、`MinMAC`、
   `MaxMAC`、`MinDC`、`MaxDC`、`MinMC`、`MaxMC`、`MinSC`、`MaxSC`、`HP`、`Accuracy`、`Agility`，
   值为 32 位整数。
-- `Drops`、`HasSpawnScript`、`HasDieScript` 是运行时派生数据，不是可编辑字段；怪物编辑器只读取掉落关系。
+- `Drops`、`HasSpawnScript`、`HasDieScript` 是运行时派生数据，不是怪物 Schema 字段；掉落通过独立 `drop` 编辑器维护。
 - `map` 覆盖 `identity`、`presentation`、`access`、`combat`、`population`、`territory` 六组共 44 个顶层标量字段；
   `Index` 和 `WeatherParticles` 只读。`Light` 使用 `Normal`、`Dawn`、`Day`、`Evening`、`Night` 枚举；
   16 位字段限制为 `0..65535`，8 位字段限制为 `0..255`，伤害、组队人数和防火墙数量必须是非负 32 位整数。
-- 地图的 `Movements`、`SafeZones`、`Respawns`、`NPCs`、`MineZones`、`ActiveCoords` 不属于 Schema；
-  保存时原样透传，地图编辑器只展示只读关系摘要。`WeatherParticles` 保持字符串以兼容旧位掩码值。
+- 地图的 `Movements`、`SafeZones`、`Respawns`、`NPCs`、`MineZones`、`ActiveCoords` 不属于标量 Schema；
+  通过 3.7.1 的关系接口写入。`WeatherParticles` 保持字符串以兼容旧位掩码值。
+- `npc` 覆盖地图、脚本、任务引用和坐标；`script` 覆盖源码与只读派生 AST/页面/问题；`drop` 覆盖物品、
+  金币、嵌套组、概率和任务限定；`magic` 覆盖全部技能参数；`quest` 覆盖目标、奖励和引用；`gameshop`
+  覆盖商品、价格、库存、上下架和购买方式；`recipe` 覆盖产出、材料、工具、条件、成功率和金币。
 - 其他顶层未知字段原样保留，避免旧数据或未来字段在编辑保存时丢失。
 
 类型化创建要求 `content:write`，仅对注册类型开放。物品请求体示例：
@@ -219,17 +231,30 @@ POST /api/v1/drafts/{id}/content/{entityType}
 }
 ```
 
-服务端在单个事务内分配草稿内下一个 `localIndex`，覆盖 `data.Index`，生成
-`<entityType>.<localIndex>`，写入实体、`create` 修订并返回 201。客户端不需要也不能自行指定最终索引或内容键。
+服务端在单个事务内解析身份并覆盖相应身份字段，写入实体、`create` 修订并返回 201。客户端不能自行指定已有内容键。
+身份规则如下：
+
+| 类型 | 身份规则 |
+| --- | --- |
+| `item` / `monster` / `map` / `npc` / `quest` | `data.Index = localIndex`，键为 `<type>.<localIndex>` |
+| `gameshop` | `data.GIndex = localIndex`，键为 `gameshop.<GIndex>` |
+| `magic` | `localIndex` 使用 `Spell` 枚举值，键为 `magic.<Spell>` |
+| `recipe` | 自动分配 `localIndex`，键为 `recipe.<产出物品名>` |
+| `script` | 自动分配 `localIndex`，键为 `script.<规范化文件路径>` |
+| `drop` | `localIndex = monsterIndex`，键为 `drop.monster.<monsterIndex>` |
+
+旧内容键保持原样；新建配方、脚本等使用安全键段，已有历史键在保存和发布校验时仍被接受。
 
 所有注册类型采用两级校验：
 
 - `PUT`/类型化创建阻断结构错误并返回 400 字段错误，包括字段类型、整数范围、枚举、flags、布尔值、
   `Index`/`contentKey` 一致性、`Stats.Values` 键和值范围。怪物属性值必须是 32 位整数。允许保存字段不完整的草稿。
-- 草稿/发布校验报告 `<entityType>-completeness` 和 `<entityType>-content-key` 问题，例如缺少顶层字段、
-  空名称、缺少 `Stats.Values`、部分随机属性或 `contentKey != <entityType>.<localIndex>`。
+- 草稿/发布校验报告 `<entityType>-completeness`、`<entityType>-content-key`、`reference-missing`、
+  `<type>-duplicate` 等问题，例如缺少顶层字段、空名称、引用缺失、重复身份或内容键不一致。
   旧物品内容缺少整个 `RandomStats` 表示全零随机属性，视为合法。
 - 地图 `FileName` 在草稿和发布集合内按 `Trim()` 后大小写不敏感唯一；冲突报告 `map-file-name-duplicate`。
+- 掉落目标重复报告 `drop-duplicate`，同一物品被多个配方产出报告 `recipe-duplicate`，脚本文本重复报告
+  `script-duplicate`，脚本编译错误报告 `script-validation-error`。
 - 未知字段原样保留，避免旧数据或未来字段在编辑保存时丢失。
 
 ### 3.5 地图目录与内容关系
@@ -242,6 +267,7 @@ GET /api/v1/content/recipe/{localIndex}/relations?importRunId=
 GET /api/v1/content/npc/{localIndex}/script?importRunId=
 GET /api/v1/content/script/{localIndex}/validation?importRunId=
 GET /api/v1/content/asset/{localIndex}/file?importRunId=
+GET /api/v1/content/asset/{localIndex}/preview?importRunId=&maxSize=256
 ```
 
 地图目录只返回 `MapSummaryDto`，不携带完整地图 JSON，供 Web 全量地图选择器使用。
@@ -272,6 +298,10 @@ NPC 本身不存在时返回 404。
 服务端要求配置 `ControlApi:AssetRoot`，并校验相对路径不越界、文件存在、大小与快照一致、SHA256 与快照一致；
 成功时返回文件流、`Content-Type`、ETag 和 `private, max-age=300` 缓存头。未配置、缺失文件、路径非法或
 完整性不一致时返回 4xx/5xx 错误，不返回未经校验的文件。
+
+资源预览接口同样要求 `asset:read`，仅支持地图资产。服务端按需重新读取并解析地图文件，将可走、阻挡和门格
+降采样到 `maxSize` 指定的最大边长，返回原始尺寸、采样网格、图例计数和地图摘要；`maxSize` 默认 256，
+范围 8～512。该接口不解析客户端 `.lib` 图库，也不提供物品/怪物图标缩略图。
 
 示例（节选）：
 
@@ -410,6 +440,17 @@ GET    /api/v1/drafts/{id}/content/{entityType}/{localIndex}
 POST   /api/v1/drafts/{id}/content/{entityType}
 PUT    /api/v1/drafts/{id}/content/{entityType}/{localIndex}
 DELETE /api/v1/drafts/{id}/content/{entityType}/{localIndex}
+POST   /api/v1/drafts/{id}/content/{entityType}/import?dryRun=true|false&reason=
+GET    /api/v1/drafts/{id}/content/{entityType}/export?importRunId=
+POST   /api/v1/drafts/{id}/content/script/{localIndex}/validate
+GET    /api/v1/drafts/{id}/content/map/{mapIndex}/relations
+PUT    /api/v1/drafts/{id}/content/map/{mapIndex}/movements|safezones|minezones|activecoords
+POST   /api/v1/drafts/{id}/content/map/{mapIndex}/respawns
+PUT    /api/v1/drafts/{id}/content/map/{mapIndex}/respawns/{respawnIndex}
+DELETE /api/v1/drafts/{id}/content/map/{mapIndex}/respawns/{respawnIndex}
+POST   /api/v1/drafts/{id}/content/map/{mapIndex}/npcs
+PUT    /api/v1/drafts/{id}/content/map/{mapIndex}/npcs/{npcIndex}
+DELETE /api/v1/drafts/{id}/content/map/{mapIndex}/npcs/{npcIndex}
 POST   /api/v1/drafts/{id}/validate
 GET    /api/v1/drafts/{id}/revisions?entityType=&contentKey=&limit=100
 ```
@@ -443,8 +484,49 @@ GET    /api/v1/drafts/{id}/revisions?entityType=&contentKey=&limit=100
 - 更新必须匹配当前实体 `revision`；删除请求体为 `{ "expectedRevision": 1, "reason": "..." }`。
 - 版本不一致返回 409，响应为 `application/problem+json`。
 - `contentKey` 创建后不可修改。每次变更追加修订记录，包含操作者、原因、前后数据和时间。
-- `item`、`monster` 和 `map` 推荐使用类型化创建接口自动分配索引；通用 `PUT` 仍可用于显式索引和旧内容迁移。
+- 十类注册编辑器推荐使用类型化创建接口解析身份；通用 `PUT` 仍可用于显式索引和旧内容迁移。
 - `validate` 返回并持久化 `contentHash`、实体数、`valid` 和问题列表；结果同时写入 `content_draft.last_validation`。
+- 保存前会执行 Schema 声明的规范化，例如脚本派生字段、商城 `Info`/`ItemIndex` 和旧内容键兼容；未知字段保留。
+
+### 3.7.1 脚本校验、JSONL 与地图关系
+
+脚本校验请求体：
+
+```json
+{
+  "source": "[@MAIN]\nSAY Hello\n",
+  "language": "CrystalNpc"
+}
+```
+
+服务端不信任客户端提交的 AST，始终重新解析源码，返回 `ast`、页面、静态引用、`validation`、`issues`、
+源码 SHA256 和 `compiledSha256`。脚本实体不存在返回 404；存在但没有可用解析器时返回 `available=false`。
+
+JSONL 导入使用与内容快照 `entities/<type>.jsonl` 一致的实体行，单次请求上限 16 MiB。示例：
+
+```json
+{"entityType":"item","localIndex":9100001,"contentKey":"item.9100001","schemaVersion":1,"data":{"Index":9100001,"Name":"Example"}}
+```
+
+- `dryRun` 省略或为 `true` 时只校验，不写草稿；响应列出总行数、有效行、逐行错误和内容键。
+- `dryRun=false` 时在单事务内按 `contentKey` upsert；成功写修订和 `draft.import` 审计，冲突返回 409，
+  校验失败返回 400。
+- 导出按 `localIndex` 稳定排序，实体行与快照格式一致；可从活动草稿或指定 `importRunId` 生成。
+
+地图数组替换请求示例：
+
+```json
+{
+  "expectedRevision": 3,
+  "items": [{"Location": {"x": 10, "y": 12}, "Size": 4, "StartPoint": false}],
+  "reason": "调整安全区"
+}
+```
+
+`movements`、`safezones`、`minezones`、`activecoords` 每次整体替换。刷新点和 NPC 行级请求体为
+`{ "data": {...}, "expectedRevision": 3, "reason": "..." }`；创建时服务端解析独立实体 `localIndex`，
+更新/删除要求匹配对应实体 revision。所有关系写入都在同一事务内同步地图 `Respawns`/`NPCs` 投影。
+坐标必须非负且在地图资源尺寸内，目标地图、怪物和 NPC 脚本必须存在；revision 不一致返回 409。
 
 ### 3.8 发布、回滚与 Manifest
 
@@ -499,12 +581,10 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 ```
 
 脚本会执行真实 PostgreSQL 导入（含掉落、配方、脚本和资源元数据）、启动 API，验证登录、JWT、刷新令牌轮换、
-RBAC 403、登出撤销、账号创建、停用/启用、管理员重置密码、自助改密、角色调整、最后管理员保护、审计查询、健康检查、
-分页、详情、类型计数、地图关系、怪物掉落、配方关系、NPC 脚本关系与 AST、资源元数据、资源文件字节/SHA256、
-物品与怪物 Schema、只读账号 Schema 读取和写拒绝、非法类型/枚举/范围/flags/布尔/Stats/Index/contentKey 400、
-物品与怪物自动索引创建、草稿复制/增改删/陈旧 revision 409/校验失败与成功、从草稿创建发布、完整发布链路、
-默认和显式双版本回滚、回滚权限 403、短原因 400、重复回滚 409 和审计事件，并在 CI 中通过 PostgreSQL 16
-service container 运行。
+RBAC 403、登出撤销、账号生命周期、最后管理员保护、审计、健康检查、分页、详情、类型计数、地图关系、怪物掉落、
+配方关系、NPC 脚本关系与 AST、资源元数据和文件字节/SHA256。M2 覆盖 10 类 Schema 的 200/401、类型化 CRUD、
+结构 400、陈旧 revision 409、引用缺失、JSONL dry-run/apply/export、脚本校验、地图关系 CRUD/清理、发布链路、
+默认和显式双版本回滚。测试在 PostgreSQL 16 service container 中运行。
 测试库应为独立数据库；已有账号时不会再执行 bootstrap。
 
 Compose 栈验证使用：
@@ -526,6 +606,8 @@ Compose 栈验证使用：
 - 关系查询直接解析 `data jsonb`，尚未建立规范化外键；大规模关系检索前需要评估专用索引或投影表。
 - 资源下载要求 API 进程能直接访问 `ControlApi:AssetRoot`；对象存储/CDN、资源上传和签名分发尚未实现。
 - 分页使用 offset，内容规模很大时需要评估 keyset pagination。
-- 当前只提供 `item`、`monster` 的类型化 Schema 和 Web 表单；地图、NPC、掉落、技能、任务等仍使用通用草稿写入或只读视图，批量操作尚未实现。
-- 物品/怪物编辑器暂不包含资源预览、批量导入导出、价格/属性模拟、掉落 CRUD 和授权/许可证处理。
-- Agent 契约已定义，但 Control API 不注册 Agent 路由，区服不会自动消费 `active` 版本。
+- 当前只提供 JSONL 批量导入导出；CSV、服务端异步大文件导入和跨草稿复制未实现。
+- 资源预览只支持地图网格；客户端 `.lib` 图库、物品/怪物图标缩略图和资源上传未实现。
+- 脚本编辑器不提供语句块拖拽、增删排序或脚本执行；完整行为仍由文本源码和服务端解析结果决定。
+- Agent 契约已定义，但 Control API 不注册 Agent 路由。ZoneServer 只支持启动期读取签名发布，不自动热切换 `active` 版本。
+- 授权、许可证和素材合规不在 M2 本轮范围。

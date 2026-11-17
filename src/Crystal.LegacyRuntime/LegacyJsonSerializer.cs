@@ -9,7 +9,7 @@ using Crystal.Content;
 using Server.Library.MirDatabase;
 using Server.MirDatabase;
 
-namespace Crystal.LegacyImporter;
+namespace Crystal.LegacyRuntime;
 
 public static class LegacyJsonSerializer
 {

@@ -1,25 +1,25 @@
 # 项目进度台账
 
-> 最后更新：2026-11-16
-> 当前阶段：M1 已完成；M2 已进入多内容编辑框架阶段，物品、怪物与地图元数据垂直切片已打通 Schema、类型化创建、两级校验、字段差异和 Web 闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
+> 最后更新：2026-11-17
+> 当前阶段：M1 已完成；M2 内容后台 MVP 已完成本轮范围，10 类内容编辑器、引用、JSONL 导入导出、地图关系、地图预览和 ZoneServer 启动期签名发布消费已闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0009 |
+| 架构决策 | 已完成初版 | ADR 0001～0011 |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts 构建成功；安全回归与内容快照检查通过 |
-| Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
+| Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job |
-| 控制面 | 已完成初版并进入 M2 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持复制、增改删、revision 乐观并发、修订和校验；`entityType` 编辑器注册表已注册 `item`、`monster`、`map`，支持类型化自动索引创建和两级校验；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接物品/怪物/地图草稿编辑、字段差异、发布中心、账号和审计页面 |
+| 控制面 | M2 已完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、结构/完整性/引用校验、JSONL dry-run/apply/export、脚本源码校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接 10 类草稿编辑、关系面板、预览、发布中心、账号和审计页面 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
-| 热更新 | 未开始 | `Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实区服热切换尚未实现 |
+| 热更新 | 启动期只读已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实热切换仍未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
 | 许可证清单 | 进行中 | 代码/外部资源清单已建立；MapEditor 和素材授权待确认 |
 
@@ -29,13 +29,28 @@
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
-| M2 内容后台 MVP | 进行中 | 35% | 多内容编辑器注册表、物品、怪物和地图元数据垂直切片已完成；NPC/掉落等专用编辑器、地图嵌套关系 CRUD、资源预览和批量导入导出待做 |
+| M2 内容后台 MVP | 已完成 | 100% | 10 类内容编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD、地图预览、签名发布启动消费已完成；授权/许可证、Agent、热切换和灰度按范围外处理 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-17（M2 内容后台 MVP 完成）
+
+- 范围：完成 M2 本轮内容后台能力，包括 10 类 Schema 驱动编辑、引用选择、两级校验、JSONL 批量导入导出、脚本源码校验、地图嵌套关系 CRUD、地图网格预览，以及 ZoneServer 启动期只读消费签名发布。授权、许可证、素材合规、M3 Agent、热切换和灰度不在本轮。
+- 编辑框架：Schema 字段类型扩展 `number`、`array`、`reference`、`code`、`color`、`readonly`，字段 DTO 增加 `referenceType`、`nullable`、`multiline`、`minItems`、`maxItems` 等可选属性；编辑器定义增加服务端身份、规范化、引用、标签和搜索钩子，统一结构/完整性/内容键/引用校验和问题码。
+- 内容类型：注册 `item`、`monster`、`map`、`npc`、`script`、`drop`、`magic`、`quest`、`gameshop`、`recipe`。身份规则覆盖自动 `localIndex`、`GIndex`、`Spell`、产出物品名、规范化脚本路径和 `monsterIndex`；旧历史内容键保留，新建键使用安全段，客户端不能改写已有内容键。
+- 专用能力：NPC 支持地图/脚本/任务引用和坐标校验；脚本由服务端重算 AST、页面、引用、问题、行数、源码 SHA256 和编译哈希；掉落支持金币、物品、嵌套组、概率、任务限定和引用；技能、任务、商城、配方覆盖专用字段、交叉引用和保存规范化。
+- API：新增 `/content/{entityType}/options`、草稿 JSONL import/export、脚本 validate、地图 relations/数组替换/刷新点与 NPC 行级 CRUD、`/content/asset/{localIndex}/preview`。关系写入使用 revision 乐观并发，刷新点/NPC 写入与地图投影同事务；地图预览返回降采样可走/阻挡/门格。
+- Web：新增十类编辑器、数字/数组/引用/颜色/代码/只读控件和引用选择器；新增脚本源码与只读 AST、嵌套掉落组、地图关系表格与分页、JSONL dry-run/apply/export、地图网格预览和资源抽屉内联预览；只读账号不显示新建或保存入口。
+- ZoneServer：新增 `--content-release`、`--content-public-key`、`--content-key-id` 及对应环境变量；启动前校验 manifest/实体哈希和 ECDSA 签名，在隔离临时目录重建 `Server.MirDB`、物化 `drop`/`recipe`/`script`/`quest`，再走现有 `Settings.Load()`/`LoadDB()`/`Envir.Start()`。未传发布参数时 legacy 模式不变；签名缺失、快照篡改和地图/脚本/配方物化失败会阻止 ready。
+- 边界：不新增数据库迁移，不改变客户端协议、快照文件格式、发布 manifest 或本地索引语义；`Crystal.Control.Api` 不引用 `Server/`、`Shared/` 或 `Crystal.LegacyRuntime`；发布模式不修改运行内容，不做热切换。
+- 验证：`scripts/ci.sh` 在全新 PostgreSQL 16 库上通过，覆盖全量构建、358 项物品安全回归、39 项内容快照检查、80 项 ContentEditor 检查、依赖边界、黄金导入/签名/重建/导出、Zone 冒烟和 Control API 集成；`scripts/zone-smoke.sh` 通过 legacy、Jev 签名发布（463 地图/1,628 物品/555 怪物/375 NPC/154 任务）、未签名、篡改快照和缺失地图五条路径；`scripts/test-control-web.sh` 在另一全新库上通过真实 API + Chromium 的十类编辑器、引用、关系 CRUD/409 恢复、JSONL、AST、地图预览、资源下载、发布/回滚和只读权限链路；`bash -n scripts/*.sh`、Web JavaScript `node --check` 和 `git diff --check` 通过。
+- 文档：新增 ADR 0010（多内容编辑、引用、批量导入导出与地图关系）和 ADR 0011（ZoneServer 启动期只读消费签名内容）；同步 ADR 索引、文档地图、架构决策摘要、数据与内容、热更新、部署与可观测性、里程碑、能力矩阵、Control API/Web/ZoneServer README、Control API 参考、内容导入参考和本台账。
+- 未验证：Windows 客户端加载修改后的内容、systemd 实际安装、真实生产发布灰度、M3 Agent/热切换、CSV/超大文件异步导入、`.lib` 图库解析、资源上传、授权与许可证合规。
+- 下一步：进入 M3，设计 Zone Agent 轮询/命令、staging 快照、启动器和原子切换/回滚；M0 的 Windows 冒烟、systemd 实装和素材授权继续作为外部阻塞。
 
 ### 2026-11-16（M2 地图元数据编辑器垂直切片）
 

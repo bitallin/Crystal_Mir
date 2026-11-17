@@ -7,7 +7,7 @@ using Server.MirDatabase;
 using Server.MirEnvir;
 using Shared;
 
-namespace Crystal.LegacyImporter;
+namespace Crystal.LegacyRuntime;
 
 public sealed class LegacyRebuildEnvironment : IDisposable
 {
@@ -258,7 +258,7 @@ public static class LegacyContentRebuilder
         {
             for (var ordinal = 0; ordinal < map.Respawns.Count; ordinal++)
             {
-                var expected = LegacyContentMapper.CreateRespawnEntity(map, map.Respawns[ordinal], ordinal);
+                var expected = LegacyRespawnProjection.CreateEntity(map, map.Respawns[ordinal], ordinal);
                 if (!respawnEntities.TryGetValue(expected.LocalIndex, out var actual))
                 {
                     throw new InvalidDataException(

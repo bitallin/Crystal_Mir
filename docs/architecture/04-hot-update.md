@@ -1,6 +1,6 @@
 # 热更新架构
 
-> 最后更新：2026-11-09
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 两条更新通道
@@ -91,7 +91,28 @@ Control Plane 发布 release
 -> 失败则保留旧快照并告警
 ```
 
-### 3.2 快照模型
+### 3.2 M2 当前实现：启动期只读消费
+
+M2 已实现不依赖 Agent 的第一条区服消费路径：
+
+```text
+Control API 发布 release
+-> 运维选择已发布版本目录和公钥
+-> ZoneServer 校验 manifest 哈希与 ECDSA 签名
+-> 在隔离临时目录重建 Server.MirDB
+-> 物化 drop/recipe/script/quest，链接或复制地图与运行文件
+-> Settings.Load / LoadDB / Envir.Start
+-> SIGTERM 后保存并清理临时目录
+```
+
+启动参数为 `--content-release <dir>`、`--content-public-key <path>` 和 `--content-key-id <id>`，也可用
+`CRYSTAL_ZONE_CONTENT_RELEASE`、`CRYSTAL_ZONE_CONTENT_PUBLIC_KEY`、`CRYSTAL_ZONE_CONTENT_KEY_ID` 注入。
+签名缺失、哈希不匹配、key ID 不匹配或地图/脚本/配方物化失败时，区服启动失败且不进入 ready。
+
+未提供发布参数时仍使用 `--content-root` 下的 `Server.MirDB` 和运行文件，legacy 模式保持兼容。该模式只在启动时
+读取发布，不轮询、不热切换、不修改运行中的内容，也不提供 Agent 回滚命令；需要换版时必须重启区服。
+
+### 3.3 快照模型
 
 ```text
 ContentSnapshot
@@ -105,7 +126,7 @@ ContentSnapshot
 
 运行中的对象只持有不可变快照引用。需要修改对象时，复制到新实例，不原地修改旧快照。
 
-### 3.3 热重载边界
+### 3.4 热重载边界
 
 | 内容 | 是否可热重载 | 约束 |
 | --- | --- | --- |
@@ -117,7 +138,7 @@ ContentSnapshot
 | 协议/包结构 | 否 | 必须客户端版本同步 |
 | 数据库 schema | 否 | 走迁移和停机/双写流程 |
 
-### 3.4 玩家状态迁移
+### 3.5 玩家状态迁移
 
 内容变更可能影响角色数据：
 

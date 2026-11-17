@@ -1,6 +1,6 @@
 # 架构文档索引
 
-> 最后更新：2026-11-16
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 架构目标
@@ -40,7 +40,8 @@
 | 许可证边界 | 控制面与 GPL 服务端代码隔离，跨边界只使用 MIT 契约 | `adr/0004-gpl-boundary.md` |
 | 草稿与回滚 | 草稿独立复制、逐实体 revision、发布冻结、回滚切换发布状态 | `adr/0006-content-drafts-and-release-rollback.md` |
 | 内容编辑器 | 按 `entityType` 注册手工 Schema、类型化自动索引、保存只阻断结构错误、发布校验完整性 | `adr/0007-item-editor-schema-and-validation.md`、`adr/0008-multi-content-editor-registry.md` |
-| 地图编辑器边界 | 顶层标量元数据可编辑；传送、安全区、刷新点、NPC、矿区和激活坐标只读；天气字段保持兼容字符串 | `adr/0009-map-metadata-editor.md` |
+| M2 多内容与引用 | 10 类内容共享身份、引用、校验和 JSONL 导入导出；地图关系分区写入并维护投影 | `adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md` |
+| 区服发布消费 | ZoneServer 启动期验证签名快照并在隔离目录重建，不原地修改运行内容 | `adr/0011-zone-server-read-only-signed-content-release.md` |
 
 ## 5. 文档索引
 

@@ -57,6 +57,23 @@ public sealed record DraftValidationReportDto(
     bool Valid,
     IReadOnlyList<ReleaseValidationIssueDto> Issues);
 
+public sealed record DraftMapRelationsDto(
+    long DraftId,
+    long MapLocalIndex,
+    string MapContentKey,
+    long Revision,
+    IReadOnlyList<JsonElement> Movements,
+    IReadOnlyList<JsonElement> SafeZones,
+    IReadOnlyList<JsonElement> MineZones,
+    IReadOnlyList<JsonElement> ActiveCoords,
+    IReadOnlyList<DraftEntityDto> Respawns,
+    IReadOnlyList<DraftEntityDto> Npcs);
+
+public sealed record ReplaceMapArrayRequest(
+    long ExpectedRevision,
+    JsonElement? Items,
+    string? Reason);
+
 public sealed class DraftNotFoundException : Exception
 {
     public DraftNotFoundException(string message) : base(message)

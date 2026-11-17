@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Text;
 using Crystal.Content;
 
 namespace Crystal.Control.Api.Content;
@@ -92,6 +93,275 @@ public sealed partial class ContentDraftService
                    $"Draft entity {entityType}/{localIndex} does not exist in draft {draftId}.");
     }
 
+    public async Task<IReadOnlyList<ContentReferenceOptionDto>> QueryOptionsAsync(
+        string entityType,
+        long? draftId,
+        long? importRunId,
+        string? query,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityType(entityType);
+        if (draftId is not null)
+        {
+            _ = await GetAsync(draftId.Value, cancellationToken);
+            return await _store.QueryOptionsAsync(draftId.Value, entityType, query, limit, cancellationToken);
+        }
+
+        var runId = await _queryStore.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            throw new DraftNotFoundException(
+                importRunId is null
+                    ? "No imported content run is available."
+                    : $"Import run {importRunId} does not exist.");
+        }
+
+        return await _queryStore.QueryOptionsAsync(runId.Value, entityType, query, limit, cancellationToken);
+    }
+
+    public async Task<ContentImportResultDto> ImportJsonLinesAsync(
+        long draftId,
+        string entityType,
+        string jsonLines,
+        bool dryRun,
+        long? actorAccountId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        _ = await GetAsync(draftId, cancellationToken);
+        ValidateEntityType(entityType);
+        if (!ContentEditorSchemas.TryGet(entityType, out var schema))
+        {
+            throw new DraftConflictException($"Typed import is not available for entity type '{entityType}'.");
+        }
+
+        var errors = new List<ContentImportLineIssue>();
+        var entities = new List<(int Line, ContentEntity Entity)>();
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var lineNumber = 0;
+        var totalLines = 0;
+        using var reader = new StringReader(jsonLines);
+        while (reader.ReadLine() is { } line)
+        {
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            totalLines++;
+
+            ContentEntity entity;
+            try
+            {
+                entity = JsonSerializer.Deserialize<ContentEntity>(line, ContentJson.CompactOptions)
+                         ?? throw new JsonException("Entity row is empty.");
+            }
+            catch (JsonException exception)
+            {
+                errors.Add(new ContentImportLineIssue(lineNumber, "jsonl-invalid", exception.Message));
+                continue;
+            }
+
+            if (!string.Equals(entity.EntityType, entityType, StringComparison.Ordinal))
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    "entity-type",
+                    $"Entity type must be '{entityType}', got '{entity.EntityType}'."));
+                continue;
+            }
+
+            if (entity.SchemaVersion != schema.SchemaVersion)
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    "schema-version",
+                    $"Unsupported schemaVersion {entity.SchemaVersion}; expected {schema.SchemaVersion}."));
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entity.ContentKey) ||
+                entity.ContentKey.Length > 256 ||
+                !ContentKeyPattern().IsMatch(entity.ContentKey))
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    "content-key",
+                    "contentKey is invalid for JSONL import."));
+                continue;
+            }
+
+            if (!keys.Add(entity.ContentKey))
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    $"{entityType}-duplicate",
+                    $"Duplicate contentKey '{entity.ContentKey}' in import batch."));
+                continue;
+            }
+
+            var rawStructureErrors = ContentEditorSchemas.ValidateRawStructure(entityType, entity.Data);
+            if (rawStructureErrors.Count > 0)
+            {
+                foreach (var (path, messages) in rawStructureErrors)
+                {
+                    foreach (var message in messages)
+                    {
+                        errors.Add(new ContentImportLineIssue(lineNumber, path, message));
+                    }
+                }
+
+                continue;
+            }
+
+            JsonElement normalized;
+            try
+            {
+                normalized = ContentEditorSchemas.Normalize(entityType, entity.Data);
+            }
+            catch (JsonException exception)
+            {
+                errors.Add(new ContentImportLineIssue(lineNumber, "jsonl-invalid", exception.Message));
+                continue;
+            }
+
+            var identity = ContentEditorSchemas.ResolveIdentity(entityType, normalized, entity.LocalIndex);
+            if (identity.LocalIndex != entity.LocalIndex)
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    $"{entityType}-content-key",
+                    $"localIndex {entity.LocalIndex} does not match resolved identity {identity.LocalIndex}."));
+                continue;
+            }
+
+            normalized = ContentEditorSchemas.ApplyIdentity(entityType, normalized, identity);
+            if (!ContentEditorSchemas.IsContentKeyValid(
+                    entityType,
+                    normalized,
+                    identity.LocalIndex,
+                    entity.ContentKey))
+            {
+                errors.Add(new ContentImportLineIssue(
+                    lineNumber,
+                    $"{entityType}-content-key",
+                    $"contentKey must be '{identity.ContentKey}'."));
+                continue;
+            }
+
+            var structureErrors = schema.ValidateStructure(normalized, identity.LocalIndex, entity.ContentKey);
+            if (structureErrors.Count > 0)
+            {
+                foreach (var (path, messages) in structureErrors)
+                {
+                    foreach (var message in messages)
+                    {
+                        errors.Add(new ContentImportLineIssue(lineNumber, path, message));
+                    }
+                }
+
+                continue;
+            }
+
+            entities.Add((lineNumber, new ContentEntity
+            {
+                EntityType = entityType,
+                LocalIndex = identity.LocalIndex,
+                ContentKey = entity.ContentKey,
+                SchemaVersion = entity.SchemaVersion,
+                Data = normalized
+            }));
+        }
+
+        var applied = 0;
+        if (!dryRun && errors.Count == 0 && entities.Count > 0)
+        {
+            applied = await _store.ImportEntitiesAsync(
+                draftId,
+                entityType,
+                entities.Select(item => item.Entity).ToArray(),
+                actorAccountId,
+                NormalizeReason(reason),
+                DateTimeOffset.UtcNow,
+                cancellationToken);
+        }
+
+        return new ContentImportResultDto(
+            draftId,
+            entityType,
+            dryRun,
+            totalLines,
+            entities.Count,
+            applied,
+            errors.Count == 0,
+            errors,
+            entities.Select(item => item.Entity.ContentKey).ToArray());
+    }
+
+    public async Task<byte[]> ExportJsonLinesAsync(
+        long draftId,
+        string entityType,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityType(entityType);
+        IReadOnlyList<ContentEntity> entities;
+        if (importRunId is null)
+        {
+            _ = await GetAsync(draftId, cancellationToken);
+            entities = (await _store.GetEntitiesAsync(draftId, cancellationToken))
+                .Where(entity => string.Equals(entity.EntityType, entityType, StringComparison.Ordinal))
+                .ToArray();
+        }
+        else
+        {
+            var run = await _queryStore.GetImportRunAsync(importRunId.Value, cancellationToken)
+                      ?? throw new DraftNotFoundException($"Import run {importRunId} does not exist.");
+            _ = run;
+            entities = await _queryStore.GetEntitiesAsync(importRunId.Value, entityType, cancellationToken);
+        }
+
+        var ordered = entities
+            .OrderBy(entity => entity.LocalIndex)
+            .ThenBy(entity => entity.ContentKey, StringComparer.Ordinal)
+            .Select(entity => new ContentEntity
+            {
+                EntityType = entity.EntityType,
+                LocalIndex = entity.LocalIndex,
+                ContentKey = entity.ContentKey,
+                SchemaVersion = entity.SchemaVersion,
+                Data = ContentJson.Canonicalize(entity.Data)
+            });
+        var builder = new StringBuilder();
+        foreach (var entity in ordered)
+        {
+            builder.Append(JsonSerializer.Serialize(entity, ContentJson.CompactOptions)).Append('\n');
+        }
+
+        return Encoding.UTF8.GetBytes(builder.ToString());
+    }
+
+    public static ContentScriptValidationResponse ValidateScript(string source, string? language)
+    {
+        var normalizedLanguage = string.IsNullOrWhiteSpace(language) ? "CrystalNpc" : language.Trim();
+        var normalizedSource = source ?? string.Empty;
+        var parsed = NpcScriptParser.Parse(normalizedSource, normalizedLanguage);
+        return new ContentScriptValidationResponse(
+            parsed.IsValid,
+            ContentJson.Sha256Hex(normalizedSource),
+            Encoding.UTF8.GetByteCount(normalizedSource),
+            normalizedSource.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Split('\n').Length,
+            parsed.CompiledSha256,
+            parsed.PageKeys,
+            parsed.Issues.Select(issue => new NpcScriptValidationIssueDto(
+                issue.Code,
+                issue.Severity,
+                issue.Message,
+                issue.Line,
+                issue.Page)).ToArray(),
+            parsed.Ast);
+    }
+
     public async Task<DraftEntityDto> UpsertEntityAsync(
         long draftId,
         string entityType,
@@ -132,7 +402,9 @@ public sealed partial class ContentDraftService
             throw new DraftConflictException("schemaVersion must be a positive integer.");
         }
 
-        ValidateStructure(entityType, localIndex, contentKey, request.Data.Value);
+        ValidateRawStructure(entityType, request.Data.Value);
+        var normalizedData = ContentEditorSchemas.Normalize(entityType, request.Data.Value);
+        ValidateStructure(entityType, localIndex, contentKey, normalizedData);
 
         var reason = NormalizeReason(request.Reason);
         return await _store.UpsertEntityAsync(
@@ -140,7 +412,7 @@ public sealed partial class ContentDraftService
             entityType,
             localIndex,
             request,
-            request.Data.Value,
+            normalizedData,
             contentKey,
             schemaVersion,
             actorAccountId,
@@ -324,6 +596,15 @@ public sealed partial class ContentDraftService
         }
     }
 
+    private static void ValidateRawStructure(string entityType, JsonElement data)
+    {
+        var errors = ContentEditorSchemas.ValidateRawStructure(entityType, data);
+        if (errors.Count > 0)
+        {
+            throw new DraftInputValidationException(errors);
+        }
+    }
+
     private static string? NormalizeReason(string? reason)
     {
         if (string.IsNullOrWhiteSpace(reason)) return null;
@@ -336,6 +617,6 @@ public sealed partial class ContentDraftService
         return normalized;
     }
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._()-]{0,255}$", RegexOptions.CultureInvariant)]
     private static partial Regex ContentKeyPattern();
 }

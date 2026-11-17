@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Crystal.LegacyRuntime</AssemblyName>
+    <RootNamespace>Crystal.LegacyRuntime</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Server/Server.Library.csproj" />
+    <ProjectReference Include="../../Shared/Shared.csproj" />
+    <ProjectReference Include="../Crystal.Content/Crystal.Content.csproj" />
+  </ItemGroup>
+</Project>

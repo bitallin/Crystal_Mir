@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Crystal.LegacyRuntime;
 using log4net;
 using log4net.Config;
 using log4net.Repository;
@@ -45,9 +46,22 @@ internal static class Program
         Directory.SetCurrentDirectory(options.ContentRoot);
         ConfigureLogging(options);
 
+        LegacyContentReleaseWorkspace? releaseWorkspace = null;
         try
         {
             Packet.IsServer = true;
+            if (options.ContentRelease is not null)
+            {
+                _log.Info($"Loading signed content release: {options.ContentRelease}");
+                releaseWorkspace = LegacyContentReleaseLoader.Prepare(
+                    options.ContentRelease,
+                    options.ContentRoot,
+                    options.ContentPublicKeyPath!,
+                    options.ContentKeyId!);
+                Directory.SetCurrentDirectory(releaseWorkspace.RootPath);
+                _log.Info($"Content release materialized in isolated runtime root: {releaseWorkspace.RootPath}");
+            }
+
             Settings.Load();
             ApplySettingsOverrides(_log);
 
@@ -105,6 +119,7 @@ internal static class Program
         finally
         {
             StopZone();
+            releaseWorkspace?.Dispose();
         }
     }
 
@@ -302,6 +317,9 @@ internal static class Program
             "Usage: Crystal.ZoneServer [options]\n\n" +
             "Options:\n" +
             "  --content-root <path>       Content/runtime directory (default: CRYSTAL_ZONE_HOME or cwd)\n" +
+            "  --content-release <path>    Signed immutable content snapshot directory (release mode)\n" +
+            "  --content-public-key <path> ECDSA P-256 public key used to verify the release signature\n" +
+            "  --content-key-id <id>       Expected signing key id for the content release\n" +
             "  --startup-timeout <seconds> Maximum time to wait for the zone to become ready (default: 300)\n" +
             "  --log-config <path>         Override log4net.config path\n" +
             "  --check                     Validate database and content file references, then exit\n" +
@@ -309,7 +327,8 @@ internal static class Program
             "Environment:\n" +
             "  CRYSTAL_ZONE_HOME, CRYSTAL_ZONE_ID, CRYSTAL_ZONE_IP, CRYSTAL_ZONE_PORT,\n" +
             "  CRYSTAL_ZONE_STATUS_PORT, CRYSTAL_ZONE_MAX_USER, CRYSTAL_ZONE_MAX_IP,\n" +
-            "  CRYSTAL_ZONE_THREADS, CRYSTAL_ZONE_SAVE_DELAY_MINUTES");
+            "  CRYSTAL_ZONE_THREADS, CRYSTAL_ZONE_SAVE_DELAY_MINUTES,\n" +
+            "  CRYSTAL_ZONE_CONTENT_RELEASE, CRYSTAL_ZONE_CONTENT_PUBLIC_KEY, CRYSTAL_ZONE_CONTENT_KEY_ID");
     }
 }
 
@@ -320,6 +339,9 @@ internal sealed class ZoneHostOptions
     public string? LogConfigPath { get; private init; }
     public bool CheckOnly { get; private init; }
     public bool ShowHelp { get; private init; }
+    public string? ContentRelease { get; private init; }
+    public string? ContentPublicKeyPath { get; private init; }
+    public string? ContentKeyId { get; private init; }
 
     public static ZoneHostOptions Parse(string[] args)
     {
@@ -328,6 +350,9 @@ internal sealed class ZoneHostOptions
         string? logConfig = null;
         bool checkOnly = false;
         bool showHelp = false;
+        string? contentRelease = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_RELEASE")?.Trim();
+        string? contentPublicKey = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_PUBLIC_KEY")?.Trim();
+        string? contentKeyId = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_KEY_ID")?.Trim();
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -345,6 +370,15 @@ internal sealed class ZoneHostOptions
                 case "--content-root":
                     contentRoot = RequireValue(args, ref i, arg);
                     break;
+                case "--content-release":
+                    contentRelease = RequireValue(args, ref i, arg);
+                    break;
+                case "--content-public-key":
+                    contentPublicKey = RequireValue(args, ref i, arg);
+                    break;
+                case "--content-key-id":
+                    contentKeyId = RequireValue(args, ref i, arg);
+                    break;
                 case "--startup-timeout":
                     timeoutSeconds = ParsePositiveInt(RequireValue(args, ref i, arg), arg);
                     break;
@@ -354,6 +388,12 @@ internal sealed class ZoneHostOptions
                 default:
                     if (arg.StartsWith("--content-root=", StringComparison.Ordinal))
                         contentRoot = arg.Substring("--content-root=".Length);
+                    else if (arg.StartsWith("--content-release=", StringComparison.Ordinal))
+                        contentRelease = arg.Substring("--content-release=".Length);
+                    else if (arg.StartsWith("--content-public-key=", StringComparison.Ordinal))
+                        contentPublicKey = arg.Substring("--content-public-key=".Length);
+                    else if (arg.StartsWith("--content-key-id=", StringComparison.Ordinal))
+                        contentKeyId = arg.Substring("--content-key-id=".Length);
                     else if (arg.StartsWith("--startup-timeout=", StringComparison.Ordinal))
                         timeoutSeconds = ParsePositiveInt(arg.Substring("--startup-timeout=".Length), "--startup-timeout");
                     else if (arg.StartsWith("--log-config=", StringComparison.Ordinal))
@@ -373,13 +413,30 @@ internal sealed class ZoneHostOptions
         if (logConfig != null && !File.Exists(logConfig))
             throw new ArgumentException($"Log config does not exist: {logConfig}");
 
+        if (!string.IsNullOrWhiteSpace(contentRelease))
+        {
+            if (string.IsNullOrWhiteSpace(contentPublicKey))
+                throw new ArgumentException("--content-public-key is required with --content-release.");
+            if (string.IsNullOrWhiteSpace(contentKeyId))
+                throw new ArgumentException("--content-key-id is required with --content-release.");
+            if (!File.Exists(contentPublicKey))
+                throw new ArgumentException($"Content public key does not exist: {contentPublicKey}");
+        }
+        else if (!string.IsNullOrWhiteSpace(contentPublicKey) || !string.IsNullOrWhiteSpace(contentKeyId))
+        {
+            throw new ArgumentException("--content-release is required with content signature options.");
+        }
+
         return new ZoneHostOptions
         {
             ContentRoot = Path.GetFullPath(contentRoot),
             StartupTimeout = TimeSpan.FromSeconds(timeoutSeconds),
             LogConfigPath = logConfig == null ? null : Path.GetFullPath(logConfig),
             CheckOnly = checkOnly,
-            ShowHelp = showHelp
+            ShowHelp = showHelp,
+            ContentRelease = string.IsNullOrWhiteSpace(contentRelease) ? null : Path.GetFullPath(contentRelease),
+            ContentPublicKeyPath = string.IsNullOrWhiteSpace(contentPublicKey) ? null : Path.GetFullPath(contentPublicKey),
+            ContentKeyId = string.IsNullOrWhiteSpace(contentKeyId) ? null : contentKeyId
         };
     }
 

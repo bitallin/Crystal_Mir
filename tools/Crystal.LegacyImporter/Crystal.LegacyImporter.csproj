@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Server/Server.Library.csproj" />
     <ProjectReference Include="../../src/Crystal.Content/Crystal.Content.csproj" />
+    <ProjectReference Include="../../src/Crystal.LegacyRuntime/Crystal.LegacyRuntime.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="8.0.6" />

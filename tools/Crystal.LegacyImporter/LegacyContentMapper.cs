@@ -25,6 +25,11 @@ public static class LegacyContentMapper
         var entities = new List<ContentEntity>();
         var sourceCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
+        if (contentRoot is not null)
+        {
+            LoadQuestTexts(envir, contentRoot);
+        }
+
         AddEntities(entities, sourceCounts, ContentEntityTypes.Item, envir.ItemInfoList,
             item => item.Index, item => $"item.{item.Index}");
         AddEntities(entities, sourceCounts, ContentEntityTypes.Monster, envir.MonsterInfoList,
@@ -219,20 +224,7 @@ public static class LegacyContentMapper
 
     public static ContentEntity CreateRespawnEntity(MapInfo map, RespawnInfo respawn, int ordinal)
     {
-        // RespawnIndex is not globally unique in legacy databases; use map + ordinal as the stable local identity.
-        var localIndex = (long)map.Index * 1_000_000L + ordinal + 1L;
-        var payload = LegacyJsonSerializer.Serialize(respawn);
-        var node = JsonNode.Parse(payload.GetRawText())!.AsObject();
-        node["mapIndex"] = map.Index;
-        node["mapFileName"] = map.FileName;
-        node["legacyRespawnIndex"] = respawn.RespawnIndex;
-        return new ContentEntity
-        {
-            EntityType = ContentEntityTypes.Respawn,
-            LocalIndex = localIndex,
-            ContentKey = $"respawn.map{map.Index}.{ordinal + 1}",
-            Data = ContentJson.Canonicalize(JsonSerializer.SerializeToElement(node))
-        };
+        return LegacyRespawnProjection.CreateEntity(map, respawn, ordinal);
     }
 
     private static void AddEntities<T>(
@@ -255,6 +247,29 @@ public static class LegacyContentMapper
                 ContentKey = keySelector(value),
                 Data = LegacyJsonSerializer.Serialize(value!)
             });
+        }
+    }
+
+    private static void LoadQuestTexts(Envir envir, string contentRoot)
+    {
+        var originalDirectory = Environment.CurrentDirectory;
+        var previousItems = Envir.Main.ItemInfoList;
+        var previousMonsters = Envir.Main.MonsterInfoList;
+        try
+        {
+            Environment.CurrentDirectory = Path.GetFullPath(contentRoot);
+            Envir.Main.ItemInfoList = envir.ItemInfoList;
+            Envir.Main.MonsterInfoList = envir.MonsterInfoList;
+            foreach (var quest in envir.QuestInfoList)
+            {
+                quest.LoadInfo(clear: true);
+            }
+        }
+        finally
+        {
+            Envir.Main.ItemInfoList = previousItems;
+            Envir.Main.MonsterInfoList = previousMonsters;
+            Environment.CurrentDirectory = originalDirectory;
         }
     }
 }

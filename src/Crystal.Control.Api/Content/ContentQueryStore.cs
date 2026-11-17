@@ -131,23 +131,22 @@ public sealed class ContentQueryStore
         string direction,
         CancellationToken cancellationToken)
     {
+        var label = ContentOptionSearch.LabelExpression("e", entityType);
+        var search = ContentOptionSearch.SearchExpression("e", entityType);
         var orderExpression = sort switch
         {
-            "key" => "content_key",
-            "name" => "lower(coalesce(data->>'Name', data->>'Title', data->>'FileName', content_key)) COLLATE \"C\"",
-            _ => "local_index"
+            "key" => "e.content_key",
+            "name" => $"lower({label}) COLLATE \"C\"",
+            _ => "e.local_index"
         };
         var orderDirection = string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase)
             ? "DESC"
             : "ASC";
 
-        var where = "import_run_id = @runId AND entity_type = @entityType";
+        var where = "e.import_run_id = @runId AND e.entity_type = @entityType";
         if (!string.IsNullOrWhiteSpace(query))
         {
-            where += """
-                 AND lower(coalesce(data->>'Name', data->>'Title', data->>'FileName', content_key))
-                     LIKE lower(@pattern) ESCAPE E'\\'
-                """;
+            where += $" AND {search} LIKE lower(@pattern) ESCAPE E'\\\\'";
         }
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
@@ -156,7 +155,7 @@ public sealed class ContentQueryStore
         await using var command = new NpgsqlCommand(
             $"""
              SELECT id, import_run_id, content_key, local_index, schema_version, data::text
-             FROM content_entity
+             FROM content_entity e
              WHERE {where}
              ORDER BY {orderExpression} {orderDirection}, local_index ASC
              LIMIT @limit OFFSET @offset;
@@ -176,6 +175,90 @@ public sealed class ContentQueryStore
         }
 
         return (items, total);
+    }
+
+    public async Task<IReadOnlyList<ContentReferenceOptionDto>> QueryOptionsAsync(
+        long importRunId,
+        string entityType,
+        string? query,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var label = ContentOptionSearch.LabelExpression("e", entityType);
+        var search = ContentOptionSearch.SearchExpression("e", entityType);
+        var where = "e.import_run_id = @runId AND e.entity_type = @entityType";
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            where += $" AND {search} LIKE lower(@pattern) ESCAPE E'\\\\'";
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            $"""
+             SELECT e.local_index, e.content_key, e.data::text
+             FROM content_entity e
+             WHERE {where}
+             ORDER BY lower({label}) COLLATE "C", e.local_index
+             LIMIT @limit;
+             """,
+            connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("entityType", entityType);
+        command.Parameters.AddWithValue("limit", limit);
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            command.Parameters.AddWithValue("pattern", $"%{EscapeLike(query.Trim())}%");
+        }
+
+        var result = new List<ContentReferenceOptionDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            using var document = JsonDocument.Parse(reader.GetString(2));
+            var contentKey = reader.GetString(1);
+            result.Add(new ContentReferenceOptionDto(
+                reader.GetInt64(0),
+                contentKey,
+                ContentOptionSearch.Label(document.RootElement, contentKey, entityType),
+                ContentOptionSearch.Summary(document.RootElement)));
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<ContentEntity>> GetEntitiesAsync(
+        long importRunId,
+        string entityType,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT entity_type, local_index, content_key, schema_version, data::text
+            FROM content_entity
+            WHERE import_run_id = @runId AND entity_type = @entityType
+            ORDER BY local_index, content_key;
+            """,
+            connection);
+        command.Parameters.AddWithValue("runId", importRunId);
+        command.Parameters.AddWithValue("entityType", entityType);
+
+        var entities = new List<ContentEntity>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            using var document = JsonDocument.Parse(reader.GetString(4));
+            entities.Add(new ContentEntity
+            {
+                EntityType = reader.GetString(0),
+                LocalIndex = reader.GetInt64(1),
+                ContentKey = reader.GetString(2),
+                SchemaVersion = reader.GetInt32(3),
+                Data = document.RootElement.Clone()
+            });
+        }
+
+        return entities;
     }
 
     public async Task<(IReadOnlyList<MapSummaryDto> Items, long Total)> QueryMapCatalogAsync(
@@ -290,7 +373,7 @@ public sealed class ContentQueryStore
         bool addExactQuery = false)
     {
         await using var command = new NpgsqlCommand(
-            $"SELECT count(*)::bigint FROM content_entity WHERE {where};",
+            $"SELECT count(*)::bigint FROM content_entity e WHERE {where};",
             connection);
         command.Parameters.AddWithValue("runId", importRunId);
         command.Parameters.AddWithValue("entityType", entityType);
@@ -313,6 +396,13 @@ public sealed class ContentQueryStore
         {
             command.Parameters.AddWithValue("exactQuery", query);
         }
+    }
+
+    private static string EscapeLike(string value)
+    {
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
     }
 
     private static MapSummaryDto ReadMapSummary(ContentEntityDto entity)

@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Crystal.GameCore/Crystal.GameCore.csproj" />
+    <ProjectReference Include="../Crystal.LegacyRuntime/Crystal.LegacyRuntime.csproj" />
     <ProjectReference Include="../../Server/Server.Library.csproj" />
     <ProjectReference Include="../../Shared/Shared.csproj" />
   </ItemGroup>

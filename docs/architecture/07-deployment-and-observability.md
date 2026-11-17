@@ -1,6 +1,6 @@
 # 部署与可观测性
 
-> 最后更新：2026-11-13
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 0. 当前实现（2026-11-10）
@@ -16,7 +16,27 @@
 
 运维步骤见 `docs/runbooks/zone-server-linux.md`。Content Agent、热更新和 Prometheus 指标尚未接入。
 
-### 0.1 控制面 Compose 栈（2026-11-13）
+### 0.1 ZoneServer 发布模式（M2）
+
+已签名的发布版本可在启动期通过以下参数消费：
+
+```bash
+Crystal.ZoneServer \
+  --content-root /srv/crystal/content \
+  --content-release /srv/crystal/releases/2026.11.17.1 \
+  --content-public-key /etc/crystal/content-public.pem \
+  --content-key-id content-release-2026-01
+```
+
+也可使用 `CRYSTAL_ZONE_CONTENT_RELEASE`、`CRYSTAL_ZONE_CONTENT_PUBLIC_KEY` 和
+`CRYSTAL_ZONE_CONTENT_KEY_ID`。启动时先校验 manifest/实体哈希和 ECDSA 签名，再在系统临时目录重建旧库并物化
+`drop`、`recipe`、`script`、`quest`；地图、配置和其余运行文件从 `--content-root` 链接或复制。发布目录和源内容根
+不被修改。签名缺失、快照篡改或物化失败会阻止启动和 ready。未传发布参数时继续使用 legacy 二进制库模式。
+
+该模式不含 Agent、热切换、灰度或在线回滚；换版需要重启区服。冒烟覆盖 legacy、签名发布、未签名、快照篡改和缺失地图
+五条路径，见 `scripts/zone-smoke.sh`。
+
+### 0.2 控制面 Compose 栈（2026-11-13）
 
 根目录 `compose.yaml` 提供可在 Linux 容器中验证的 M1 控制面栈：
 

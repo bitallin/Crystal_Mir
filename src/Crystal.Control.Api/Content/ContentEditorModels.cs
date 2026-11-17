@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Crystal.Control.Api.Content;
 
@@ -14,7 +15,19 @@ public sealed record ContentEditorFieldDto(
     long? Min = null,
     long? Max = null,
     IReadOnlyList<ContentEditorOptionDto>? Options = null,
-    IReadOnlyList<ContentEditorFieldDto>? Fields = null);
+    IReadOnlyList<ContentEditorFieldDto>? Fields = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ReferenceType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? StoreAs = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? Nullable = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? Multiline = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MinItems = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MaxItems = null);
 
 public sealed record ContentEditorSectionDto(
     string Id,
@@ -44,3 +57,12 @@ public sealed class DraftInputValidationException : Exception
 
     public IReadOnlyDictionary<string, string[]> Errors { get; }
 }
+
+public sealed record ContentEditorIdentity(long LocalIndex, string ContentKey);
+
+public sealed record ContentEditorReferenceValue(
+    string Path,
+    string EntityType,
+    long Index,
+    bool Required = true,
+    string? Key = null);

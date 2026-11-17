@@ -21,6 +21,8 @@ public static class ContentEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/editor-schemas/{entityType}", GetEditorSchemaAsync)
             .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/content/{entityType}/options", GetContentOptionsAsync)
+            .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}/{localIndex:long}", GetContentByIndexAsync)
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/{entityType}/key/{contentKey}", GetContentByKeyAsync)
@@ -39,6 +41,8 @@ public static class ContentEndpoints
             .RequireAuthorization(Permissions.ContentRead);
         api.MapGet("/content/asset/{localIndex:long}/file", GetAssetFileAsync)
             .RequireAuthorization(Permissions.AssetRead);
+        api.MapGet("/content/asset/{localIndex:long}/preview", GetAssetPreviewAsync)
+            .RequireAuthorization(Permissions.AssetRead);
         return api;
     }
 
@@ -53,6 +57,69 @@ public static class ContentEndpoints
         }
 
         return Results.Ok(editorSchema.Schema);
+    }
+
+    private static async Task<IResult> GetContentOptionsAsync(
+        string entityType,
+        ContentDraftService draftService,
+        long? draftId,
+        long? importRunId,
+        string? q,
+        int? limit,
+        CancellationToken cancellationToken)
+    {
+        if (!EntityTypes.Contains(entityType))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["entityType"] = [$"Unknown entity type '{entityType}'."]
+            });
+        }
+
+        var take = limit ?? 20;
+        var errors = new Dictionary<string, string[]>();
+        if (take is < 1 or > 100)
+        {
+            errors["limit"] = ["limit must be between 1 and 100."];
+        }
+
+        if (!string.IsNullOrWhiteSpace(q) && q.Trim().Length > 100)
+        {
+            errors["q"] = ["q must be 100 characters or less."];
+        }
+
+        if (draftId is not null && importRunId is not null)
+        {
+            errors["scope"] = ["Specify either draftId or importRunId, not both."];
+        }
+
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        try
+        {
+            var items = await draftService.QueryOptionsAsync(
+                entityType,
+                draftId,
+                importRunId,
+                string.IsNullOrWhiteSpace(q) ? null : q.Trim(),
+                take,
+                cancellationToken);
+            return Results.Ok(new { entityType, items });
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return Results.Problem(statusCode: 404, title: "Content scope not found", detail: exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["entityType"] = [exception.Message]
+            });
+        }
     }
 
     private static async Task<IResult> GetImportRunsAsync(
@@ -517,6 +584,85 @@ public static class ContentEndpoints
                value.ValueKind == System.Text.Json.JsonValueKind.String
             ? value.GetString()
             : null;
+    }
+
+    private static async Task<IResult> GetAssetPreviewAsync(
+        long localIndex,
+        ContentQueryStore store,
+        ContentAssetService assetService,
+        long? importRunId,
+        int? maxSize,
+        CancellationToken cancellationToken)
+    {
+        var size = maxSize ?? 256;
+        if (size is < 8 or > 512)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["maxSize"] = ["maxSize must be between 8 and 512."]
+            });
+        }
+
+        var runId = await store.ResolveImportRunIdAsync(importRunId, cancellationToken);
+        if (runId is null)
+        {
+            return importRunId is null
+                ? Results.Problem(statusCode: 404, title: "No imported content", detail: "No imported content run is available.")
+                : Results.Problem(
+                    statusCode: 404,
+                    title: "Import run not found",
+                    detail: $"Imported content run {importRunId} does not exist.");
+        }
+
+        var asset = await assetService.ResolveAsync(runId.Value, localIndex, cancellationToken);
+        if (!asset.IsOk)
+        {
+            return asset.Status switch
+            {
+                ContentAssetStatus.NotFound => Results.Problem(
+                    statusCode: 404,
+                    title: "Asset not found",
+                    detail: $"asset/{localIndex} was not found in import run {runId.Value}."),
+                ContentAssetStatus.NotConfigured => Results.Problem(
+                    statusCode: 503,
+                    title: "Asset store is not configured",
+                    detail: asset.Error),
+                ContentAssetStatus.MissingFile => Results.Problem(
+                    statusCode: 404,
+                    title: "Asset file is missing",
+                    detail: asset.Error),
+                ContentAssetStatus.InvalidPath => Results.Problem(
+                    statusCode: 400,
+                    title: "Invalid asset path",
+                    detail: asset.Error),
+                ContentAssetStatus.IntegrityMismatch => Results.Problem(
+                    statusCode: 409,
+                    title: "Asset integrity check failed",
+                    detail: asset.Error),
+                _ => Results.Problem(
+                    statusCode: 422,
+                    title: "Invalid asset metadata",
+                    detail: asset.Error)
+            };
+        }
+
+        var extension = Path.GetExtension(asset.FullPath!).ToLowerInvariant();
+        if (extension != ".map")
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Asset is not a map",
+                detail: $"asset/{localIndex} has extension '{extension}'.");
+        }
+
+        var bytes = await File.ReadAllBytesAsync(asset.FullPath!, cancellationToken);
+        var preview = MapAssetParser.ParsePreview(bytes, size);
+        return preview.Valid
+            ? Results.Ok(preview)
+            : Results.Problem(
+                statusCode: 422,
+                title: "Map preview failed",
+                detail: preview.Error);
     }
 
     private static async Task<IResult> GetRecipeRelationsAsync(

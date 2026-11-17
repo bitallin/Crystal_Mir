@@ -78,11 +78,18 @@
   }
 
   const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop", "recipe", "buff", "script", "asset"]);
-  const EDITABLE_ENTITY_TYPES = new Set(["item", "monster", "map"]);
+  const EDITABLE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "script", "drop", "magic", "quest", "gameshop", "recipe"]);
   const EDITOR_META = Object.freeze({
     item: { typeId: "items", singular: "物品", eyebrow: "ITEM", icon: "sword" },
     monster: { typeId: "monsters", singular: "怪物", eyebrow: "MONSTER", icon: "monster" },
-    map: { typeId: "maps", singular: "地图", eyebrow: "MAP", icon: "map" }
+    map: { typeId: "maps", singular: "地图", eyebrow: "MAP", icon: "map" },
+    npc: { typeId: "npcs", singular: "NPC", eyebrow: "NPC", icon: "message" },
+    script: { typeId: "npc-scripts", singular: "脚本", eyebrow: "SCRIPT", icon: "code" },
+    drop: { typeId: "drops", singular: "掉落表", eyebrow: "DROP", icon: "drop" },
+    magic: { typeId: "skills", singular: "技能", eyebrow: "MAGIC", icon: "wand" },
+    quest: { typeId: "quests", singular: "任务", eyebrow: "QUEST", icon: "file" },
+    gameshop: { typeId: "shops", singular: "商城条目", eyebrow: "GAMESHOP", icon: "bag" },
+    recipe: { typeId: "recipes", singular: "配方", eyebrow: "RECIPE", icon: "hammer" }
   });
 
   const ROUTE_PERMISSIONS = Object.freeze({
@@ -1075,6 +1082,95 @@
     return state.live.editorSchemaPromises[entityType];
   }
 
+  function collectReferenceTypes(schema, target = new Set()) {
+    const visit = field => {
+      if (!field) return;
+      if ((field.kind === "reference" || field.kind === "reference-array") && field.referenceType) {
+        target.add(field.referenceType);
+      }
+      (field.fields || []).forEach(visit);
+    };
+    (schema?.sections || []).forEach(section => (section.fields || []).forEach(visit));
+    return target;
+  }
+
+  async function loadReferenceOptions(schema, draftId) {
+    const types = collectReferenceTypes(schema);
+    if (schema?.entityType === "map") {
+      ["map", "monster", "script"].forEach(type => types.add(type));
+    }
+    const entries = await Promise.all(Array.from(types).map(async type => {
+      try {
+        const payload = await API.getContentOptions(type, { draftId, limit: 100 });
+        return [type, payload.items || []];
+      } catch (error) {
+        if (error?.status === 401) throw error;
+        return [type, []];
+      }
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  const referenceSearchTimers = new WeakMap();
+
+  function referenceOptionValue(storeAs, entityType, option) {
+    if (storeAs === "string") {
+      const raw = String(option.summary || option.label || option.contentKey || "");
+      if (entityType === "script") {
+        return raw.replace(/^Envir\/NPCs\//i, "").replace(/\.txt$/i, "");
+      }
+      return raw;
+    }
+    return String(option.localIndex);
+  }
+
+  function referenceOptionLabel(storeAs, option) {
+    if (storeAs === "string") return String(option.summary || option.label || option.contentKey || "");
+    return `${option.label || option.contentKey} · ${option.contentKey}`;
+  }
+
+  function replaceReferenceOptions(input) {
+    const picker = input.closest(".editor-reference-picker");
+    const select = picker?.querySelector("select");
+    const editor = state.live.editor;
+    if (!select || !editor) return;
+
+    const storeAs = input.dataset.referenceStoreAs || select.dataset.referenceStoreAs || "index";
+    const type = input.dataset.referenceType || select.dataset.referenceType || "item";
+    const currentValue = select.value;
+    const currentOption = select.selectedOptions?.[0];
+    const currentKey = currentOption?.dataset?.key || "";
+    const currentLabel = currentOption?.textContent?.trim() || currentValue;
+    const placeholder = select.options[0]?.textContent?.includes("无引用") ? "无引用" : "请选择引用";
+    const items = Array.isArray(input._referenceOptions) ? input._referenceOptions : [];
+    const options = items.map(option => {
+      const value = referenceOptionValue(storeAs, type, option);
+      return `<option value="${esc(value)}" data-key="${esc(option.contentKey || "")}"${value === currentValue ? " selected" : ""}>${esc(referenceOptionLabel(storeAs, option))}</option>`;
+    }).join("");
+    const hasCurrent = items.some(option => referenceOptionValue(storeAs, type, option) === currentValue);
+    const fallback = currentValue && !hasCurrent
+      ? `<option value="${esc(currentValue)}" data-key="${esc(currentKey)}" selected>${esc(currentLabel)}</option>`
+      : "";
+    select.innerHTML = `<option value="">${esc(placeholder)}</option>${fallback}${options}`;
+  }
+
+  async function searchReferenceOptions(input) {
+    const editor = state.live.editor;
+    if (!editor) return;
+    const type = input.dataset.referenceType || "item";
+    try {
+      const payload = await API.getContentOptions(type, {
+        draftId: editor.draftId,
+        q: String(input.value || "").trim(),
+        limit: 100
+      });
+      input._referenceOptions = payload.items || [];
+      replaceReferenceOptions(input);
+    } catch (error) {
+      if (error?.status === 401) handleApiFailure(error);
+    }
+  }
+
   function selectDraft(draftId) {
     const normalized = Number(draftId);
     state.live.activeDraftId = Number.isFinite(normalized) && normalized > 0 ? normalized : null;
@@ -1872,6 +1968,38 @@
     }
   }
 
+  async function previewAssetFromDrawer(actionEl) {
+    const localIndex = Number(actionEl.dataset.index);
+    const host = document.getElementById("asset-inline-preview");
+    if (!host || !Number.isFinite(localIndex)) return;
+    host.innerHTML = `<div class="empty-inline">${I("refresh", 14)} 正在读取资源预览...</div>`;
+    try {
+      if (actionEl.dataset.assetType === "map") {
+        const preview = await API.getAssetPreview(localIndex, { maxSize: 96, importRunId: state.live.run?.id });
+        host.innerHTML = `<div class="asset-map-preview"><div class="data-list"><div class="data-row"><span>格式</span><strong>${esc(preview.formatName)}</strong></div><div class="data-row"><span>原始尺寸</span><strong>${esc(preview.width)} × ${esc(preview.height)}</strong></div><div class="data-row"><span>采样尺寸</span><strong>${esc(preview.sampleWidth)} × ${esc(preview.sampleHeight)}</strong></div><div class="data-row"><span>可走 / 阻挡 / 门</span><strong>${esc(preview.walkableCells)} / ${esc(preview.blockedCells)} / ${esc(preview.doorCells)}</strong></div></div><pre class="asset-map-grid">${esc((preview.rows || []).join("\n"))}</pre><div class="asset-map-legend"><span><b>.</b> 可走</span><span><b>#</b> 阻挡</span><span><b>D</b> 门</span></div></div>`;
+        return;
+      }
+      const file = await API.downloadAsset(localIndex, state.live.run?.id);
+      if (file.blob.type.startsWith("image/")) {
+        const url = URL.createObjectURL(file.blob);
+        host.innerHTML = `<div class="asset-inline-image"><img src="${url}" alt="资源预览"><div class="asset-inline-meta">${esc(file.fileName)} · ${esc(formatBytes(file.blob.size))}</div></div>`;
+        return;
+      }
+      if (file.blob.type.startsWith("text/") || /\.(txt|json|xml|csv|ini|cfg|md)$/i.test(file.fileName)) {
+        const text = await file.blob.text();
+        host.innerHTML = `<pre class="asset-text-preview">${esc(text.slice(0, 20000))}</pre>${text.length > 20000 ? `<div class="editor-hint">仅显示前 20000 个字符。</div>` : ""}`;
+        return;
+      }
+      host.innerHTML = `<div class="empty-inline">该资源为二进制文件，使用上方“下载并校验资源”。</div>`;
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      host.innerHTML = `<div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>预览失败</strong><span>${esc(error?.message || "Control API 请求失败")}</span></div></div>`;
+    }
+  }
+
   function auditRows() {
     if (isLive() && state.live.audit?.items) {
       return state.live.audit.items.map((event, index) => ({
@@ -1949,7 +2077,7 @@
     const newAction = editable
       ? (canWrite ? btn(`新建${type.singular}`, "plus", "btn-primary", `data-action="open-content-editor-new" data-entity-type="${type.entity}" data-type="${type.id}"`) : "")
       : btn(`新建${type.singular}`, "plus", "btn-primary", `data-action="open-modal" data-modal="create-content" data-type="${type.id}"`);
-    const actions = `${btn("导出", "download", "btn-secondary", 'data-action="toast" data-message="已创建内容导出任务"')}${newAction}`;
+    const actions = `${editable && active ? btn("导入 JSONL", "upload", "btn-secondary", `data-action="open-content-import" data-entity-type="${esc(type.entity)}" data-type="${esc(type.id)}"`) : ""}${editable && active ? btn("导出 JSONL", "download", "btn-secondary", `data-action="export-content" data-entity-type="${esc(type.entity)}" data-type="${esc(type.id)}"`) : btn("导出", "download", "btn-secondary", 'data-action="toast" data-message="已创建内容导出任务"')}${newAction}`;
     const draftOptions = drafts.length
       ? drafts.map(draft => `<option value="${draft.id}"${Number(active?.id) === Number(draft.id) ? " selected" : ""}>草稿 #${draft.id} · ${esc(draft.name)} · ${esc(draft.status)} · ${formatNumber(draft.entityCount)} 实体</option>`).join("")
       : `<option value="">无可用草稿</option>`;
@@ -3518,7 +3646,7 @@
         const payload = await API.getContentByKey("asset", row.key, runId);
         if (!document.getElementById("live-drawer-relations")) return;
         const map = payload.data?.map;
-        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>资源文件</span><span class="tag gold">${esc(formatBytes(payload.data?.sizeBytes))}</span></div><div class="data-list"><div class="data-row"><span>路径</span><strong class="mono">${esc(payload.data?.relativePath || "—")}</strong></div><div class="data-row"><span>哈希</span><strong class="mono">${esc(payload.data?.sha256 || "—")}</strong></div><div class="data-row"><span>地图格式</span><strong>${esc(map?.formatName || "非地图资源")}</strong></div><div class="data-row"><span>尺寸 / 可走 / 阻挡</span><strong>${map?.valid ? `${esc(map.width)} × ${esc(map.height)} / ${esc(map.walkableCells)} / ${esc(map.blockedCells)}` : "—"}</strong></div></div><div class="divider"></div><button class="btn btn-primary" style="width:100%" data-action="download-asset" data-index="${esc(row.index)}" data-file-name="${esc(payload.data?.fileName || "")}" data-sha256="${esc(payload.data?.sha256 || "")}">${I("download", 14)}下载并校验资源</button></div>`;
+        host.innerHTML = `<div class="detail-section"><div class="detail-section-title"><span>资源文件</span><span class="tag gold">${esc(formatBytes(payload.data?.sizeBytes))}</span></div><div class="data-list"><div class="data-row"><span>路径</span><strong class="mono">${esc(payload.data?.relativePath || "—")}</strong></div><div class="data-row"><span>哈希</span><strong class="mono">${esc(payload.data?.sha256 || "—")}</strong></div><div class="data-row"><span>地图格式</span><strong>${esc(map?.formatName || "非地图资源")}</strong></div><div class="data-row"><span>尺寸 / 可走 / 阻挡</span><strong>${map?.valid ? `${esc(map.width)} × ${esc(map.height)} / ${esc(map.walkableCells)} / ${esc(map.blockedCells)}` : "—"}</strong></div></div><div class="flex gap-6 mt-12"><button class="btn btn-secondary" style="flex:1" data-action="preview-asset" data-index="${esc(row.index)}" data-asset-type="${esc(payload.data?.assetType || "")}">${I("eye", 14)}预览</button><button class="btn btn-primary" style="flex:1" data-action="download-asset" data-index="${esc(row.index)}" data-file-name="${esc(payload.data?.fileName || "")}" data-sha256="${esc(payload.data?.sha256 || "")}">${I("download", 14)}下载并校验资源</button></div><div id="asset-inline-preview" class="mt-12"></div></div>`;
       }
     } catch (error) {
       if (error?.status === 401) {
@@ -3590,6 +3718,25 @@
     </div>`;
   }
 
+  function contentEditorScriptValidationMarkup(editor) {
+    if (editor.entityType !== "script") return "";
+    const report = editor.scriptValidation;
+    if (!report) return `<div class="detail-section"><div class="detail-section-title"><span>脚本校验</span><span class="tag gold">按需运行</span></div><div class="empty-inline">点击“校验脚本”读取源码 AST、页面和问题列表。</div></div>`;
+    const issues = Array.isArray(report.issues) ? report.issues : [];
+    const pages = Array.isArray(report.pages) ? report.pages : [];
+    return `<div class="detail-section editor-script-issues" data-editor-script-validation>
+      <div class="detail-section-title"><span>脚本校验</span><span class="status ${report.valid ? "success" : "danger"}">${report.valid ? "通过" : `${issues.length} 个问题`}</span></div>
+      <div class="data-list">
+        <div class="data-row"><span>页面</span><strong>${esc(pages.join(" / ") || "—")}</strong></div>
+        <div class="data-row"><span>行数 / 字节</span><strong>${esc(report.lineCount ?? "—")} / ${formatBytes(report.sizeBytes)}</strong></div>
+        <div class="data-row"><span>源码 SHA256</span><strong class="mono">${esc(report.sha256 || "—")}</strong></div>
+        <div class="data-row"><span>编译哈希</span><strong class="mono">${esc(report.compiledSha256 || "—")}</strong></div>
+        <div class="data-row"><span>AST 页面 / 命令</span><strong>${esc(report.ast?.pages?.length ?? pages.length)} / ${esc(report.ast?.statementCount ?? "—")}</strong></div>
+      </div>
+      <div class="validation-list">${issues.length ? issues.map(issue => `<div class="validation-item ${issue.severity === "error" ? "warn" : "ok"}">${I(issue.severity === "error" ? "warning" : "checkCircle", 12)}<span>${esc(issue.line || "—")} 行 · ${esc(issue.page || "")} ${esc(issue.message)}</span></div>`).join("") : `<div class="validation-item ok">${I("checkCircle", 12)}<span>没有脚本问题。</span></div>`}</div>
+    </div>`;
+  }
+
   function contentEditorDropsMarkup(editor) {
     if (editor.entityType !== "monster" || editor.mode === "create") return "";
     const body = editor.dropsLoading
@@ -3602,30 +3749,171 @@
     return `<div class="detail-section"><div class="detail-section-title"><span>掉落关系（只读）</span><span class="tag gold">${esc(editor.drops?.dropContentKey || "当前批次")}</span></div>${body}</div>`;
   }
 
+  function relationNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function relationPoint(value) {
+    return { x: relationNumber(value?.x), y: relationNumber(value?.y) };
+  }
+
+  function relationMapOptions(editor, selected) {
+    const options = (editor.referenceOptions?.map || []).slice();
+    const current = relationNumber(selected);
+    if (current && !options.some(option => Number(option.localIndex) === current)) {
+      options.unshift({ localIndex: current, contentKey: `map.${current}`, label: `当前地图 ${current}` });
+    }
+    return options.map(option => `<option value="${esc(option.localIndex)}"${Number(option.localIndex) === current ? " selected" : ""}>${esc(option.label || option.contentKey)} · ${esc(option.contentKey)}</option>`).join("");
+  }
+
+  function relationMonsterOptions(editor, selected) {
+    const options = (editor.referenceOptions?.monster || []).slice();
+    const current = relationNumber(selected);
+    if (current && !options.some(option => Number(option.localIndex) === current)) {
+      options.unshift({ localIndex: current, contentKey: `monster.${current}`, label: `当前怪物 ${current}` });
+    }
+    return options.map(option => `<option value="${esc(option.localIndex)}"${Number(option.localIndex) === current ? " selected" : ""}>${esc(option.label || option.contentKey)} · ${esc(option.contentKey)}</option>`).join("");
+  }
+
+  function relationScriptPath(option) {
+    if (typeof option.summary === "string" && option.summary) {
+      return option.summary.replace(/^Envir\/NPCs\//i, "").replace(/\.txt$/i, "");
+    }
+    return String(option.label || option.contentKey || "");
+  }
+
+  function relationScriptOptions(editor, selected) {
+    const options = (editor.referenceOptions?.script || []).slice();
+    const current = String(selected || "");
+    if (current && !options.some(option => relationScriptPath(option) === current)) {
+      options.unshift({ contentKey: `script.${current}`, label: current, summary: current });
+    }
+    return options.map(option => {
+      const value = relationScriptPath(option);
+      return `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(option.label || value)} · ${esc(option.contentKey)}</option>`;
+    }).join("");
+  }
+
+  function mapRelationRowShell(content, className = "") {
+    return `<div class="relation-edit-row ${className}" data-map-relation-row>${content}<button class="icon-btn" type="button" data-action="editor-relation-row-remove" title="移除行">×</button></div>`;
+  }
+
+  function mapMovementRow(editor, item) {
+    const source = relationPoint(item?.Source);
+    const destination = relationPoint(item?.Destination);
+    return mapRelationRowShell(`
+      <label><span>目标地图</span><select data-rel-field="MapIndex">${relationMapOptions(editor, item?.MapIndex)}</select></label>
+      <label><span>源坐标</span><span class="relation-point"><input type="number" data-rel-field="Source.x" value="${source.x}"><input type="number" data-rel-field="Source.y" value="${source.y}"></span></label>
+      <label><span>目标坐标</span><span class="relation-point"><input type="number" data-rel-field="Destination.x" value="${destination.x}"><input type="number" data-rel-field="Destination.y" value="${destination.y}"></span></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="NeedHole"${item?.NeedHole ? " checked" : ""}><span>需要洞口</span></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="NeedMove"${item?.NeedMove ? " checked" : ""}><span>需要移动</span></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="ShowOnBigMap"${item?.ShowOnBigMap ? " checked" : ""}><span>大地图</span></label>
+      <input type="hidden" data-rel-field="Icon" value="${relationNumber(item?.Icon)}">
+      <input type="hidden" data-rel-field="ConquestIndex" value="${relationNumber(item?.ConquestIndex)}">`, "relation-movement-row");
+  }
+
+  function mapSafeZoneRow(editor, item) {
+    const location = relationPoint(item?.Location);
+    return mapRelationRowShell(`
+      <label><span>坐标</span><span class="relation-point"><input type="number" data-rel-field="Location.x" value="${location.x}"><input type="number" data-rel-field="Location.y" value="${location.y}"></span></label>
+      <label><span>范围</span><input type="number" data-rel-field="Size" value="${relationNumber(item?.Size)}"></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="StartPoint"${item?.StartPoint ? " checked" : ""}><span>出生点</span></label>`, "relation-simple-row");
+  }
+
+  function mapMineZoneRow(editor, item) {
+    const location = relationPoint(item?.Location);
+    return mapRelationRowShell(`
+      <label><span>坐标</span><span class="relation-point"><input type="number" data-rel-field="Location.x" value="${location.x}"><input type="number" data-rel-field="Location.y" value="${location.y}"></span></label>
+      <label><span>范围</span><input type="number" data-rel-field="Size" value="${relationNumber(item?.Size)}"></label>
+      <label><span>矿区</span><input type="number" data-rel-field="Mine" value="${relationNumber(item?.Mine)}"></label>`, "relation-simple-row");
+  }
+
+  function mapActiveCoordRow(editor, item) {
+    return mapRelationRowShell(`
+      <label><span>坐标</span><span class="relation-point"><input type="number" data-rel-field="x" value="${relationNumber(item?.x)}"><input type="number" data-rel-field="y" value="${relationNumber(item?.y)}"></span></label>`, "relation-active-row");
+  }
+
+  function maskRelationTable(editor, group, title, rows, renderRow) {
+    const body = rows.length ? rows.map(renderRow).join("") : `<div class="empty-inline">该分组暂无记录。</div>`;
+    return `<details class="detail-section relation-group" data-map-relation-group="${esc(group)}"${rows.length ? "" : " open"}>
+      <summary><span>${esc(title)} · ${rows.length}</span><span class="relation-group-actions"><button class="btn btn-ghost btn-sm" type="button" data-action="editor-relation-row-add" data-group="${esc(group)}">+ 添加</button><button class="btn btn-secondary btn-sm" type="button" data-action="editor-relation-group-save" data-group="${esc(group)}">保存该组</button></span></summary>
+      <div class="relation-edit-rows">${body}</div>
+      <template class="relation-row-template">${renderRow(null)}</template>
+    </details>`;
+  }
+
+  function relationEntityPage(editor, kind) {
+    const pageSize = 8;
+    const page = Math.max(1, relationNumber(editor.relationPages?.[kind], 1));
+    const items = editor.mapRelations?.[kind === "respawn" ? "respawns" : "npcs"] || [];
+    const pages = Math.max(1, Math.ceil(items.length / pageSize));
+    const current = Math.min(page, pages);
+    return { items: items.slice((current - 1) * pageSize, current * pageSize), page: current, pages, total: items.length };
+  }
+
+  function respawnRelationRow(editor, entity) {
+    const data = entity?.data || {};
+    const location = relationPoint(data.Location);
+    return `<div class="relation-edit-row relation-entity-row" data-relation-entity-row data-entity-type="respawn" data-index="${entity ? esc(entity.localIndex) : ""}" data-revision="${entity ? esc(entity.revision) : "0"}">
+      <label><span>怪物</span><select data-rel-field="MonsterIndex">${relationMonsterOptions(editor, data.MonsterIndex)}</select></label>
+      <label><span>坐标</span><span class="relation-point"><input type="number" data-rel-field="Location.x" value="${location.x}"><input type="number" data-rel-field="Location.y" value="${location.y}"></span></label>
+      <label><span>数量</span><input type="number" data-rel-field="Count" value="${relationNumber(data.Count, 1)}"></label>
+      <label><span>散布</span><input type="number" data-rel-field="Spread" value="${relationNumber(data.Spread)}"></label>
+      <label><span>延迟</span><input type="number" data-rel-field="Delay" value="${relationNumber(data.Delay)}"></label>
+      <label><span>随机延迟</span><input type="number" data-rel-field="RandomDelay" value="${relationNumber(data.RandomDelay)}"></label>
+      <label><span>方向</span><input type="number" data-rel-field="Direction" value="${relationNumber(data.Direction)}"></label>
+      <label><span>路径</span><input type="text" data-rel-field="RoutePath" value="${esc(data.RoutePath || "")}"></label>
+      <div class="relation-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="editor-relation-entity-save" data-entity-type="respawn">保存</button>${entity ? `<button class="btn btn-danger btn-sm" type="button" data-action="editor-relation-entity-delete" data-entity-type="respawn">删除</button>` : ""}</div>
+    </div>`;
+  }
+
+  function npcRelationRow(editor, entity) {
+    const data = entity?.data || {};
+    const location = relationPoint(data.Location);
+    return `<div class="relation-edit-row relation-entity-row" data-relation-entity-row data-entity-type="npc" data-index="${entity ? esc(entity.localIndex) : ""}" data-revision="${entity ? esc(entity.revision) : "0"}">
+      <label><span>名称</span><input type="text" data-rel-field="Name" value="${esc(data.Name || "")}"></label>
+      <label><span>脚本</span><select data-rel-field="FileName">${relationScriptOptions(editor, data.FileName)}</select></label>
+      <label><span>坐标</span><span class="relation-point"><input type="number" data-rel-field="Location.x" value="${location.x}"><input type="number" data-rel-field="Location.y" value="${location.y}"></span></label>
+      <label><span>刷新率</span><input type="number" data-rel-field="Rate" value="${relationNumber(data.Rate, 100)}"></label>
+      <label><span>图像</span><input type="number" data-rel-field="Image" value="${relationNumber(data.Image)}"></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="ShowOnBigMap"${data.ShowOnBigMap ? " checked" : ""}><span>大地图</span></label>
+      <label class="editor-check"><input class="checkbox" type="checkbox" data-rel-field="TimeVisible"${data.TimeVisible ? " checked" : ""}><span>限时出现</span></label>
+      <div class="relation-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="editor-relation-entity-save" data-entity-type="npc">保存</button>${entity ? `<button class="btn btn-danger btn-sm" type="button" data-action="editor-relation-entity-delete" data-entity-type="npc">删除</button>` : ""}</div>
+    </div>`;
+  }
+
+  function relationEntitySection(editor, kind, title, renderRow) {
+    const page = relationEntityPage(editor, kind);
+    const rows = page.items.map(entity => renderRow(editor, entity)).join("");
+    return `<details class="detail-section relation-group" data-relation-entity-group="${esc(kind)}"${page.items.length ? "" : " open"}>
+      <summary><span>${esc(title)} · ${page.total}</span><span class="relation-group-actions"><button class="btn btn-ghost btn-sm" type="button" data-action="editor-relation-entity-add" data-entity-type="${esc(kind)}">+ 新增</button></span></summary>
+      <div class="relation-edit-rows" data-relation-entity-list>${rows || `<div class="empty-inline">该地图暂无${esc(title)}。</div>`}</div>
+      <template class="relation-entity-template">${renderRow(editor, null)}</template>
+      <div class="paginator relation-pager"><span>第 ${page.page} / ${page.pages} 页 · ${page.total} 条</span><div class="page-buttons"><button class="page-btn" type="button" data-action="editor-relation-page" data-kind="${esc(kind)}" data-page="${page.page - 1}"${page.page <= 1 ? " disabled" : ""}>${I("chevronLeft", 11)}</button><button class="page-btn" type="button" data-action="editor-relation-page" data-kind="${esc(kind)}" data-page="${page.page + 1}"${page.page >= page.pages ? " disabled" : ""}>${I("chevronRight", 11)}</button></div></div>
+    </details>`;
+  }
+
   function contentEditorMapRelationsMarkup(editor) {
     if (editor.entityType !== "map" || editor.mode === "create") return "";
     const relations = editor.mapRelations;
     const movements = relations?.movements || [];
     const safeZones = relations?.safeZones || [];
-    const npcs = relations?.npcs || [];
-    const respawns = relations?.respawns?.items || [];
-    const respawnTotal = relations?.respawns?.total || 0;
+    const mineZones = relations?.mineZones || [];
+    const activeCoords = relations?.activeCoords || [];
     const body = editor.mapRelationsLoading
-      ? `<div class="empty-inline">${I("refresh", 14)} 正在读取只读地图关系...</div>`
+      ? `<div class="empty-inline">${I("refresh", 14)} 正在读取草稿地图关系...</div>`
       : editor.mapRelationsError
         ? `<div class="empty-inline">地图关系读取失败：${esc(editor.mapRelationsError)}</div>`
-        : relations?.map
-          ? `<div class="data-list">
-              <div class="data-row"><span>传送 / 出入口</span><strong>${formatNumber(movements.length)}</strong></div>
-              <div class="data-row"><span>安全区</span><strong>${formatNumber(safeZones.length)}</strong></div>
-              <div class="data-row"><span>NPC</span><strong>${formatNumber(npcs.length)}</strong></div>
-              <div class="data-row"><span>刷新点</span><strong>${formatNumber(respawnTotal)}</strong></div>
-            </div>
-            ${movements.length ? `<div class="detail-section-title mt-16"><span>首批传送</span></div><div class="data-list">${movements.slice(0, 6).map(move => `<div class="data-row"><span>${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</span><strong class="mono">${esc(pointText(move.source))} → ${esc(pointText(move.destination))}</strong></div>`).join("")}</div>` : ""}
-            ${npcs.length ? `<div class="detail-section-title mt-16"><span>首批 NPC</span></div><div class="data-list">${npcs.slice(0, 6).map(npc => `<div class="data-row"><span>${esc(npc.name || npc.contentKey)}</span><strong class="mono">${esc(pointText(npc.location))}</strong></div>`).join("")}</div>` : ""}
-            ${respawns.length ? `<div class="detail-section-title mt-16"><span>首批刷新点</span></div><div class="data-list">${respawns.slice(0, 6).map(respawn => `<div class="data-row"><span>${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</span><strong>${esc(respawn.count)} 只 · ${esc(pointText(respawn.location))}</strong></div>`).join("")}</div>` : ""}`
+        : relations?.mapLocalIndex !== undefined
+          ? `${maskRelationTable(editor, "movements", "传送与出入口", movements, item => mapMovementRow(editor, item))}
+            ${maskRelationTable(editor, "safezones", "安全区", safeZones, item => mapSafeZoneRow(editor, item))}
+            ${maskRelationTable(editor, "minezones", "矿区", mineZones, item => mapMineZoneRow(editor, item))}
+            ${maskRelationTable(editor, "activecoords", "激活坐标", activeCoords, item => mapActiveCoordRow(editor, item))}
+            ${relationEntitySection(editor, "respawn", "刷新点", respawnRelationRow)}
+            ${relationEntitySection(editor, "npc", "NPC", npcRelationRow)}`
           : `<div class="empty-inline">基础批次没有该地图的关系数据。</div>`;
-    return `<div class="detail-section" data-editor-map-relations><div class="detail-section-title"><span>地图关系（只读）</span><span class="tag blue">嵌套集合不直接编辑</span></div>${body}</div>`;
+    return `<div class="detail-section" data-editor-map-relations><div class="detail-section-title"><span>地图关系</span><span class="tag blue">revision ${esc(relations?.revision ?? "—")}</span></div>${body}</div>`;
   }
 
   function editorEntityTitle(editor, fallback) {
@@ -3668,7 +3956,7 @@
             ${conflict}${general}${deleteConfirm}
             <div class="editor-workspace">
               <div class="editor-form-pane">
-                ${E.renderForm(schema, editor.data || {}, { errors })}
+                ${E.renderForm(schema, editor.data || {}, { errors, referenceOptions: editor.referenceOptions || {} })}
                 <section class="editor-section editor-save-panel">
                   <div class="editor-section-head"><div><strong>保存说明</strong><span>变更原因会写入草稿修订与审计日志。</span></div></div>
                   <div class="editor-section-body">
@@ -3680,6 +3968,7 @@
                 <div class="editor-preview-head"><div><strong>字段变更预览</strong><span id="editor-change-count">${E.diff(editor.originalData, editor.data, schema).length} 个字段</span></div><span class="tag gold">前后对比</span></div>
                 <div id="editor-diff">${E.renderDiff(editor.originalData, editor.data, schema)}</div>
                 ${contentEditorValidationMarkup(editor.validation)}
+                ${contentEditorScriptValidationMarkup(editor)}
                 ${contentEditorDropsMarkup(editor)}
                 ${contentEditorMapRelationsMarkup(editor)}
               </aside>
@@ -3689,6 +3978,7 @@
             <span class="editor-save-state">${editor.saving ? "正在保存..." : editor.validationLoading ? "正在校验..." : "草稿编辑模式"}</span>
             ${!isCreate ? btn("删除", "trash", "btn-danger btn-sm", 'data-action="editor-delete-request"') : ""}
             ${!isCreate ? btn("校验草稿", "play", "btn-secondary btn-sm", 'data-action="editor-validate"') : ""}
+            ${editor.entityType === "script" ? btn("校验脚本", "code", "btn-secondary btn-sm", 'data-action="editor-script-validate"') : ""}
             ${btn("关闭", "", "btn-secondary", 'data-action="close-drawer"')}
             ${btn(isCreate ? `创建${meta.singular}` : `保存${meta.singular}`, "save", "btn-primary", 'data-action="editor-save"')}
           </div>
@@ -3755,23 +4045,22 @@
     editor.mapRelationsError = null;
     renderContentEditorDrawer();
     try {
-      const relations = await API.getMapRelations(editor.localIndex, {
-        importRunId: state.live.run?.id,
-        respawnPage: 1,
-        respawnPageSize: 10
-      });
+      const relations = await API.getDraftMapRelations(editor.draftId, editor.localIndex);
       if (state.live.editor !== editor) return;
       editor.mapRelations = relations;
     } catch (error) {
       if (state.live.editor !== editor) return;
       if (error?.status === 404) {
         editor.mapRelations = {
-          importRunId: state.live.run?.id,
-          map: null,
+          draftId: editor.draftId,
+          mapLocalIndex: editor.localIndex,
+          revision: editor.revision,
           movements: [],
           safeZones: [],
-          npcs: [],
-          respawns: { page: 1, pageSize: 10, total: 0, items: [] }
+          mineZones: [],
+          activeCoords: [],
+          respawns: [],
+          npcs: []
         };
       } else {
         editor.mapRelationsError = draftErrorMessage(error);
@@ -3806,11 +4095,13 @@
       }
 
       const isCreate = Boolean(options.create);
+      const referenceOptions = await loadReferenceOptions(schema, draftId);
       state.live.editor = {
         mode: isCreate ? "create" : "edit",
         entityType,
         typeId: meta.typeId,
         schema,
+        referenceOptions,
         draftId,
         loading: !isCreate,
         localIndex: isCreate ? null : Number(localIndex),
@@ -3831,7 +4122,9 @@
         dropsError: null,
         mapRelations: null,
         mapRelationsLoading: false,
-        mapRelationsError: null
+        mapRelationsError: null,
+        relationPages: { respawn: 1, npc: 1 },
+        relationSaving: null
       };
       renderContentEditorDrawer();
       if (isCreate) return;
@@ -3879,6 +4172,252 @@
     }
     render();
     showToast(message);
+  }
+
+  function relationControl(row, name) {
+    return row?.querySelector(`[data-rel-field="${name}"]`) || null;
+  }
+
+  function relationControlNumber(row, name, fallback = 0) {
+    const number = Number(relationControl(row, name)?.value);
+    return Number.isFinite(number) ? Math.trunc(number) : fallback;
+  }
+
+  function relationControlChecked(row, name) {
+    return Boolean(relationControl(row, name)?.checked);
+  }
+
+  function readMapRelationRows(group) {
+    const host = document.querySelector(`[data-map-relation-group="${group}"]`);
+    return Array.from(host?.querySelectorAll(":scope > .relation-edit-rows > [data-map-relation-row]") || []).map(row => {
+      if (group === "movements") {
+        return {
+          MapIndex: relationControlNumber(row, "MapIndex"),
+          Source: { x: relationControlNumber(row, "Source.x"), y: relationControlNumber(row, "Source.y") },
+          Destination: { x: relationControlNumber(row, "Destination.x"), y: relationControlNumber(row, "Destination.y") },
+          NeedHole: relationControlChecked(row, "NeedHole"),
+          NeedMove: relationControlChecked(row, "NeedMove"),
+          ShowOnBigMap: relationControlChecked(row, "ShowOnBigMap"),
+          ConquestIndex: relationControlNumber(row, "ConquestIndex"),
+          Icon: relationControlNumber(row, "Icon")
+        };
+      }
+      if (group === "safezones") {
+        return {
+          Location: { x: relationControlNumber(row, "Location.x"), y: relationControlNumber(row, "Location.y") },
+          Size: relationControlNumber(row, "Size"),
+          StartPoint: relationControlChecked(row, "StartPoint")
+        };
+      }
+      if (group === "minezones") {
+        return {
+          Location: { x: relationControlNumber(row, "Location.x"), y: relationControlNumber(row, "Location.y") },
+          Size: relationControlNumber(row, "Size"),
+          Mine: relationControlNumber(row, "Mine")
+        };
+      }
+      return { x: relationControlNumber(row, "x"), y: relationControlNumber(row, "y") };
+    });
+  }
+
+  function mergeRelationMapUpdate(editor, map, current) {
+    editor.revision = map.revision;
+    editor.contentKey = map.contentKey;
+    editor.originalData = cloneData(map.data || {});
+    editor.data = cloneData(map.data || {});
+    if (current) {
+      Object.entries(current).forEach(([key, value]) => {
+        if (!["Movements", "SafeZones", "MineZones", "ActiveCoords", "Respawns", "NPCs"].includes(key)) {
+          editor.data[key] = cloneData(value);
+        }
+      });
+    }
+  }
+
+  async function saveMapRelationGroup(group) {
+    const editor = state.live.editor;
+    if (!editor || editor.entityType !== "map" || !editor.mapRelations || editor.relationSaving) return;
+    const current = readContentEditorData();
+    const items = readMapRelationRows(group);
+    editor.relationSaving = group;
+    renderContentEditorDrawer();
+    try {
+      const map = await API.replaceDraftMapArray(
+        editor.draftId,
+        editor.localIndex,
+        group,
+        items,
+        editor.mapRelations.revision,
+        document.getElementById("editor-reason")?.value.trim() || `地图关系 ${group} 保存`
+      );
+      if (state.live.editor !== editor) return;
+      mergeRelationMapUpdate(editor, map, current);
+      editor.mapRelations = null;
+      editor.relationSaving = null;
+      renderContentEditorDrawer();
+      await hydrateContentEditorMapRelations();
+      showToast(`地图关系 ${group} 已保存为 revision ${map.revision}`);
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      editor.relationSaving = null;
+      renderContentEditorDrawer();
+      if (error?.status === 409) {
+        showToast(`地图关系 revision 已变化，正在载入最新数据：${draftErrorMessage(error)}`, "danger");
+        await reloadContentEditor();
+      } else {
+        showToast(`地图关系保存失败：${draftErrorMessage(error)}`, "danger");
+      }
+    }
+  }
+
+  function readMapRelationEntityRow(row, entityType) {
+    if (entityType === "respawn") {
+      return {
+        MonsterIndex: relationControlNumber(row, "MonsterIndex"),
+        Location: { x: relationControlNumber(row, "Location.x"), y: relationControlNumber(row, "Location.y") },
+        Count: relationControlNumber(row, "Count", 1),
+        Spread: relationControlNumber(row, "Spread"),
+        Delay: relationControlNumber(row, "Delay"),
+        RandomDelay: relationControlNumber(row, "RandomDelay"),
+        Direction: relationControlNumber(row, "Direction"),
+        RoutePath: relationControl(row, "RoutePath")?.value || "",
+        RespawnTicks: 0,
+        SaveRespawnTime: false
+      };
+    }
+    return {
+      Name: relationControl(row, "Name")?.value || "",
+      FileName: relationControl(row, "FileName")?.value || "",
+      Location: { x: relationControlNumber(row, "Location.x"), y: relationControlNumber(row, "Location.y") },
+      Rate: relationControlNumber(row, "Rate", 100),
+      Image: relationControlNumber(row, "Image"),
+      ShowOnBigMap: relationControlChecked(row, "ShowOnBigMap"),
+      TimeVisible: relationControlChecked(row, "TimeVisible"),
+      MapIndex: Number(state.live.editor?.localIndex || 0)
+    };
+  }
+
+  async function refreshMapEditorAfterRelationEntity(editor, current) {
+    const map = await API.getDraftEntity(editor.draftId, "map", editor.localIndex);
+    if (state.live.editor !== editor) return;
+    mergeRelationMapUpdate(editor, map, current);
+    editor.mapRelations = null;
+    renderContentEditorDrawer();
+    await hydrateContentEditorMapRelations();
+  }
+
+  async function saveMapRelationEntityRow(actionEl) {
+    const editor = state.live.editor;
+    const row = actionEl.closest("[data-relation-entity-row]");
+    if (!editor || !row || editor.relationSaving) return;
+    const entityType = row.dataset.entityType;
+    const index = row.dataset.index ? Number(row.dataset.index) : null;
+    const current = readContentEditorData();
+    editor.relationSaving = `${entityType}-${index || "new"}`;
+    renderContentEditorDrawer();
+    try {
+      await API.saveDraftMapRelationEntity(
+        editor.draftId,
+        editor.localIndex,
+        entityType,
+        index,
+        readMapRelationEntityRow(row, entityType),
+        index ? Number(row.dataset.revision) : editor.mapRelations?.revision,
+        document.getElementById("editor-reason")?.value.trim() || `地图 ${editor.localIndex} ${entityType} 保存`
+      );
+      if (state.live.editor !== editor) return;
+      editor.relationSaving = null;
+      await refreshMapEditorAfterRelationEntity(editor, current);
+      showToast(`${entityType === "npc" ? "NPC" : "刷新点"}已保存`);
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      editor.relationSaving = null;
+      renderContentEditorDrawer();
+      if (error?.status === 409) {
+        showToast(`地图关系 revision 已变化，正在载入最新数据：${draftErrorMessage(error)}`, "danger");
+        await reloadContentEditor();
+      } else {
+        showToast(`地图关系保存失败：${draftErrorMessage(error)}`, "danger");
+      }
+    }
+  }
+
+  async function deleteMapRelationEntityRow(actionEl) {
+    const editor = state.live.editor;
+    const row = actionEl.closest("[data-relation-entity-row]");
+    if (!editor || !row || editor.relationSaving) return;
+    const entityType = row.dataset.entityType;
+    const index = Number(row.dataset.index);
+    if (!index || !window.confirm(`确认删除${entityType === "npc" ? " NPC" : "刷新点"} ${index}？`)) return;
+    const current = readContentEditorData();
+    editor.relationSaving = `${entityType}-${index}`;
+    renderContentEditorDrawer();
+    try {
+      await API.deleteDraftMapRelationEntity(
+        editor.draftId,
+        editor.localIndex,
+        entityType,
+        index,
+        Number(row.dataset.revision),
+        document.getElementById("editor-reason")?.value.trim() || `地图 ${editor.localIndex} ${entityType} 删除`
+      );
+      if (state.live.editor !== editor) return;
+      editor.relationSaving = null;
+      await refreshMapEditorAfterRelationEntity(editor, current);
+      showToast(`${entityType === "npc" ? "NPC" : "刷新点"} ${index} 已删除`);
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      editor.relationSaving = null;
+      renderContentEditorDrawer();
+      if (error?.status === 409) {
+        showToast(`地图关系 revision 已变化，正在载入最新数据：${draftErrorMessage(error)}`, "danger");
+        await reloadContentEditor();
+      } else {
+        showToast(`删除地图关系失败：${draftErrorMessage(error)}`, "danger");
+      }
+    }
+  }
+
+  function addMapRelationRow(actionEl) {
+    const group = actionEl.dataset.group;
+    const host = document.querySelector(`[data-map-relation-group="${group}"]`);
+    const template = host?.querySelector("template.relation-row-template");
+    const rows = host?.querySelector(":scope > .relation-edit-rows");
+    if (rows && template?.content?.firstElementChild) {
+      rows.querySelector(".empty-inline")?.remove();
+      rows.appendChild(template.content.firstElementChild.cloneNode(true));
+    }
+  }
+
+  function addMapRelationEntityRow(actionEl) {
+    const entityType = actionEl.dataset.entityType;
+    const host = document.querySelector(`[data-relation-entity-group="${entityType}"]`);
+    const template = host?.querySelector("template.relation-entity-template");
+    const rows = host?.querySelector("[data-relation-entity-list]");
+    if (rows && template?.content?.firstElementChild) {
+      rows.querySelector(".empty-inline")?.remove();
+      const row = template.content.firstElementChild.cloneNode(true);
+      row.dataset.index = "";
+      row.dataset.revision = "0";
+      rows.prepend(row);
+    }
+  }
+
+  function setMapRelationPage(actionEl) {
+    const editor = state.live.editor;
+    const page = Number(actionEl.dataset.page);
+    if (!editor || !Number.isFinite(page) || page < 1) return;
+    editor.relationPages = Object.assign({}, editor.relationPages, { [actionEl.dataset.kind]: page });
+    renderContentEditorDrawer();
   }
 
   async function saveContentEditor() {
@@ -3946,7 +4485,9 @@
         dropsError: null,
         mapRelations: null,
         mapRelationsLoading: false,
-        mapRelationsError: null
+        mapRelationsError: null,
+        relationPages: editor.relationPages || { respawn: 1, npc: 1 },
+        relationSaving: null
       };
       renderContentEditorDrawer();
       void hydrateContentEditorDrops();
@@ -4021,6 +4562,38 @@
     }
   }
 
+  async function validateContentEditorScript() {
+    const editor = state.live.editor;
+    if (!editor || editor.entityType !== "script") return;
+    const data = readContentEditorData();
+    if (!data) return;
+    editor.data = data;
+    editor.scriptValidationLoading = true;
+    renderContentEditorDrawer();
+    try {
+      const report = await API.validateDraftScript(
+        editor.draftId,
+        editor.localIndex ?? 0,
+        String(data.source ?? ""),
+        String(data.language || "CrystalNpc")
+      );
+      if (state.live.editor !== editor) return;
+      editor.scriptValidation = report;
+      showToast(report.valid ? "脚本校验通过" : `脚本校验发现 ${report.issues?.length || 0} 个问题`, report.valid ? "success" : "danger");
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      showToast(`脚本校验失败：${draftErrorMessage(error)}`, "danger");
+    } finally {
+      if (state.live.editor === editor) {
+        editor.scriptValidationLoading = false;
+        renderContentEditorDrawer();
+      }
+    }
+  }
+
   function openNewContentEditor(entityType) {
     if (!isLive() || !hasPermission("content:write")) {
       showToast("当前账号没有内容写入权限。", "danger");
@@ -4054,6 +4627,84 @@
     } catch (error) {
       if (error?.status === 401) handleApiFailure(error);
       else showToast(`创建草稿失败：${draftErrorMessage(error)}`, "danger");
+    }
+  }
+
+  function openContentImportModal(entityType, typeId) {
+    const meta = editorMeta(entityType) || { singular: entityType };
+    if (!state.live.activeDraftId) {
+      showToast("请先创建或选择草稿。", "danger");
+      return;
+    }
+    modalShell({
+      title: `导入${meta.singular} JSONL`,
+      desc: `写入草稿 #${state.live.activeDraftId}；默认先做 dry-run，应用模式在单事务内按 contentKey upsert。`,
+      iconName: "upload",
+      body: `<div class="field"><label for="content-import-lines">实体行（每行一个快照格式 JSON 对象）</label><textarea id="content-import-lines" rows="14" spellcheck="false" placeholder='{"entityType":"${esc(entityType)}","localIndex":1,"contentKey":"${esc(entityType)}.1","schemaVersion":1,"data":{}}'></textarea><div class="field-hint">格式与快照 JSONL 一致；导入不会直接创建发布批次。</div></div><div class="field"><label for="content-import-reason">导入原因</label><input id="content-import-reason" placeholder="例如：批量修正商城价格"></div><div id="content-import-result" class="mt-12"></div>`,
+      foot: `${btn("关闭", "", "btn-secondary", 'data-action="close-modal"')}${btn("Dry-run 校验", "play", "btn-secondary", `data-action="content-import-dryrun" data-entity-type="${esc(entityType)}" data-type="${esc(typeId)}"`)}${btn("应用导入", "upload", "btn-primary", `data-action="content-import-apply" data-entity-type="${esc(entityType)}" data-type="${esc(typeId)}"`)}`
+    });
+  }
+
+  function contentImportResultMarkup(result) {
+    if (!result) return "";
+    const errors = Array.isArray(result.errors) ? result.errors : [];
+    return `<div class="detail-section"><div class="detail-section-title"><span>${result.dryRun ? "Dry-run 结果" : "导入结果"}</span><span class="status ${result.valid ? "success" : "danger"}">${result.valid ? "通过" : `${errors.length} 个错误`}</span></div><div class="data-list"><div class="data-row"><span>总行数 / 有效 / 应用</span><strong>${esc(result.totalLines)} / ${esc(result.validLines)} / ${esc(result.appliedLines)}</strong></div><div class="data-row"><span>内容键</span><strong class="mono">${esc((result.contentKeys || []).slice(0, 5).join(", ") || "—")}</strong></div></div>${errors.length ? `<div class="editor-issue-list">${errors.slice(0, 30).map(issue => `<div class="editor-issue"><span class="tag danger">${esc(issue.line)}</span><div><strong>${esc(issue.message)}</strong><span class="mono">${esc(issue.code)}</span></div></div>`).join("")}</div>` : ""}</div>`;
+  }
+
+  async function runContentImport(dryRun) {
+    const draftId = state.live.activeDraftId;
+    const entityType = document.querySelector('[data-action="content-import-apply"]')?.dataset.entityType;
+    const text = document.getElementById("content-import-lines")?.value || "";
+    const reason = document.getElementById("content-import-reason")?.value.trim() || "";
+    const host = document.getElementById("content-import-result");
+    if (!draftId || !entityType || !host) return;
+    if (!text.trim()) {
+      showToast("请粘贴至少一行 JSONL。", "danger");
+      return;
+    }
+    host.innerHTML = `<div class="empty-inline">${I("refresh", 14)} ${dryRun ? "正在执行 dry-run..." : "正在应用导入..."}</div>`;
+    try {
+      const response = await API.importDraftContent(draftId, entityType, text, dryRun, reason);
+      const result = response.payload;
+      host.innerHTML = contentImportResultMarkup(result);
+      if (!dryRun && result?.valid) {
+        invalidateDraftContent(draftId);
+        state.live.draftsLoaded = false;
+        await ensureDrafts(true);
+        closeOverlays();
+        render();
+        showToast(`导入应用完成：${result.appliedLines} 行`);
+      } else {
+        showToast(dryRun ? (result?.valid ? "Dry-run 通过" : "Dry-run 发现问题") : "导入未通过校验", result?.valid ? "success" : "danger");
+      }
+    } catch (error) {
+      if (error?.status === 401) {
+        handleApiFailure(error);
+        return;
+      }
+      const result = error?.problem;
+      if (result && typeof result === "object" && Array.isArray(result.errors)) {
+        host.innerHTML = contentImportResultMarkup(result);
+      } else {
+        host.innerHTML = `<div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>导入失败</strong><span>${esc(draftErrorMessage(error))}</span></div></div>`;
+      }
+      showToast(`导入失败：${draftErrorMessage(error)}`, "danger");
+    }
+  }
+
+  async function exportLiveContent(entityType) {
+    const draftId = state.live.activeDraftId;
+    if (!draftId) {
+      showToast("请先创建或选择草稿。", "danger");
+      return;
+    }
+    try {
+      const response = await API.exportDraftContent(draftId, entityType);
+      saveBlob(new Blob([response.text], { type: "application/x-ndjson" }), `${entityType}.jsonl`);
+      showToast(`${entityType}.jsonl 已导出`);
+    } catch (error) {
+      if (error?.status === 401) handleApiFailure(error);
+      else showToast(`导出失败：${draftErrorMessage(error)}`, "danger");
     }
   }
 
@@ -4193,6 +4844,12 @@
       return;
     }
     if (event.target.closest(".js-content-editor")) {
+      if (event.target.matches("[data-drop-mode]")) {
+        const row = event.target.closest("[data-drop-row]");
+        row?.querySelectorAll(":scope > [data-drop-pane]").forEach(pane => {
+          pane.classList.toggle("hidden", pane.dataset.dropPane !== event.target.value);
+        });
+      }
       if (event.target.matches('input[type="checkbox"][data-edit-path]')) {
         const label = event.target.closest(".editor-check")?.querySelector("[data-boolean-label]");
         if (label) label.textContent = event.target.checked ? "已启用" : "未启用";
@@ -4254,14 +4911,50 @@
       if (action === "select-relation") { state.relationScenario = actionEl.dataset.scenario; render(); return; }
       if (action === "open-content") { openContentDrawer(actionEl.dataset.type, actionEl.dataset.key); return; }
       if (action === "open-content-editor-new") { openNewContentEditor(actionEl.dataset.entityType); return; }
+      if (action === "open-content-import") { openContentImportModal(actionEl.dataset.entityType, actionEl.dataset.type); return; }
+      if (action === "export-content") { void exportLiveContent(actionEl.dataset.entityType); return; }
+      if (action === "content-import-dryrun") { void runContentImport(true); return; }
+      if (action === "content-import-apply") { void runContentImport(false); return; }
       if (action === "editor-add-stat") { E.addStatRow(actionEl.closest(".editor-stats")); updateContentEditorPreview(); return; }
       if (action === "editor-remove-stat") { actionEl.closest(".editor-stat-row")?.remove(); updateContentEditorPreview(); return; }
+      if (action === "editor-add-array") {
+        const host = actionEl.closest("[data-editor-array]");
+        const template = host?.querySelector("template.editor-array-template");
+        const rows = host?.querySelector(".editor-array-rows");
+        if (rows && template?.content?.firstElementChild) rows.appendChild(template.content.firstElementChild.cloneNode(true));
+        updateContentEditorPreview(); return;
+      }
+      if (action === "editor-remove-array") { actionEl.closest("[data-array-row]")?.remove(); updateContentEditorPreview(); return; }
+      if (action === "editor-add-reference-array") {
+        const host = actionEl.closest("[data-reference-array]");
+        const template = host?.querySelector("template.editor-reference-array-template");
+        const rows = host?.querySelector(".editor-reference-array-rows");
+        if (rows && template?.content?.firstElementChild) rows.appendChild(template.content.firstElementChild.cloneNode(true));
+        updateContentEditorPreview(); return;
+      }
+      if (action === "editor-remove-reference-array") { actionEl.closest("[data-reference-array-row]")?.remove(); updateContentEditorPreview(); return; }
+      if (action === "editor-add-drop") {
+        const host = actionEl.closest("[data-drop-table], [data-drop-group]");
+        const template = host?.querySelector(":scope > template.editor-drop-template");
+        const rows = host?.querySelector(":scope > .editor-drop-rows");
+        if (rows && template?.content?.firstElementChild) rows.appendChild(template.content.firstElementChild.cloneNode(true));
+        updateContentEditorPreview(); return;
+      }
+      if (action === "editor-remove-drop") { actionEl.closest("[data-drop-row]")?.remove(); updateContentEditorPreview(); return; }
+      if (action === "editor-relation-row-add") { addMapRelationRow(actionEl); return; }
+      if (action === "editor-relation-row-remove") { actionEl.closest("[data-map-relation-row]")?.remove(); return; }
+      if (action === "editor-relation-group-save") { void saveMapRelationGroup(actionEl.dataset.group); return; }
+      if (action === "editor-relation-entity-add") { addMapRelationEntityRow(actionEl); return; }
+      if (action === "editor-relation-entity-save") { void saveMapRelationEntityRow(actionEl); return; }
+      if (action === "editor-relation-entity-delete") { void deleteMapRelationEntityRow(actionEl); return; }
+      if (action === "editor-relation-page") { setMapRelationPage(actionEl); return; }
       if (action === "editor-save") { void saveContentEditor(); return; }
       if (action === "editor-reload") { void reloadContentEditor(); return; }
       if (action === "editor-delete-request") { if (state.live.editor) state.live.editor.confirmDelete = true; renderContentEditorDrawer(); return; }
       if (action === "editor-delete-cancel") { if (state.live.editor) state.live.editor.confirmDelete = false; renderContentEditorDrawer(); return; }
       if (action === "editor-delete-confirm") { void deleteContentEditor(); return; }
       if (action === "editor-validate") { void validateActiveDraft(true); return; }
+      if (action === "editor-script-validate") { void validateContentEditorScript(); return; }
       if (action === "validate-active-draft") { void validateActiveDraft(false); return; }
       if (action === "submit-draft-create") { void createDraftFromModal(); return; }
       if (action === "open-audit") {
@@ -4322,6 +5015,7 @@
       }
       if (action === "export-audit") { exportAuditCsv(); return; }
       if (action === "download-asset") { void downloadAssetFromDrawer(actionEl); return; }
+      if (action === "preview-asset") { void previewAssetFromDrawer(actionEl); return; }
       if (action === "refresh-releases") { void loadReleaseCenterData(true).catch(handleApiFailure); return; }
       if (action === "release-perform") { void runReleaseAction(actionEl.dataset.op, Number(actionEl.dataset.id)); return; }
       if (action === "open-release-detail") { openLiveReleaseDetail(Number(actionEl.dataset.id)); return; }
@@ -4372,6 +5066,14 @@
     if (event.target.id === "spotlight-input") {
       const results = document.getElementById("spotlight-results");
       if (results) results.innerHTML = spotlightResults(event.target.value);
+      return;
+    }
+    if (event.target.matches("[data-reference-search]") && isLive()) {
+      const input = event.target;
+      window.clearTimeout(referenceSearchTimers.get(input));
+      referenceSearchTimers.set(input, window.setTimeout(() => {
+        void searchReferenceOptions(input);
+      }, 250));
       return;
     }
     if (event.target.matches("[data-live-content-search]") && isLive()) {

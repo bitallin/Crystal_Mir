@@ -12,6 +12,11 @@ if (options.ShowHelp)
 
 try
 {
+    if (options.NpcScriptManifestPath is not null)
+    {
+        return WriteNpcScriptManifest(options);
+    }
+
     if (options.ExportPath is not null)
     {
         if (options.SnapshotPath is not null)
@@ -105,6 +110,29 @@ catch (Exception exception)
 {
     Console.Error.WriteLine(exception);
     return 1;
+}
+
+static int WriteNpcScriptManifest(ImportOptions options)
+{
+    using var session = LegacyDatabaseSession.Open(options.DatabasePath);
+    var names = session.Envir.NPCInfoList
+        .Select(npc => (npc.FileName ?? string.Empty).Trim().Replace('\\', '/').Trim('/'))
+        .Where(name => name.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var output = Path.GetFullPath(options.NpcScriptManifestPath!);
+    var directory = Path.GetDirectoryName(output);
+    if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+    File.WriteAllLines(output, names);
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        database = session.SourcePath,
+        databaseSha256 = session.SourceHash,
+        output,
+        count = names.Length
+    }, ContentJson.IndentedOptions));
+    return 0;
 }
 
 static int ExportDatabase(ImportOptions options)
@@ -241,6 +269,8 @@ internal sealed class ImportOptions
 
     public string? PostgresSourceConnectionString { get; init; }
 
+    public string? NpcScriptManifestPath { get; init; }
+
     public bool VerifyExport { get; init; } = true;
 
     public bool Force { get; init; }
@@ -263,6 +293,8 @@ internal sealed class ImportOptions
           --snapshot <dir>     Rebuild and export from a JSONL content snapshot
           --from-postgres <connection>
                                Rebuild and export from the latest imported PostgreSQL snapshot
+          --npc-script-manifest <path>
+                               Write the distinct NPC script names referenced by the database
           --no-verify          Skip reloading and comparing an exported database
           --force              Replace snapshot files in a non-empty output directory
                                or replace an existing export file
@@ -281,6 +313,7 @@ internal sealed class ImportOptions
         string? export = null;
         string? snapshot = null;
         string? postgresSource = null;
+        string? npcScriptManifest = null;
         var databaseWasSpecified = false;
         var outputWasSpecified = false;
         var releaseWasSpecified = false;
@@ -326,6 +359,9 @@ internal sealed class ImportOptions
                 case "--from-postgres":
                     postgresSource = NextValue(args, ref index, argument);
                     break;
+                case "--npc-script-manifest":
+                    npcScriptManifest = NextValue(args, ref index, argument);
+                    break;
                 case "--no-verify":
                     verifyExport = false;
                     break;
@@ -347,6 +383,15 @@ internal sealed class ImportOptions
         {
             throw new ArgumentException(
                 "--export cannot be combined with --out, --release, --source, --content-root, --dsn, or --schema.");
+        }
+
+        if (npcScriptManifest is not null &&
+            (outputWasSpecified || releaseWasSpecified || source is not null || contentRoot is not null ||
+             dsn is not null || schema is not null || export is not null || snapshot is not null ||
+             postgresSource is not null))
+        {
+            throw new ArgumentException(
+                "--npc-script-manifest cannot be combined with snapshot, export, PostgreSQL, or content options.");
         }
 
         if (snapshot is not null && postgresSource is not null)
@@ -388,6 +433,7 @@ internal sealed class ImportOptions
             ExportPath = export,
             SnapshotPath = snapshot,
             PostgresSourceConnectionString = postgresSource,
+            NpcScriptManifestPath = npcScriptManifest,
             VerifyExport = verifyExport,
             Force = force,
             ShowHelp = help

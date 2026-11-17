@@ -1,7 +1,7 @@
 # 内容快照、二进制导入与导出
 
-> 最后更新：2026-11-11
-> 状态：生效（M1 初版）
+> 最后更新：2026-11-17
+> 状态：生效（M1 导入/重建 + M2 草稿 JSONL 与区服发布消费）
 
 ## 1. 组成
 
@@ -109,6 +109,26 @@ $HOME/.dotnet/dotnet run --project tools/Crystal.ContentTool/Crystal.ContentTool
 `contentHash` 和旧二进制重建结果不受影响。私钥不得进入仓库、数据库、日志或内容包，生产发布应使用
 KMS/Vault 或硬件签名服务。算法、密钥轮换和重新评估条件见 `adr/0005-content-signature-format.md`。
 
+### 2.2 草稿 JSONL 导入导出
+
+Control API 的草稿导入导出复用快照实体行，不另建 CSV 或表格格式：
+
+```text
+POST /api/v1/drafts/{id}/content/{entityType}/import?dryRun=true|false&reason=
+GET  /api/v1/drafts/{id}/content/{entityType}/export?importRunId=
+```
+
+- 导入体为 UTF-8 JSONL，每行一个 `entityType`、`localIndex`、`contentKey`、`schemaVersion`、`data` 对象，
+  单次上限 16 MiB。
+- `dryRun` 省略或为 `true` 时只运行身份、Schema 和引用相关校验，返回总行数、有效行、逐行错误和内容键，不写草稿。
+- `dryRun=false` 时在单事务内按 `contentKey` upsert；成功写草稿修订和 `draft.import` 审计，冲突返回 409，
+  校验失败返回 400。导入不会直接创建发布批次。
+- 导出按 `localIndex` 稳定排序，输出与快照 `entities/<type>.jsonl` 相同的实体行；可选择活动草稿或指定导入批次。
+- 导入仍受服务端内容身份和安全键规则约束；旧历史内容键可保留，客户端不能借导入改写已有实体的内容键。
+
+区服侧通过 `Crystal.ZoneServer --content-release` 启动期验签并消费发布，详见
+`adr/0011-zone-server-read-only-signed-content-release.md` 和 `src/Crystal.ZoneServer/README.md`。
+
 ## 3. 快照格式
 
 ```text
@@ -210,11 +230,13 @@ Control API 通过 `fileNameKey` 建立 NPC→脚本关系。脚本和资源均�
 ## 5. 当前边界
 
 `Server.MirDB` 只包含核心实体。掉落、配方、NPC 脚本和资源元数据可通过 `--content-root` 导入，
-Buff 由启动代码生成并始终导入。以下内容仍不在本次导入范围，后续由文件/资源管线处理：
+Buff 由启动代码生成并始终导入。M2 已支持草稿 JSONL 导入导出和区服启动期消费签名发布，但以下内容仍不在导入范围，
+后续由文件/资源管线处理：
 
 - 图库、音效、特效、客户端补丁等未位于 `Maps`/`Envir/Previews` 的资源二进制。
 - GT 地图运行时状态（仅保存可重建的 `legacy.gtMaps` 元数据）。
-- NPC 脚本 DSL 在旧运行时中的端到端执行结果；M1 已保存 AST、编译哈希和静态校验，但不执行脚本。
+- NPC 脚本 DSL 在旧运行时中的端到端执行结果；已保存 AST、编译哈希和静态校验，但不执行脚本。
+- CSV 导入、服务端异步大文件导入和跨草稿复制。
 
 未提供 `--content-root` 时，限制仍写入 manifest 的 `legacy.notImported`，避免把“未导入”误判为
 “数据为空”；提供后写入掉落/配方/脚本/资源的实际文件数、解析条目数和实体数。Buff 来源和实体数始终
@@ -274,6 +296,6 @@ Buff 由启动代码生成并始终导入。以下内容仍不在本次导入范
 
 - 快照和导入批次都是不可变的；回滚通过切换活动批次或恢复数据库备份完成。
 - `LegacyBinaryExporter` 已提供旧二进制格式的确定性写入、冷回读验证和快照/PostgreSQL 重建。
-- 纯控制面回滚已具备数据导出路径；脚本 AST/校验、资源完整性下载已进入只读 API；后续仍需补齐
-  内容发布 API、其余资源二进制和 staging 演练。
-- 控制面 API 按 `import_run_id` 或未来活动发布读取实体。
+- 纯控制面回滚已具备数据导出路径；脚本 AST/校验、资源完整性下载、草稿 JSONL 和启动期发布消费已完成。
+- 后续仍需补齐其余资源二进制、M3 Agent/热切换、staging 演练和灰度发布。
+- 控制面 API 按 `import_run_id`、草稿或发布产物读取实体。

@@ -1,5 +1,6 @@
 using Crystal.Control.Api.Audit;
 using Crystal.Control.Api.Auth;
+using System.Text.Json;
 
 namespace Crystal.Control.Api.Content;
 
@@ -18,6 +19,34 @@ public static class DraftEndpoints
         api.MapPost("/drafts", CreateDraftAsync)
             .RequireAuthorization(Permissions.ContentWrite);
         api.MapPost("/drafts/{id:long}/content/{entityType}", CreateDraftEntityAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPost("/drafts/{id:long}/content/{entityType}/import", ImportDraftContentAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapGet("/drafts/{id:long}/content/{entityType}/export", ExportDraftContentAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapPost("/drafts/{id:long}/content/script/{localIndex:long}/validate", ValidateDraftScriptAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapGet("/drafts/{id:long}/content/map/{mapIndex:long}/relations", GetDraftMapRelationsAsync)
+            .RequireAuthorization(Permissions.ContentRead);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/movements", ReplaceDraftMapMovementsAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/safezones", ReplaceDraftMapSafeZonesAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/minezones", ReplaceDraftMapMineZonesAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/activecoords", ReplaceDraftMapActiveCoordsAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPost("/drafts/{id:long}/content/map/{mapIndex:long}/respawns", CreateDraftMapRespawnAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/respawns/{respawnIndex:long}", UpdateDraftMapRespawnAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapDelete("/drafts/{id:long}/content/map/{mapIndex:long}/respawns/{respawnIndex:long}", DeleteDraftMapRespawnAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPost("/drafts/{id:long}/content/map/{mapIndex:long}/npcs", CreateDraftMapNpcAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapPut("/drafts/{id:long}/content/map/{mapIndex:long}/npcs/{npcIndex:long}", UpdateDraftMapNpcAsync)
+            .RequireAuthorization(Permissions.ContentWrite);
+        api.MapDelete("/drafts/{id:long}/content/map/{mapIndex:long}/npcs/{npcIndex:long}", DeleteDraftMapNpcAsync)
             .RequireAuthorization(Permissions.ContentWrite);
         api.MapGet("/drafts/{id:long}/content", QueryDraftContentAsync)
             .RequireAuthorization(Permissions.ContentRead);
@@ -296,6 +325,590 @@ public static class DraftEndpoints
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>(exception.Errors));
         }
+    }
+
+    private static async Task<IResult> ImportDraftContentAsync(
+        long id,
+        string entityType,
+        bool? dryRun,
+        string? reason,
+        ContentDraftService service,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        const int maxBytes = 16 * 1024 * 1024;
+        using var body = new MemoryStream();
+        await context.Request.Body.CopyToAsync(body, cancellationToken);
+        if (body.Length > maxBytes)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                title: "Import too large",
+                detail: "JSONL import must be 16 MiB or smaller.");
+        }
+
+        var content = System.Text.Encoding.UTF8.GetString(body.ToArray());
+        var apply = dryRun == false;
+        try
+        {
+            var result = await service.ImportJsonLinesAsync(
+                id,
+                entityType,
+                content,
+                !apply,
+                RequestMetadata.AccountId(context.User),
+                reason,
+                cancellationToken);
+            if (apply && result.Valid)
+            {
+                await auditStore.WriteAsync(new AuditEventWrite(
+                    RequestMetadata.AccountId(context.User),
+                    context.User.Identity?.Name,
+                    RequestMetadata.ClientIp(context),
+                    "draft.import",
+                    "content_draft",
+                    id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    null,
+                    result.AppliedLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    RequestMetadata.RequestId(context),
+                    "success",
+                    reason,
+                    RequestMetadata.UserAgent(context),
+                    new { entityType, result.TotalLines, result.AppliedLines }), cancellationToken);
+            }
+
+            return apply && !result.Valid
+                ? Results.Json(result, statusCode: StatusCodes.Status400BadRequest)
+                : Results.Ok(result);
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
+    private static async Task<IResult> ExportDraftContentAsync(
+        long id,
+        string entityType,
+        ContentDraftService service,
+        long? importRunId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = await service.ExportJsonLinesAsync(id, entityType, importRunId, cancellationToken);
+            return Results.File(bytes, "application/x-ndjson; charset=utf-8", $"{entityType}.jsonl");
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return BadRequest(exception.Message);
+        }
+    }
+
+    private static async Task<IResult> ValidateDraftScriptAsync(
+        long id,
+        long localIndex,
+        ContentDraftService service,
+        HttpContext context,
+        string? language,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = await service.GetAsync(id, cancellationToken);
+            using var body = new MemoryStream();
+            await context.Request.Body.CopyToAsync(body, cancellationToken);
+            var content = System.Text.Encoding.UTF8.GetString(body.ToArray());
+            var source = content;
+            if (context.Request.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                using var document = JsonDocument.Parse(content);
+                if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                    !document.RootElement.TryGetProperty("source", out var sourceElement) ||
+                    sourceElement.ValueKind != JsonValueKind.String)
+                {
+                    return Results.ValidationProblem(new Dictionary<string, string[]>
+                    {
+                        ["source"] = ["source is required and must be a string."]
+                    });
+                }
+
+                source = sourceElement.GetString() ?? string.Empty;
+                if (document.RootElement.TryGetProperty("language", out var languageElement) &&
+                    languageElement.ValueKind == JsonValueKind.String)
+                {
+                    language = languageElement.GetString();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                var existing = await service.GetEntityAsync(id, "script", localIndex, cancellationToken);
+                language = ContentEditorValidation.ReadString(existing.Data, "language");
+            }
+
+            return Results.Ok(ContentDraftService.ValidateScript(source, language));
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return BadRequest(exception.Message);
+        }
+        catch (JsonException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["source"] = [exception.Message]
+            });
+        }
+    }
+
+    private static async Task<IResult> GetDraftMapRelationsAsync(
+        long id,
+        long mapIndex,
+        ContentDraftStore store,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Results.Ok(await store.GetMapRelationsAsync(id, mapIndex, cancellationToken));
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+    }
+
+    private static Task<IResult> ReplaceDraftMapMovementsAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return ReplaceDraftMapArrayAsync(id, mapIndex, "Movements", expectedRevision, reason, store,
+            auditStore, context, cancellationToken);
+    }
+
+    private static Task<IResult> ReplaceDraftMapSafeZonesAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return ReplaceDraftMapArrayAsync(id, mapIndex, "SafeZones", expectedRevision, reason, store,
+            auditStore, context, cancellationToken);
+    }
+
+    private static Task<IResult> ReplaceDraftMapMineZonesAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return ReplaceDraftMapArrayAsync(id, mapIndex, "MineZones", expectedRevision, reason, store,
+            auditStore, context, cancellationToken);
+    }
+
+    private static Task<IResult> ReplaceDraftMapActiveCoordsAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return ReplaceDraftMapArrayAsync(id, mapIndex, "ActiveCoords", expectedRevision, reason, store,
+            auditStore, context, cancellationToken);
+    }
+
+    private static async Task<IResult> ReplaceDraftMapArrayAsync(
+        long id,
+        long mapIndex,
+        string property,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        AuditStore auditStore,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var body = await ReadJsonBodyAsync(context.Request, cancellationToken);
+            if (body is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["body"] = ["A JSON array or relation request object is required."]
+                });
+            }
+
+            var root = body.RootElement;
+            var revision = expectedRevision;
+            JsonElement items;
+            string? requestReason = reason;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                items = root;
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("expectedRevision", out var revisionElement) &&
+                    revisionElement.TryGetInt64(out var parsedRevision))
+                {
+                    revision = parsedRevision;
+                }
+
+                if (root.TryGetProperty("reason", out var reasonElement) &&
+                    reasonElement.ValueKind == JsonValueKind.String)
+                {
+                    requestReason = reasonElement.GetString();
+                }
+
+                if (!root.TryGetProperty("items", out items) &&
+                    !root.TryGetProperty(property, out items) &&
+                    !root.TryGetProperty(property.ToLowerInvariant(), out items))
+                {
+                    return Results.ValidationProblem(new Dictionary<string, string[]>
+                    {
+                        ["items"] = ["items array is required."]
+                    });
+                }
+            }
+            else
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["body"] = ["A JSON array or relation request object is required."]
+                });
+            }
+
+            if (revision is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["expectedRevision"] = ["expectedRevision is required."]
+                });
+            }
+
+            var entity = await store.ReplaceMapArrayAsync(
+                id,
+                mapIndex,
+                property,
+                items,
+                revision.Value,
+                requestReason,
+                RequestMetadata.AccountId(context.User),
+                cancellationToken);
+            await auditStore.WriteAsync(new AuditEventWrite(
+                RequestMetadata.AccountId(context.User),
+                context.User.Identity?.Name,
+                RequestMetadata.ClientIp(context),
+                "draft.map.relations.update",
+                "content_draft",
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                null,
+                entity.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                RequestMetadata.RequestId(context),
+                "success",
+                requestReason,
+                RequestMetadata.UserAgent(context),
+                new { mapIndex, property, entity.Revision }), cancellationToken);
+            return Results.Ok(entity);
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (DraftInputValidationException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>(exception.Errors));
+        }
+        catch (JsonException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["body"] = [exception.Message]
+            });
+        }
+    }
+
+    private static Task<IResult> CreateDraftMapRespawnAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return SaveDraftMapRelationEntityAsync(id, mapIndex, "respawn", null, expectedRevision, reason,
+            store, context, cancellationToken);
+    }
+
+    private static Task<IResult> UpdateDraftMapRespawnAsync(
+        long id,
+        long mapIndex,
+        long respawnIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return SaveDraftMapRelationEntityAsync(id, mapIndex, "respawn", respawnIndex, expectedRevision, reason,
+            store, context, cancellationToken);
+    }
+
+    private static Task<IResult> CreateDraftMapNpcAsync(
+        long id,
+        long mapIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return SaveDraftMapRelationEntityAsync(id, mapIndex, "npc", null, expectedRevision, reason,
+            store, context, cancellationToken);
+    }
+
+    private static Task<IResult> UpdateDraftMapNpcAsync(
+        long id,
+        long mapIndex,
+        long npcIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return SaveDraftMapRelationEntityAsync(id, mapIndex, "npc", npcIndex, expectedRevision, reason,
+            store, context, cancellationToken);
+    }
+
+    private static async Task<IResult> SaveDraftMapRelationEntityAsync(
+        long id,
+        long mapIndex,
+        string entityType,
+        long? localIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var body = await ReadJsonBodyAsync(context.Request, cancellationToken);
+            if (body is null || body.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["body"] = ["A JSON object is required."]
+                });
+            }
+
+            var root = body.RootElement;
+            JsonElement data = root;
+            string? requestReason = reason;
+            if (root.TryGetProperty("data", out var wrappedData) && wrappedData.ValueKind == JsonValueKind.Object)
+            {
+                data = wrappedData;
+            }
+
+            if (root.TryGetProperty("expectedRevision", out var revisionElement) &&
+                revisionElement.TryGetInt64(out var parsedRevision))
+            {
+                expectedRevision = parsedRevision;
+            }
+
+            if (root.TryGetProperty("reason", out var reasonElement) &&
+                reasonElement.ValueKind == JsonValueKind.String)
+            {
+                requestReason = reasonElement.GetString();
+            }
+
+            if (localIndex is not null && expectedRevision is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["expectedRevision"] = ["expectedRevision is required for updates."]
+                });
+            }
+
+            var entity = await store.SaveMapRelationEntityAsync(
+                id,
+                mapIndex,
+                entityType,
+                localIndex,
+                expectedRevision,
+                data,
+                requestReason,
+                RequestMetadata.AccountId(context.User),
+                cancellationToken);
+            return localIndex is null
+                ? Results.Created($"/api/v1/drafts/{id}/content/{entityType}/{entity.LocalIndex}", entity)
+                : Results.Ok(entity);
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (DraftInputValidationException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>(exception.Errors));
+        }
+        catch (JsonException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["body"] = [exception.Message]
+            });
+        }
+    }
+
+    private static Task<IResult> DeleteDraftMapRespawnAsync(
+        long id,
+        long mapIndex,
+        long respawnIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return DeleteDraftMapRelationEntityAsync(id, mapIndex, "respawn", respawnIndex, expectedRevision,
+            reason, store, context, cancellationToken);
+    }
+
+    private static Task<IResult> DeleteDraftMapNpcAsync(
+        long id,
+        long mapIndex,
+        long npcIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return DeleteDraftMapRelationEntityAsync(id, mapIndex, "npc", npcIndex, expectedRevision,
+            reason, store, context, cancellationToken);
+    }
+
+    private static async Task<IResult> DeleteDraftMapRelationEntityAsync(
+        long id,
+        long mapIndex,
+        string entityType,
+        long localIndex,
+        long? expectedRevision,
+        string? reason,
+        ContentDraftStore store,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            string? requestReason = reason;
+            using var body = await ReadJsonBodyAsync(context.Request, cancellationToken);
+            if (body is not null && body.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (body.RootElement.TryGetProperty("expectedRevision", out var revisionElement) &&
+                    revisionElement.TryGetInt64(out var parsedRevision))
+                {
+                    expectedRevision = parsedRevision;
+                }
+
+                if (body.RootElement.TryGetProperty("reason", out var reasonElement) &&
+                    reasonElement.ValueKind == JsonValueKind.String)
+                {
+                    requestReason = reasonElement.GetString();
+                }
+            }
+
+            if (expectedRevision is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["expectedRevision"] = ["expectedRevision is required."]
+                });
+            }
+
+            await store.DeleteMapRelationEntityAsync(
+                id,
+                mapIndex,
+                entityType,
+                localIndex,
+                expectedRevision.Value,
+                requestReason,
+                RequestMetadata.AccountId(context.User),
+                cancellationToken);
+            return Results.NoContent();
+        }
+        catch (DraftNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (DraftConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (JsonException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["body"] = [exception.Message]
+            });
+        }
+    }
+
+    private static async Task<JsonDocument?> ReadJsonBodyAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream();
+        await request.Body.CopyToAsync(stream, cancellationToken);
+        if (stream.Length == 0) return null;
+        if (stream.Length > 8 * 1024 * 1024)
+        {
+            throw new JsonException("Relation request body must be 8 MiB or smaller.");
+        }
+
+        return JsonDocument.Parse(stream.ToArray());
     }
 
     private static async Task<IResult> DeleteDraftEntityAsync(

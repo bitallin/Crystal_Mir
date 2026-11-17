@@ -47,11 +47,33 @@ cd "$ROOT"
 "$DOTNET" build tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj -c "$CONFIGURATION" --nologo >/dev/null
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo >/dev/null
 
+CONTENT_ROOT="$TMP/content"
+cp -a "$ROOT/tests/fixtures/content" "$CONTENT_ROOT"
+"$DOTNET" run --project tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj \
+  -c "$CONFIGURATION" --no-build -- \
+  --db tests/fixtures/golden/Server.MirDB \
+  --npc-script-manifest "$TMP/npc-scripts.txt" >/dev/null
+python3 - "$CONTENT_ROOT" "$TMP/npc-scripts.txt" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for name in Path(sys.argv[2]).read_text(encoding="utf-8").splitlines():
+    name = name.strip().replace("\\", "/").strip("/")
+    if not name:
+        continue
+    path = root / "Envir" / "NPCs" / f"{name}.txt"
+    if path.exists():
+        continue
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[@MAIN]\n", encoding="utf-8")
+PY
+
 "$DOTNET" run --project tools/Crystal.LegacyImporter/Crystal.LegacyImporter.csproj \
   -c "$CONFIGURATION" --no-build -- \
   --db tests/fixtures/golden/Server.MirDB \
   --out "$TMP/snapshot" \
-  --content-root tests/fixtures/content \
+  --content-root "$CONTENT_ROOT" \
   --release "api.$(date -u +%Y%m%d%H%M%S)" \
   --dsn "$DSN" >/dev/null
 
@@ -95,7 +117,7 @@ ControlApi__ApiRateLimitPermitLimit=5000 \
 ControlApi__BootstrapAdminUsername="$ADMIN_USERNAME" \
 ControlApi__BootstrapAdminPassword="$ADMIN_PASSWORD" \
 ControlApi__CorsOrigins="$WEB_ORIGIN" \
-ControlApi__AssetRoot="$ROOT/tests/fixtures/content" \
+ControlApi__AssetRoot="$CONTENT_ROOT" \
 ControlApi__ReleaseRoot="$TMP/releases" \
 ControlApi__ReleaseSigningPrivateKeyPath="$TMP/release-private.pem" \
 ControlApi__ReleaseSigningPublicKeyPath="$TMP/release-public.pem" \
@@ -153,10 +175,14 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/map/1/relations?respa
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/monster/1/drops" >"$TMP/monster-drops.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/recipe?pageSize=5" >"$TMP/recipes.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/buff?pageSize=5" >"$TMP/buffs.json"
-curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script?pageSize=5" >"$TMP/scripts.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script?pageSize=1" >"$TMP/scripts.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script?q=Transport&pageSize=5" >"$TMP/script-transport.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset?pageSize=5" >"$TMP/assets.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/recipe/1/relations" >"$TMP/recipe-relations.json"
-curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script/1/validation" >"$TMP/script-validation.json"
+TRANSPORT_SCRIPT_INDEX="$(curl -fsS --max-time 10 -H "X-Api-Key: $API_KEY" \
+  "$BASE/api/v1/content/script/key/script.BichonProvince.BorderVillage.Transport" | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["localIndex"])')"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/script/$TRANSPORT_SCRIPT_INDEX/validation" >"$TMP/script-validation.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset/1/file" >"$TMP/asset-file.bin"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/npc/1/script" >"$TMP/npc-script.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/item" >"$TMP/item-schema.json"
@@ -173,7 +199,7 @@ import json, sys
 runs = json.load(open(sys.argv[1]))
 assert runs, "no import runs returned"
 assert runs[0]["status"] == "imported", runs[0]
-assert runs[0]["entityCount"] == 9797, runs[0]
+assert runs[0]["entityCount"] == 10160, runs[0]
 print(runs[0]["id"])
 PY
 )"
@@ -313,7 +339,8 @@ assert len(relations["npcs"]) == 46, len(relations["npcs"])
 assert relations["npcs"][0]["name"] == "Teleport_Gilbert", relations["npcs"][0]
 assert relations["npcs"][0]["script"]["contentKey"] == "script.BichonProvince.BorderVillage.Transport", relations["npcs"][0]
 assert relations["npcs"][0]["script"]["lineCount"] == 95, relations["npcs"][0]
-assert relations["npcs"][1]["script"] is None, relations["npcs"][1]
+assert relations["npcs"][1]["script"] is not None, relations["npcs"][1]
+assert relations["npcs"][1]["script"]["contentKey"].startswith("script."), relations["npcs"][1]
 assert relations["respawns"]["page"] == 2, relations["respawns"]
 assert relations["respawns"]["pageSize"] == 5, relations["respawns"]
 assert relations["respawns"]["total"] == 360, relations["respawns"]
@@ -348,8 +375,8 @@ assert buffs["items"][0]["data"]["StackType"] == "ResetDuration", buffs["items"]
 
 scripts = load("scripts.json")
 assert scripts["entityType"] == "script", scripts
-assert scripts["total"] == 1, scripts["total"]
-script = scripts["items"][0]
+assert scripts["total"] == 364, scripts["total"]
+script = load("script-transport.json")["items"][0]
 assert script["contentKey"] == "script.BichonProvince.BorderVillage.Transport", script
 assert script["data"]["npcIndexes"] == [1], script
 assert script["data"]["lineCount"] == 95, script
@@ -417,7 +444,7 @@ actual = {entry["entityType"]: entry["count"] for entry in counts["counts"]}
 expected = {
     "item": 1628, "monster": 555, "map": 463, "npc": 375, "quest": 154,
     "magic": 111, "gameshop": 105, "conquest": 1, "dragon": 1, "respawn": 6341,
-    "drop": 1, "recipe": 1, "buff": 59, "script": 1, "asset": 1,
+    "drop": 1, "recipe": 1, "buff": 59, "script": 364, "asset": 1,
 }
 assert actual == expected, (actual, expected)
 PY
@@ -943,7 +970,7 @@ fi
 
 curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
-  --data "$(printf '{"contentKey":"script.invalid.%s","schemaVersion":1,"expectedRevision":0,"reason":"create invalid script","data":{"validation":{"errorCount":1}}}' "$SUFFIX")" \
+  --data '{"contentKey":"script.999998","schemaVersion":1,"expectedRevision":0,"reason":"create invalid script","data":{"validation":{"errorCount":1}}}' \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/script/999998" >"$TMP/draft-invalid-script.json"
 
 curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
@@ -960,6 +987,8 @@ curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/revisions?limit=50" >"$TMP/draft-revisions.json"
 
 DRAFT_RELEASE_VERSION="api.draft.${SUFFIX}"
+python3 "$ROOT/scripts/test-m2-content.py" "$BASE" "$DRAFT_ID" "$AUTHOR_ACCESS" "$RUN_ID"
+
 curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
   --data "$(printf '{"draftId":%s,"version":"%s","notes":"release from editable draft"}' "$DRAFT_ID" "$DRAFT_RELEASE_VERSION")" \
@@ -1357,7 +1386,7 @@ assert {entry["entityType"]: entry["count"] for entry in created["counts"]} == e
 validated = load("release-validated.json")
 assert validated["valid"] is True, validated
 assert validated["issues"] == [], validated
-assert validated["entityCount"] == 9797, validated
+assert validated["entityCount"] == 10160, validated
 
 compiled = load("release-compiled.json")
 assert compiled["status"] == "compiled", compiled
@@ -1386,7 +1415,7 @@ assert any(release["id"] == created["id"] for release in release_list["items"]),
 draft_created = load("draft-created.json")
 assert draft_created["status"] == "editing", draft_created
 assert draft_created["baseImportRunId"] is not None, draft_created
-assert draft_created["entityCount"] == 9797, draft_created
+assert draft_created["entityCount"] == 10160, draft_created
 assert {entry["entityType"]: entry["count"] for entry in draft_created["counts"]} == expected_counts, draft_created["counts"]
 assert any(draft["id"] == draft_created["id"] for draft in load("drafts-list.json")["items"]), load("drafts-list.json")
 
@@ -1493,7 +1522,7 @@ assert any(issue["code"] == "script-validation-error" for issue in invalid_repor
 valid_report = load("draft-valid-report.json")
 assert valid_report["valid"] is True, valid_report
 assert valid_report["issues"] == [], valid_report
-assert valid_report["entityCount"] == 9797, valid_report
+assert valid_report["entityCount"] == 10160, valid_report
 
 revisions = load("draft-revisions.json")["items"]
 assert any(revision["action"] == "update" and revision["contentKey"] == "item.1" and revision["reason"] == "integration draft update" for revision in revisions), revisions

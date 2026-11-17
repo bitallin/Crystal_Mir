@@ -46,3 +46,35 @@ public sealed record MapAssetMetadata(
         };
     }
 }
+
+public sealed record MapAssetPreview(
+    bool Valid,
+    int Format,
+    string FormatName,
+    int Width,
+    int Height,
+    int SampleWidth,
+    int SampleHeight,
+    long WalkableCells,
+    long BlockedCells,
+    long DoorCells,
+    IReadOnlyList<string> Rows,
+    string? Error)
+{
+    public static MapAssetPreview Invalid(int format, string error)
+    {
+        return new MapAssetPreview(
+            false,
+            format,
+            MapAssetMetadata.FormatNameFor(format),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Array.Empty<string>(),
+            error);
+    }
+}

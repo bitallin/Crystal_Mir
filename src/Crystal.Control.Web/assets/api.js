@@ -193,6 +193,15 @@
     return request(`/api/v1/editor-schemas/${encodeURIComponent(entityType)}`);
   }
 
+  function getContentOptions(entityType, options = {}) {
+    const params = new URLSearchParams();
+    if (options.draftId) params.set("draftId", options.draftId);
+    if (options.importRunId) params.set("importRunId", options.importRunId);
+    if (options.q) params.set("q", options.q);
+    params.set("limit", options.limit || 100);
+    return request(`/api/v1/content/${encodeURIComponent(entityType)}/options?${params}`);
+  }
+
   function queryDraftContent(draftId, entityType, options = {}) {
     const params = new URLSearchParams({ entityType });
     params.set("page", options.page || 1);
@@ -230,6 +239,50 @@
 
   function validateDraft(draftId) {
     return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/validate`, { method: "POST" });
+  }
+
+  function validateDraftScript(draftId, localIndex, source, language) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/script/${encodeURIComponent(localIndex)}/validate`, {
+      method: "POST",
+      body: { source, language }
+    });
+  }
+
+  async function importDraftContent(draftId, entityType, jsonLines, dryRun, reason) {
+    const params = new URLSearchParams({ dryRun: dryRun ? "true" : "false" });
+    if (reason) params.set("reason", reason);
+    const path = `/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}/import?${params}`;
+    return requestText(path, { method: "POST", rawBody: jsonLines });
+  }
+
+  function getDraftMapRelations(draftId, mapIndex) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/map/${encodeURIComponent(mapIndex)}/relations`);
+  }
+
+  function replaceDraftMapArray(draftId, mapIndex, group, items, expectedRevision, reason) {
+    const names = { movements: "movements", safeZones: "safezones", mineZones: "minezones", activeCoords: "activecoords" };
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/map/${encodeURIComponent(mapIndex)}/${names[group] || group}`, {
+      method: "PUT",
+      body: { expectedRevision, items, reason }
+    });
+  }
+
+  function saveDraftMapRelationEntity(draftId, mapIndex, entityType, localIndex, data, expectedRevision, reason) {
+    const base = `/api/v1/drafts/${encodeURIComponent(draftId)}/content/map/${encodeURIComponent(mapIndex)}/${entityType === "npc" ? "npcs" : "respawns"}`;
+    if (localIndex === null || localIndex === undefined) {
+      return request(base, { method: "POST", body: { data, expectedRevision, reason } });
+    }
+    return request(`${base}/${encodeURIComponent(localIndex)}`, {
+      method: "PUT",
+      body: { data, expectedRevision, reason }
+    });
+  }
+
+  function deleteDraftMapRelationEntity(draftId, mapIndex, entityType, localIndex, expectedRevision, reason) {
+    return request(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/map/${encodeURIComponent(mapIndex)}/${entityType === "npc" ? "npcs" : "respawns"}/${encodeURIComponent(localIndex)}`, {
+      method: "DELETE",
+      body: { expectedRevision, reason }
+    });
   }
 
   function listDraftRevisions(draftId, options = {}) {
@@ -335,6 +388,48 @@
     return request(`/api/v1/content/script/${encodeURIComponent(localIndex)}/validation${params}`);
   }
 
+  function getAssetPreview(localIndex, options = {}) {
+    const params = new URLSearchParams({ maxSize: options.maxSize || 256 });
+    if (options.importRunId) params.set("importRunId", options.importRunId);
+    return request(`/api/v1/content/asset/${encodeURIComponent(localIndex)}/preview?${params}`);
+  }
+
+  async function requestText(path, options = {}) {
+    if (tokenNeedsRefresh()) await refresh();
+    const headers = Object.assign({ Accept: "application/json" }, options.headers || {});
+    if (options.rawBody !== undefined) headers["Content-Type"] = "application/x-ndjson";
+    if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
+    let response = await window.fetch(`${baseUrl()}${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.rawBody
+    });
+    if (response.status === 401 && session?.refreshToken) {
+      await refresh();
+      headers.Authorization = `Bearer ${session.accessToken}`;
+      response = await window.fetch(`${baseUrl()}${path}`, {
+        method: options.method || "GET",
+        headers,
+        body: options.rawBody
+      });
+    }
+    const text = response.status === 204 ? "" : await response.text();
+    let payload = null;
+    if (text) {
+      try { payload = JSON.parse(text); } catch { payload = { detail: text }; }
+    }
+    if (!response.ok) {
+      const detail = payload && (payload.detail || payload.title || payload.message);
+      throw new ApiError(detail || `Request failed with HTTP ${response.status}.`, response.status, payload);
+    }
+    return { text, payload, headers: response.headers };
+  }
+
+  async function exportDraftContent(draftId, entityType, importRunId) {
+    const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
+    return requestText(`/api/v1/drafts/${encodeURIComponent(draftId)}/content/${encodeURIComponent(entityType)}/export${params}`);
+  }
+
   async function downloadAsset(localIndex, importRunId) {
     if (tokenNeedsRefresh()) await refresh();
     const params = importRunId ? `?importRunId=${encodeURIComponent(importRunId)}` : "";
@@ -426,11 +521,14 @@
     createRelease,
     deleteDraftEntity,
     getContentByKey,
+    getContentOptions,
     getContentTypes,
+    getDraftMapRelations,
     getDraftEntity,
     getEditorSchema,
     getImportRun,
     getMapRelations,
+    getAssetPreview,
     getMonsterDrops,
     getRecipeRelations,
     getRelease,
@@ -451,6 +549,11 @@
     me,
     queryContent,
     queryDraftContent,
+    importDraftContent,
+    exportDraftContent,
+    replaceDraftMapArray,
+    saveDraftMapRelationEntity,
+    deleteDraftMapRelationEntity,
     publishRelease,
     downloadAsset,
     resetAccountPassword,
@@ -462,6 +565,7 @@
     updateAccountRoles,
     updateDraftEntity,
     validateDraft,
+    validateDraftScript,
     setBaseUrl
   };
 })();

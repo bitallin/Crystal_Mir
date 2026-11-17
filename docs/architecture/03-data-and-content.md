@@ -1,6 +1,6 @@
 # 数据与内容架构
 
-> 最后更新：2026-11-16
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 数据域
@@ -175,13 +175,29 @@ content_draft_revision(
 校验结果持久化到 `content_draft.last_validation`，发布时从草稿当前实体复制到不可变发布版本。
 
 M2 的内容编辑器复用上述草稿表，不新增迁移。Control API 按 `entityType` 维护版本化 Schema 注册表，当前注册
-`item` 和 `monster`：物品覆盖 33 个顶层字段、`Stats.Values` 和 70 个随机属性字段；怪物覆盖身份、基础行为、
-战斗参数、布尔开关以及 13 个固定属性键。字段枚举、图像清单和属性键均不引用 GPL 程序集。
-类型化创建在事务内为草稿分配下一个 `local_index`，覆盖 `Index` 并生成 `<entityType>.<localIndex>`。
-保存只阻断字段类型、范围、枚举、`Index`/内容键一致性等结构错误；缺失字段、空名称和
+`item`、`monster`、`map`、`npc`、`script`、`drop`、`magic`、`quest`、`gameshop` 和 `recipe` 十类编辑器。
+Schema 支持标量、数组、引用、代码、颜色和只读派生字段；字段枚举、图像清单、属性键和引用目标均不引用 GPL 程序集。
+类型化创建在事务内为草稿分配 `local_index`，并由服务端解析内容身份：
+
+| 类型 | localIndex | 内容键 |
+| --- | --- | --- |
+| `item` / `monster` / `map` / `npc` / `quest` | 自动分配 | `<type>.<localIndex>` |
+| `gameshop` | 自动分配 `GIndex` | `gameshop.<GIndex>` |
+| `magic` | `Spell` 枚举值 | `magic.<Spell>` |
+| `recipe` | 自动分配 | `recipe.<产出物品名>` |
+| `script` | 自动分配 | `script.<规范化文件路径>` |
+| `drop` | `monsterIndex` | `drop.monster.<monsterIndex>` |
+
+旧内容键保持原样，新建实体使用安全键段；已有实体不得由客户端改写内容键。保存只阻断字段类型、范围、枚举、
+`Index`/`GIndex`/`monsterIndex`/内容键一致性等结构错误；缺失字段、空名称、引用缺失和
 `<entityType>-content-key` 由草稿/发布校验报告。旧物品内容省略 `RandomStats` 表示全零随机属性，视为合法；
-未知字段在编辑保存时原样保留。详见 `adr/0007-item-editor-schema-and-validation.md` 和
-`adr/0008-multi-content-editor-registry.md`。
+未知字段在编辑保存时原样保留。引用规则、规范化、标签和搜索字段由服务端编辑器钩子声明，Web 不复制这些规则。
+详见 `adr/0007-item-editor-schema-and-validation.md`、`adr/0008-multi-content-editor-registry.md` 和
+`adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md`。
+
+引用选择通过 `GET /api/v1/content/{entityType}/options` 在活动草稿或指定导入批次内搜索。草稿 JSONL 导入默认
+dry-run，应用模式在单事务内按 `contentKey` upsert，并记录修订和审计；导出按 `localIndex` 稳定排序，实体行与
+内容快照 JSONL 一致。脚本保存和校验由服务端重新计算 AST、页面、静态引用、问题、行数、源码 SHA256 和编译哈希。
 
 专用表用于需要索引、关联约束和后台筛选的字段；`data jsonb` 保存完整实体。
 
@@ -190,10 +206,13 @@ M2 的内容编辑器复用上述草稿表，不新增迁移。Control API 按 `
 保留产出、材料、工具、成功率、金币和解锁条件；启动时生成的 `BuffInfo` 导入为 `buff` 实体；`Envir/NPCs`
 文本导入为 `script` 实体，保留规范化原文、页面、包含/插入/调用关系和 NPC 索引；`Maps` 与 `Envir/Previews`
 文件导入为 `asset` 元数据，只保存路径、类型、大小和 SHA256，不复制二进制内容。这些实体都不参与旧二进制重建；
-Control API 直接按 `jsonb` 关系提供地图拓扑、刷新点、传送门、NPC、NPC 脚本、怪物掉落和配方引用只读查询，
-并通过通用内容接口查询资源元数据。脚本实体同时保存由 `NpcScriptParser` 生成的 AST、校验问题和稳定编译哈希；
-地图资源由 `MapAssetParser` 解析格式、尺寸、可走/阻挡/门格。资源文件由配置的 `ControlApi:AssetRoot` 提供，
-下载前校验路径不越界、文件大小和 SHA256，但二进制仍不进入快照或 PostgreSQL。图库/音效等其他资源服务仍需后续管线。
+Control API 直接按 `jsonb` 关系提供地图拓扑、刷新点、传送门、NPC、NPC 脚本、怪物掉落和配方引用查询，
+并通过通用内容接口查询资源元数据。草稿地图的传送、安全区、矿区和激活坐标按数组整体替换并使用 `revision`
+乐观并发；刷新点和 NPC 以独立 `respawn`/`npc` 实体为事实来源，行级写入在同一事务内同步地图投影。
+脚本实体同时保存由 `NpcScriptParser` 生成的 AST、校验问题和稳定编译哈希；地图资源由 `MapAssetParser`
+解析格式、尺寸、可走/阻挡/门格，`/content/asset/{localIndex}/preview` 可按需返回降采样网格。资源文件由配置的
+`ControlApi:AssetRoot` 提供，下载前校验路径不越界、文件大小和 SHA256，但二进制仍不进入快照或 PostgreSQL。
+图库/音效等其他资源服务和 `.lib` 解析仍不在范围内。
 
 ### 4.3 发布与资源
 
@@ -244,6 +263,13 @@ ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会�
 重新验签目标产物后把当前版本标记为 `rolled_back`，把目标版本标记为 `active`，并记录
 `rolled_back_at`、`rolled_back_by`、`rollback_reason` 和 `rollback_target_id`。部分唯一索引
 保证最多一个 `active` 版本。详见 `adr/0006-content-drafts-and-release-rollback.md`。
+
+M2 的 `Crystal.ZoneServer` 可通过 `--content-release`、`--content-public-key` 和 `--content-key-id`
+启动期消费已签名发布。区服先校验 manifest、实体哈希和 ECDSA 签名，再在隔离临时目录重建
+`Server.MirDB`，物化 `drop`、`recipe`、`script`、`quest` 并链接/复制地图和运行文件，最后走现有
+`Settings.Load()`、`LoadDB()`、`Envir.Start()`。发布目录和源内容根保持只读；签名、哈希或物化失败时
+启动失败，不进入 ready。未指定发布参数时继续使用旧二进制库模式。热切换、Agent 和灰度留给 M3，
+详见 `adr/0011-zone-server-read-only-signed-content-release.md`。
 
 ### 4.4 区服与运营
 

@@ -5,7 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
-namespace Crystal.LegacyImporter;
+namespace Crystal.LegacyRuntime;
 
 public sealed class LegacyJsonDeserializer
 {

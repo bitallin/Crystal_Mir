@@ -24,6 +24,35 @@ public sealed record ContentEntityDto(
 
 public sealed record ContentTypeCountDto(string EntityType, long Count);
 
+public sealed record ContentReferenceOptionDto(
+    long LocalIndex,
+    string ContentKey,
+    string Label,
+    string? Summary);
+
+public sealed record ContentScriptValidationResponse(
+    bool Valid,
+    string Sha256,
+    int SizeBytes,
+    int LineCount,
+    string CompiledSha256,
+    IReadOnlyList<string> Pages,
+    IReadOnlyList<NpcScriptValidationIssueDto> Issues,
+    NpcScriptAst Ast);
+
+public sealed record ContentImportLineIssue(int Line, string Code, string Message);
+
+public sealed record ContentImportResultDto(
+    long DraftId,
+    string EntityType,
+    bool DryRun,
+    int TotalLines,
+    int ValidLines,
+    int AppliedLines,
+    bool Valid,
+    IReadOnlyList<ContentImportLineIssue> Errors,
+    IReadOnlyList<string> ContentKeys);
+
 public sealed record PagedResult<T>(
     long ImportRunId,
     string EntityType,

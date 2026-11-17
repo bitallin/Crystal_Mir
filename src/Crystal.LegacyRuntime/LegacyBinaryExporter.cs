@@ -4,7 +4,7 @@ using System.Text;
 using Crystal.Content;
 using Server.MirEnvir;
 
-namespace Crystal.LegacyImporter;
+namespace Crystal.LegacyRuntime;
 
 public sealed record LegacyDatabaseIndices(
     int Map,

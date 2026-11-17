@@ -115,8 +115,10 @@ curl -fsS --max-time 15 -X POST -H "Authorization: Bearer $ADMIN_ACCESS"   -H 'C
 python3 - "$WEB" "$BASE" "$ADMIN_PASSWORD" "$FINANCE_USER" "$FINANCE_PASSWORD" "$UI_USER" "$UI_PASSWORD" <<'PY'
 import hashlib
 import json
+import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -130,11 +132,20 @@ def is_expected_console_error(text):
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    page.on("dialog", lambda dialog: dialog.accept())
     errors = []
     failed = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     page.on("console", lambda msg: errors.append(f"{msg.type}:{msg.text}") if msg.type == "error" and not is_expected_console_error(msg.text) else None)
     page.on("requestfailed", lambda request: failed.append(f"{request.method} {request.url}: {request.failure}") if "ERR_ABORTED" not in str(request.failure) else None)
+    last_editor_request = {"entityType": None, "localIndex": None}
+    def capture_editor_request(request):
+        path = urllib.parse.urlparse(request.url).path
+        match = re.search(r"/api/v1/drafts/\d+/content/([^/]+)/(\d+)$", path)
+        if match:
+            last_editor_request["entityType"] = match.group(1)
+            last_editor_request["localIndex"] = int(match.group(2))
+    page.on("request", capture_editor_request)
 
     page.goto(login_url, wait_until="networkidle")
     page.fill('input[name="username"]', "admin")
@@ -159,10 +170,26 @@ with sync_playwright() as playwright:
         if token:
             request.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(request, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = response.read().decode("utf-8")
+            return json.loads(payload) if payload else None
+
+    def open_first_draft_editor(route, type_id, entity_type, query=None):
+        page.goto(f"{web}/?api={api}#/{route}", wait_until="networkidle")
+        page.wait_for_selector("#content-table tbody tr.content-row", timeout=20000)
+        if query is not None:
+            page.fill(f"#content-search-{type_id}", query)
+            page.wait_for_timeout(1200)
+            page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+        last_editor_request["entityType"] = None
+        last_editor_request["localIndex"] = None
+        page.locator("#content-table tbody tr.content-row").first.click()
+        page.wait_for_selector(f'#content-editor[data-editor-entity-type="{entity_type}"] .js-content-editor', timeout=15000)
+        assert last_editor_request["entityType"] == entity_type, last_editor_request
+        assert last_editor_request["localIndex"] is not None, last_editor_request
+        return last_editor_request["localIndex"]
 
     page.goto(f"{web}/?api={api}#/content-overview", wait_until="networkidle")
-    page.wait_for_function("document.querySelector('.main-content').innerText.includes('9,797')", timeout=15000)
+    page.wait_for_function("document.querySelector('.main-content').innerText.includes('10,160')", timeout=15000)
     overview_text = page.locator(".main-content").inner_text()
     assert "1,628" in overview_text, overview_text[:900]
     assert "批次 #" in overview_text, overview_text[:900]
@@ -431,6 +458,216 @@ with sync_playwright() as playwright:
     map_validation_text = page.locator("#content-editor [data-editor-validation]").inner_text()
     assert "通过" in map_validation_text, map_validation_text[:1200]
 
+    page.click('[data-action="close-drawer"]')
+    relation_map_source = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/1", token=admin_token)["data"]
+    relation_map_source["Title"] = f"UIRelationMap{draft_ui_id}"
+    relation_map_source["FileName"] = "0"
+    for relation_property in ["Movements", "SafeZones", "MineZones", "ActiveCoords", "Respawns", "NPCs"]:
+        relation_map_source[relation_property] = []
+    created_relation_map = api_request("POST", f"/api/v1/drafts/{draft_ui_id}/content/map", {
+        "schemaVersion": 1,
+        "data": relation_map_source,
+        "reason": "Web UI map relation fixture"
+    }, admin_token)
+    relation_map_index = created_relation_map["localIndex"]
+    page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.fill("#content-search-maps", relation_map_source["Title"])
+    page.wait_for_function(
+        "title => document.querySelector('#content-table tbody')?.innerText.includes(title)",
+        arg=relation_map_source["Title"],
+        timeout=15000)
+    page.locator("#content-table tbody tr.content-row", has_text=relation_map_source["Title"]).first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+    page.wait_for_function("document.querySelector('#content-editor [data-editor-map-relations]')?.innerText.toLowerCase().includes('revision 1')", timeout=15000)
+
+    def map_group(group):
+        locator = page.locator(f'[data-map-relation-group="{group}"]')
+        if locator.count():
+            locator.evaluate("element => element.open = true")
+        return locator
+
+    safe_group = map_group("safezones")
+    safe_group.locator('[data-action="editor-relation-row-add"]').click()
+    safe_row = safe_group.locator(".relation-edit-rows [data-map-relation-row]").last
+    safe_row.locator('[data-rel-field="Location.x"]').fill("1")
+    safe_row.locator('[data-rel-field="Location.y"]').fill("1")
+    safe_row.locator('[data-rel-field="Size"]').fill("3")
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/safezones" in response.url and response.request.method == "PUT") as response_info:
+        safe_group.locator('[data-action="editor-relation-group-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_after_safe = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    assert any(zone["Location"] == {"x": 1, "y": 1} and zone["Size"] == 3 for zone in relations_after_safe["safeZones"]), relations_after_safe["safeZones"]
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_after_safe["revision"],
+        timeout=15000)
+
+    mine_group = map_group("minezones")
+    mine_group.locator('[data-action="editor-relation-row-add"]').click()
+    mine_row = mine_group.locator(".relation-edit-rows [data-map-relation-row]").last
+    mine_row.locator('[data-rel-field="Location.x"]').fill("2")
+    mine_row.locator('[data-rel-field="Location.y"]').fill("2")
+    mine_row.locator('[data-rel-field="Size"]').fill("4")
+    mine_row.locator('[data-rel-field="Mine"]').fill("1")
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/minezones" in response.url and response.request.method == "PUT") as response_info:
+        mine_group.locator('[data-action="editor-relation-group-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_after_mine = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    assert any(zone["Location"] == {"x": 2, "y": 2} and zone["Size"] == 4 and zone["Mine"] == 1 for zone in relations_after_mine["mineZones"]), relations_after_mine["mineZones"]
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_after_mine["revision"],
+        timeout=15000)
+
+    active_group = map_group("activecoords")
+    active_group.locator('[data-action="editor-relation-row-add"]').click()
+    active_row = active_group.locator(".relation-edit-rows [data-map-relation-row]").last
+    active_row.locator('[data-rel-field="x"]').fill("3")
+    active_row.locator('[data-rel-field="y"]').fill("3")
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/activecoords" in response.url and response.request.method == "PUT") as response_info:
+        active_group.locator('[data-action="editor-relation-group-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_after_active = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    assert {"x": 3, "y": 3} in relations_after_active["activeCoords"], relations_after_active["activeCoords"]
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_after_active["revision"],
+        timeout=15000)
+
+    respawn_group = page.locator('[data-relation-entity-group="respawn"]')
+    respawn_group.evaluate("element => element.open = true")
+    respawn_group.locator('[data-action="editor-relation-entity-add"]').click()
+    new_respawn_row = respawn_group.locator('[data-relation-entity-list] > [data-relation-entity-row]').first
+    monster_select = new_respawn_row.locator('[data-rel-field="MonsterIndex"]')
+    monster_values = monster_select.locator("option").evaluate_all(
+        "options => options.map(option => option.value)")
+    monster_value = next(value for value in monster_values if value)
+    monster_select.select_option(value=monster_value)
+    new_respawn_row.locator('[data-rel-field="Location.x"]').fill("4")
+    new_respawn_row.locator('[data-rel-field="Location.y"]').fill("4")
+    new_respawn_row.locator('[data-rel-field="Count"]').fill("2")
+    with page.expect_response(lambda response: response.url.endswith(f"/content/map/{relation_map_index}/respawns") and response.request.method == "POST") as response_info:
+        new_respawn_row.locator('[data-action="editor-relation-entity-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_with_respawn = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    created_respawn = next(item for item in relations_with_respawn["respawns"]
+                           if item["data"].get("Location") == {"x": 4, "y": 4} and item["data"].get("Count") == 2)
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_with_respawn["revision"],
+        timeout=15000)
+
+    respawn_group.evaluate("element => element.open = true")
+    existing_respawn = relations_with_respawn["respawns"][0]
+    respawn_row = respawn_group.locator(f'[data-relation-entity-row][data-index="{existing_respawn["localIndex"]}"]')
+    respawn_row.wait_for(state="visible", timeout=15000)
+    respawn_count = int(existing_respawn["data"].get("Count", 1))
+    respawn_row.locator('[data-rel-field="Count"]').fill(str(respawn_count + 1))
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/respawns/{existing_respawn['localIndex']}" in response.url and response.request.method == "PUT") as response_info:
+        respawn_row.locator('[data-action="editor-relation-entity-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    updated_respawn = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/respawn/{existing_respawn['localIndex']}", token=admin_token)
+    assert updated_respawn["data"]["Count"] == respawn_count + 1 and updated_respawn["revision"] == 2, updated_respawn
+    relations_after_respawn_update = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_after_respawn_update["revision"],
+        timeout=15000)
+
+    respawn_group.evaluate("element => element.open = true")
+    respawn_row = respawn_group.locator(f'[data-relation-entity-row][data-index="{existing_respawn["localIndex"]}"]')
+    respawn_row.wait_for(state="visible", timeout=15000)
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/respawns/{existing_respawn['localIndex']}" in response.url and response.request.method == "DELETE") as response_info:
+        respawn_row.locator('[data-action="editor-relation-entity-delete"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_after_respawn_delete = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    assert all(item["localIndex"] != existing_respawn["localIndex"] for item in relations_after_respawn_delete["respawns"])
+    page.wait_for_function(
+        "index => !document.querySelector(`[data-relation-entity-row][data-index=\"${index}\"]`)",
+        arg=existing_respawn["localIndex"],
+        timeout=15000)
+
+    npc_group = page.locator('[data-relation-entity-group="npc"]')
+    npc_group.evaluate("element => element.open = true")
+    npc_group.locator('[data-action="editor-relation-entity-add"]').click()
+    new_npc_row = npc_group.locator('[data-relation-entity-list] > [data-relation-entity-row]').first
+    npc_relation_name = f"UIRelationNpc{time.time_ns()}"
+    new_npc_row.locator('[data-rel-field="Name"]').fill(npc_relation_name)
+    script_select = new_npc_row.locator('[data-rel-field="FileName"]')
+    script_values = script_select.locator("option").evaluate_all(
+        "options => options.map(option => option.value)")
+    script_select.select_option(value=next(value for value in script_values if value))
+    new_npc_row.locator('[data-rel-field="Location.x"]').fill("5")
+    new_npc_row.locator('[data-rel-field="Location.y"]').fill("5")
+    with page.expect_response(lambda response: response.url.endswith(f"/content/map/{relation_map_index}/npcs") and response.request.method == "POST") as response_info:
+        new_npc_row.locator('[data-action="editor-relation-entity-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_with_npc = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    created_npc = next(item for item in relations_with_npc["npcs"] if item["data"].get("Name") == npc_relation_name)
+    page.wait_for_function(
+        "args => { const [revision, index] = args; return document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase()) && document.querySelector(`[data-relation-entity-row][data-index=\"${index}\"]`); }",
+        arg=[relations_with_npc["revision"], created_npc["localIndex"]],
+        timeout=15000)
+
+    npc_group.evaluate("element => element.open = true")
+    npc_row = npc_group.locator(f'[data-relation-entity-row][data-index="{created_npc["localIndex"]}"]')
+    assert npc_row.count() == 1, created_npc
+    npc_row.locator('[data-rel-field="Location.x"]').fill("6")
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/npcs/{created_npc['localIndex']}" in response.url and response.request.method == "PUT") as response_info:
+        npc_row.locator('[data-action="editor-relation-entity-save"]').click()
+    assert response_info.value.ok, response_info.value.status
+    updated_npc_relation = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/npc/{created_npc['localIndex']}", token=admin_token)
+    assert updated_npc_relation["data"]["Location"] == {"x": 6, "y": 5}, updated_npc_relation
+    relations_after_npc_update = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=relations_after_npc_update["revision"],
+        timeout=15000)
+
+    npc_group.evaluate("element => element.open = true")
+    npc_row = npc_group.locator(f'[data-relation-entity-row][data-index="{created_npc["localIndex"]}"]')
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/npcs/{created_npc['localIndex']}" in response.url and response.request.method == "DELETE") as response_info:
+        npc_row.locator('[data-action="editor-relation-entity-delete"]').click()
+    assert response_info.value.ok, response_info.value.status
+    relations_after_npc_delete = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    assert all(item["localIndex"] != created_npc["localIndex"] for item in relations_after_npc_delete["npcs"])
+    page.wait_for_function(
+        "index => !document.querySelector(`[data-relation-entity-row][data-index=\"${index}\"]`)",
+        arg=created_npc["localIndex"],
+        timeout=15000)
+
+    stale_relations = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/relations", token=admin_token)
+    stale_safe_zones = list(stale_relations["safeZones"]) + [{"Location": {"x": 9, "y": 9}, "Size": 1, "StartPoint": False}]
+    advanced_map = api_request("PUT", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}/safezones", {
+        "expectedRevision": stale_relations["revision"],
+        "items": stale_safe_zones,
+        "reason": "Web UI map relation stale revision setup"
+    }, admin_token)
+    with page.expect_response(lambda response: f"/content/map/{relation_map_index}/safezones" in response.url and response.request.method == "PUT") as response_info:
+        safe_group = map_group("safezones")
+        safe_group.locator('[data-action="editor-relation-group-save"]').click()
+    assert response_info.value.status == 409, response_info.value.status
+    page.wait_for_function(
+        "revision => document.querySelector('[data-editor-map-relations]')?.innerText.toLowerCase().includes(`revision ${revision}`.toLowerCase())",
+        arg=advanced_map["revision"],
+        timeout=15000)
+
+    page.click('[data-action="close-drawer"]')
+    relation_map_current = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}", token=admin_token)
+    api_request("DELETE", f"/api/v1/drafts/{draft_ui_id}/content/map/{relation_map_index}", {
+        "expectedRevision": relation_map_current["revision"],
+        "reason": "Web UI map relation fixture cleanup"
+    }, admin_token)
+    page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.fill("#content-search-maps", "Bichon")
+    page.wait_for_function(
+        "() => document.querySelector('#content-table tbody')?.innerText.includes('Bichon')",
+        timeout=15000)
+    page.locator("#content-table tbody tr.content-row", has_text="Bichon").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+
     concurrent_map = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/1", token=admin_token)
     concurrent_map_data = concurrent_map["data"]
     concurrent_map_data["Title"] = "BichonProvinceConcurrent"
@@ -473,7 +710,7 @@ with sync_playwright() as playwright:
     page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('UITempMap')", timeout=15000)
     page.locator("#content-table tbody tr.content-row").first.click()
     page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
-    page.wait_for_function("document.querySelector('#content-editor [data-editor-map-relations]')?.innerText.includes('基础批次没有该地图的关系数据')", timeout=15000)
+    page.wait_for_function("document.querySelector('#content-editor [data-editor-map-relations]')?.innerText.includes('传送与出入口')", timeout=15000)
     assert "地图关系读取失败" not in page.locator("#content-editor").inner_text()
     page.click('#content-editor [data-action="editor-delete-request"]')
     page.wait_for_selector('#content-editor [data-action="editor-delete-confirm"]', timeout=5000)
@@ -481,14 +718,152 @@ with sync_playwright() as playwright:
     page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempMap')", timeout=15000)
 
+    editor_stamp = str(time.time_ns())
+    npc_index = open_first_draft_editor("content/npcs", "npcs", "npc")
+    npc_name = f"UINpc{editor_stamp}"
+    page.fill('#content-editor [data-edit-path="Name"]', npc_name)
+    script_search = page.locator('#content-editor .editor-reference-picker:has([data-edit-path="FileName"]) [data-reference-search]')
+    script_search.fill("Transport")
+    page.wait_for_timeout(1000)
+    npc_script_select = page.locator('#content-editor [data-edit-path="FileName"]')
+    assert npc_script_select.locator("option").count() > 1
+    npc_script = npc_script_select.locator("option").nth(1).get_attribute("value")
+    npc_script_select.select_option(index=1)
+    page.fill("#editor-reason", "Web UI NPC editor")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    edited_npc = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/npc/{npc_index}", token=admin_token)
+    assert edited_npc["revision"] == 2, edited_npc
+    assert edited_npc["data"]["Name"] == npc_name, edited_npc["data"]
+    assert edited_npc["data"]["FileName"] == npc_script, edited_npc["data"]
+
+    drop_index = open_first_draft_editor("content/drops", "drops", "drop")
+    page.fill('#content-editor [data-edit-path="monsterName"]', f"UIDrop{editor_stamp}")
+    page.locator('[data-drop-table="drops"] > [data-action="editor-add-drop"]').click()
+    drop_row = page.locator('[data-drop-table="drops"] > .editor-drop-rows > [data-drop-row]').last
+    drop_row.locator('[data-drop-mode]').select_option("group")
+    drop_row.locator('[data-drop-field="Chance"]').fill("100")
+    drop_row.locator('[data-drop-pane="group"] [data-action="editor-add-drop"]').click()
+    child_drop = drop_row.locator('[data-drop-group-rows] > [data-drop-row]').last
+    child_drop.locator('[data-reference-search]').fill("Spirit")
+    page.wait_for_timeout(1000)
+    assert child_drop.locator('[data-drop-item] option').count() > 1
+    child_drop.locator('[data-drop-item]').select_option(index=1)
+    child_drop.locator('[data-drop-field="Chance"]').fill("50")
+    page.fill("#editor-reason", "Web UI nested drop group")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    edited_drop = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/drop/{drop_index}", token=admin_token)
+    assert edited_drop["revision"] == 2, edited_drop
+    assert edited_drop["data"]["monsterName"] == f"UIDrop{editor_stamp}", edited_drop["data"]
+    nested_drop = edited_drop["data"]["drops"][-1]
+    assert nested_drop["GroupedDrop"]["items"][0]["Chance"] == 50, nested_drop
+    assert nested_drop["GroupedDrop"]["items"][0]["Item"]["$ref"] == "item", nested_drop
+
+    magic_index = open_first_draft_editor("content/skills", "skills", "magic", query="FireBall")
+    magic_name = f"UIMagic{editor_stamp}"
+    page.fill('#content-editor [data-edit-path="Name"]', magic_name)
+    assert page.locator('#content-editor [data-edit-path="MultiplierBase"]').count() == 1
+    page.fill("#editor-reason", "Web UI magic editor")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    edited_magic = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/magic/{magic_index}", token=admin_token)
+    assert edited_magic["revision"] == 2, edited_magic
+    assert edited_magic["data"]["Name"] == magic_name, edited_magic["data"]
+    assert edited_magic["data"]["Spell"] == "FireBall", edited_magic["data"]
+
+    quest_index = open_first_draft_editor("content/quests", "quests", "quest")
+    quest_name = f"UIQuest{editor_stamp}"
+    page.fill('#content-editor [data-edit-path="Name"]', quest_name)
+    assert page.locator('#content-editor [data-edit-path="Description"]').count() == 1
+    page.fill("#editor-reason", "Web UI quest editor")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    edited_quest = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/quest/{quest_index}", token=admin_token)
+    assert edited_quest["revision"] == 2, edited_quest
+    assert edited_quest["data"]["Name"] == quest_name, edited_quest["data"]
+
+    shop_index = open_first_draft_editor("content/shops", "shops", "gameshop")
+    shop_category = f"UIShop{editor_stamp}"
+    page.fill('#content-editor [data-edit-path="Category"]', shop_category)
+    item_search = page.locator('#content-editor .editor-reference-picker:has([data-edit-path="ItemIndex"]) [data-reference-search]')
+    item_search.fill("Spirit")
+    page.wait_for_timeout(1000)
+    shop_item_select = page.locator('#content-editor [data-edit-path="ItemIndex"]')
+    assert shop_item_select.locator("option").count() > 1
+    shop_item_index = int(shop_item_select.locator("option").nth(1).get_attribute("value"))
+    shop_item_select.select_option(index=1)
+    page.fill("#editor-reason", "Web UI game shop editor")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    edited_shop = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/gameshop/{shop_index}", token=admin_token)
+    assert edited_shop["revision"] == 2, edited_shop
+    assert edited_shop["data"]["Category"] == shop_category, edited_shop["data"]
+    assert edited_shop["data"]["ItemIndex"] == shop_item_index, edited_shop["data"]
+    assert edited_shop["data"]["Info"]["index"] == shop_item_index, edited_shop["data"]
+
+    page.goto(f"{web}/?api={api}#/content/items", wait_until="networkidle")
+    page.wait_for_selector("#content-search-items", timeout=15000)
+    page.fill("#content-search-items", "")
+    page.wait_for_timeout(800)
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    import_source = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/1", token=admin_token)
+    imported_item_index = 9_100_000 + draft_ui_id
+    imported_item_name = f"M2WebJsonlItem{draft_ui_id}"
+    imported_item_data = json.loads(json.dumps(import_source["data"]))
+    imported_item_data["Index"] = imported_item_index
+    imported_item_data["Name"] = imported_item_name
+    imported_item_line = json.dumps({
+        "entityType": "item",
+        "localIndex": imported_item_index,
+        "contentKey": f"item.{imported_item_index}",
+        "schemaVersion": 1,
+        "data": imported_item_data
+    }, ensure_ascii=False, separators=(",", ":"))
+    page.click('[data-action="open-content-import"][data-entity-type="item"]')
+    page.wait_for_selector("#content-import-lines", timeout=5000)
+    page.fill("#content-import-lines", imported_item_line)
+    page.fill("#content-import-reason", "Web UI JSONL dry-run")
+    with page.expect_response(lambda response: "/content/item/import" in response.url and "dryRun=true" in response.url and response.request.method == "POST") as response_info:
+        page.click('[data-action="content-import-dryrun"]')
+    assert response_info.value.ok, response_info.value.status
+    page.wait_for_function("document.querySelector('#content-import-result')?.innerText.toLowerCase().includes('dry-run 结果') && document.querySelector('#content-import-result')?.innerText.includes('通过')", timeout=15000)
+    page.fill("#content-import-reason", "Web UI JSONL apply")
+    with page.expect_response(lambda response: "/content/item/import" in response.url and "dryRun=false" in response.url and response.request.method == "POST") as response_info:
+        page.click('[data-action="content-import-apply"]')
+    assert response_info.value.ok, response_info.value.status
+    page.wait_for_function("!document.querySelector('.modal')", timeout=30000)
+    page.fill("#content-search-items", imported_item_name)
+    page.wait_for_timeout(1200)
+    page.wait_for_function(
+        "name => document.querySelector('#content-table tbody')?.innerText.includes(name)",
+        arg=imported_item_name,
+        timeout=15000)
+    imported_entity = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/item/{imported_item_index}", token=admin_token)
+    assert imported_entity["data"]["Name"] == imported_item_name, imported_entity
+
+    with page.expect_download(timeout=30000) as download_info:
+        page.click('[data-action="export-content"][data-entity-type="item"]')
+    export_download = download_info.value
+    assert export_download.suggested_filename == "item.jsonl", export_download.suggested_filename
+    exported_text = Path(export_download.path()).read_text(encoding="utf-8")
+    exported_lines = [json.loads(line) for line in exported_text.splitlines() if line.strip()]
+    assert exported_lines and exported_lines == sorted(exported_lines, key=lambda row: row["localIndex"])
+    assert any(row["contentKey"] == f"item.{imported_item_index}" and row["data"]["Name"] == imported_item_name for row in exported_lines)
+    api_request("DELETE", f"/api/v1/drafts/{draft_ui_id}/content/item/{imported_item_index}", {
+        "expectedRevision": imported_entity["revision"],
+        "reason": "Web UI JSONL cleanup"
+    }, admin_token)
+
     page.goto(f"{web}/?api={api}#/content/recipes", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
     recipe_table_text = page.locator("#content-table tbody").inner_text()
     assert "GreenPoison" in recipe_table_text, recipe_table_text[:1200]
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('配方产出与材料')", timeout=15000)
-    recipe_drawer_text = page.locator("#live-drawer-relations").inner_text()
-    assert "item.710" in recipe_drawer_text and "Taoist" in recipe_drawer_text, recipe_drawer_text[:1200]
+    page.wait_for_selector('#content-editor[data-editor-entity-type="recipe"] .js-content-editor', timeout=15000)
+    assert page.locator('#content-editor [data-edit-path="output.itemIndex"]').count() == 1
+    recipe_editor_text = page.locator("#content-editor").inner_text()
+    assert "产出与材料" in recipe_editor_text and "合成条件" in recipe_editor_text, recipe_editor_text[:1200]
     page.click('[data-action="close-drawer"]')
 
     page.goto(f"{web}/?api={api}#/content/buffs", wait_until="networkidle")
@@ -498,14 +873,18 @@ with sync_playwright() as playwright:
 
     page.goto(f"{web}/?api={api}#/content/npc-scripts", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.fill("#content-search-npc-scripts", "Transport")
+    page.wait_for_timeout(1200)
     script_table_text = page.locator("#content-table tbody").inner_text()
     assert "BorderVillage/Transport" in script_table_text, script_table_text[:1200]
     page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('AST 与编译校验')", timeout=15000)
-    script_drawer_text = page.locator(".drawer").inner_text()
-    assert "script.BichonProvince.BorderVillage.Transport" in script_drawer_text and "@tele" in script_drawer_text, script_drawer_text[:1200]
-    assert "11 / 26" in script_drawer_text and "0 / 1" in script_drawer_text, script_drawer_text[:1200]
-    assert "c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff" in script_drawer_text, script_drawer_text[:1200]
+    page.wait_for_selector('#content-editor[data-editor-entity-type="script"] .js-content-editor', timeout=15000)
+    assert "[@MAIN]" in page.locator('#content-editor [data-edit-path="source"]').input_value()
+    page.click('#content-editor [data-action="editor-script-validate"]')
+    page.wait_for_selector("#content-editor [data-editor-script-validation]", timeout=30000)
+    script_editor_text = page.locator("#content-editor [data-editor-script-validation]").inner_text()
+    assert "源码 SHA256" in script_editor_text and "编译哈希" in script_editor_text, script_editor_text[:1200]
+    assert "c0e3f43676a6d5bd978d57c2586636efa404e17fd84014102a3d7d377ecdf8ff" in script_editor_text, script_editor_text[:1200]
     page.click('[data-action="close-drawer"]')
 
     page.goto(f"{web}/?api={api}#/content/resources", wait_until="networkidle")
@@ -517,6 +896,11 @@ with sync_playwright() as playwright:
     asset_drawer_text = page.locator(".drawer").inner_text()
     assert "10 × 10 / 99 / 1" in asset_drawer_text, asset_drawer_text[:1200]
     assert "3ab00f38634c7c9c839a3085819a1807b14d0e00841a833a36e147c97aff237f" in asset_drawer_text, asset_drawer_text[:1200]
+    page.click('#live-drawer-relations [data-action="preview-asset"]')
+    page.wait_for_selector("#asset-inline-preview .asset-map-grid", timeout=15000)
+    asset_preview_text = page.locator("#asset-inline-preview").inner_text()
+    assert "10 × 10" in asset_preview_text and "可走" in asset_preview_text and "阻挡" in asset_preview_text, asset_preview_text[:1200]
+    assert "." in page.locator("#asset-inline-preview .asset-map-grid").inner_text(), asset_preview_text[:1200]
     with page.expect_download(timeout=10000) as download_info:
         page.click('#live-drawer-relations [data-action="download-asset"]')
     download = download_info.value
@@ -792,10 +1176,29 @@ with sync_playwright() as playwright:
     assert auditor_page.locator("#content-editor").count() == 0
     assert auditor_page.locator('[data-action="editor-save"]').count() == 0
 
+    for route, entity_type in [
+        ("content/npcs", "npc"),
+        ("content/drops", "drop"),
+        ("content/skills", "magic"),
+        ("content/quests", "quest"),
+        ("content/shops", "gameshop"),
+        ("content/recipes", "recipe"),
+        ("content/npc-scripts", "script"),
+    ]:
+        auditor_page.goto(f"{web}/?api={api}#/{route}", wait_until="networkidle")
+        auditor_page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+        assert auditor_page.locator(f'[data-action="open-content-editor-new"][data-entity-type="{entity_type}"]').count() == 0, route
+        auditor_page.locator("#content-table tbody tr.content-row").first.click()
+        auditor_page.wait_for_selector("#live-drawer-relations, .drawer", timeout=10000)
+        assert auditor_page.locator("#content-editor").count() == 0, route
+        assert auditor_page.locator('[data-action="editor-save"]').count() == 0, route
+        if auditor_page.locator('[data-action="close-drawer"]').count():
+            auditor_page.click('[data-action="close-drawer"]')
+
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
     assert not auditor_errors, auditor_errors
-    print("Control Web integration verified: login, live overview, import runs, item/monster/map draft editors, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, ten draft editors, content query/search, map relation CRUD/stale recovery, JSONL dry-run/apply/export, live relations, script AST validation, map preview, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY
