@@ -15,12 +15,14 @@ require_file() {
 
 require_file src/Crystal.GameCore/Crystal.GameCore.csproj
 require_file src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj
+require_file src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj
 require_file src/Crystal.Control.Api/Crystal.Control.Api.csproj
 require_file src/Crystal.Content/Crystal.Content.csproj
 require_file src/Crystal.LegacyRuntime/Crystal.LegacyRuntime.csproj
 
 if rg -n 'ProjectReference[^>]*(Server\.Library|Server\.MirForms|Crystal\.GameCore|Crystal\.ZoneServer|Crystal\.LegacyRuntime)' \
-  src/Crystal.Control.Api/Crystal.Control.Api.csproj src/Crystal.Content/Crystal.Content.csproj >/dev/null; then
+  src/Crystal.Control.Api/Crystal.Control.Api.csproj src/Crystal.Content/Crystal.Content.csproj \
+  src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj >/dev/null; then
   fail "control-plane or content project references GPL game projects"
 fi
 
@@ -36,6 +38,11 @@ fi
 
 if rg -n 'ProjectReference' src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj >/dev/null; then
   fail "Agent contracts must remain dependency-free"
+fi
+
+if rg -n 'ProjectReference' src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj | \
+  rg -v 'Crystal\.Agent\.Contracts/Crystal\.Agent\.Contracts\.csproj|Crystal\.Content/Crystal\.Content\.csproj' >/dev/null; then
+  fail "ZoneAgent may only reference Agent Contracts and Content"
 fi
 
 if ! rg -q 'ProjectReference Include="../../Shared/Shared.csproj"' src/Crystal.GameCore/Crystal.GameCore.csproj; then

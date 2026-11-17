@@ -406,6 +406,25 @@ public sealed partial class ContentReleaseService
         return await File.ReadAllTextAsync(path, cancellationToken);
     }
 
+    public async Task<ReleaseArtifactInfo> GetArtifactAsync(
+        long id,
+        CancellationToken cancellationToken)
+    {
+        var release = await GetAsync(id, cancellationToken);
+        if (release.Status is not ("published" or "active"))
+        {
+            throw new ReleaseConflictException(
+                $"Release {id} is '{release.Status}', only published or active releases can be staged.");
+        }
+
+        await EnsureSignatureAsync(release, cancellationToken);
+        return new ReleaseArtifactInfo(
+            release.Id,
+            release.Version,
+            release.ContentHash,
+            GetReleaseDirectory(release.Version));
+    }
+
     private ContentSnapshotBuild BuildSnapshot(
         string source,
         string? sourceHash,

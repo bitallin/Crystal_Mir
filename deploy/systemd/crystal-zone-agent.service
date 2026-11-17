@@ -1,0 +1,26 @@
+[Unit]
+Description=Crystal Zone Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=crystal
+Group=crystal
+WorkingDirectory=/var/lib/crystal
+EnvironmentFile=-/etc/crystal/zone-agent.env
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+ExecStart=/opt/crystal/agent/Crystal.ZoneAgent
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=60
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/crystal
+
+[Install]
+WantedBy=multi-user.target

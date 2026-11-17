@@ -264,18 +264,54 @@ ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会�
 `rolled_back_at`、`rolled_back_by`、`rollback_reason` 和 `rollback_target_id`。部分唯一索引
 保证最多一个 `active` 版本。详见 `adr/0006-content-drafts-and-release-rollback.md`。
 
-M2 的 `Crystal.ZoneServer` 可通过 `--content-release`、`--content-public-key` 和 `--content-key-id`
+`Crystal.ZoneServer` 可通过 `--content-release`、`--content-public-key` 和 `--content-key-id`
 启动期消费已签名发布。区服先校验 manifest、实体哈希和 ECDSA 签名，再在隔离临时目录重建
 `Server.MirDB`，物化 `drop`、`recipe`、`script`、`quest` 并链接/复制地图和运行文件，最后走现有
 `Settings.Load()`、`LoadDB()`、`Envir.Start()`。发布目录和源内容根保持只读；签名、哈希或物化失败时
-启动失败，不进入 ready。未指定发布参数时继续使用旧二进制库模式。热切换、Agent 和灰度留给 M3，
-详见 `adr/0011-zone-server-read-only-signed-content-release.md`。
+启动失败，不进入 ready。未指定发布参数时继续使用旧二进制库模式。
+
+M3 新增独立 `Crystal.ZoneAgent` 消费 `GET /releases/{id}/artifact`：下载 ZIP，拒绝路径穿越，校验实体/内容哈希和
+签名，写入本地不可变 staging，再通过 SIGTERM、`--ready-file` 和子进程 PID 完成进程级激活或回滚。区服激活只更新
+`zone.active_release_id` 投影，不修改 `content_release.status`；详见
+`adr/0011-zone-server-read-only-signed-content-release.md` 和
+`adr/0012-zone-agent-process-level-content-switching.md`。
 
 ### 4.4 区服与运营
 
+已实现（`db/migrations/0004_zone_agent_control.sql`）：
+
 ```text
-zone(id, name, template_id, status, host, game_port, api_port,
-     content_release_id, capacity, opened_at, closed_at)
+zone(
+  zone_id text primary key,
+  zone_name, agent_id, agent_version,
+  protocol_version, content_schema_version,
+  status,                         -- online / degraded / offline(projection)
+  started_at, last_heartbeat_at,
+  active_release_id, active_content_hash,
+  staged_release_id, staged_content_hash,
+  player_count, tick_p95_ms, error_rate,
+  capabilities text[], metadata jsonb,
+  created_at, updated_at
+)
+
+zone_command(
+  command_id uuid primary key,
+  zone_id text references zone(zone_id),
+  command_type text,              -- content.stage/activate/rollback/reload/zone.stop
+  release_id bigint,
+  payload jsonb,
+  status text,                    -- queued/delivered/succeeded/failed/rejected/expired
+  attempts int,
+  issued_at, available_at, expires_at,
+  claimed_at, lease_expires_at, completed_at,
+  error, result_payload jsonb
+)
+```
+
+`zone` 是区服运行投影，不是开区模板或编排事实源。`zone_command` 通过部分唯一索引限制每个区服同时只有一个未完成的
+activate/rollback/reload/stop 命令；租约到期可重投，终态结果幂等。以下开区/合区表仍属于后续里程碑，尚未建表：
+
+```text
 zone_template(id, name, config jsonb)
 operation_job(id, type, status, payload jsonb, result jsonb,
               created_by, started_at, finished_at)

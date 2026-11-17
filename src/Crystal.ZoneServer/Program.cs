@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Crystal.LegacyRuntime;
 using log4net;
 using log4net.Config;
@@ -45,6 +46,7 @@ internal static class Program
 
         Directory.SetCurrentDirectory(options.ContentRoot);
         ConfigureLogging(options);
+        DeleteReadyFile(options.ReadyFilePath);
 
         LegacyContentReleaseWorkspace? releaseWorkspace = null;
         try
@@ -104,6 +106,7 @@ internal static class Program
                 $"Zone ready: maps={Envir.Main.MapInfoList.Count}, mapsLoaded={Envir.Main.MapList.Count}, " +
                 $"items={Envir.Main.ItemInfoList.Count}, monsters={Envir.Main.MonsterInfoList.Count}, " +
                 $"npcs={Envir.Main.NPCInfoList.Count}, quests={Envir.Main.QuestInfoList.Count}");
+            WriteReadyFile(options, releaseWorkspace);
 
             return await WaitForShutdownAsync(shutdown.Token);
         }
@@ -119,7 +122,71 @@ internal static class Program
         finally
         {
             StopZone();
+            DeleteReadyFile(options.ReadyFilePath);
             releaseWorkspace?.Dispose();
+        }
+    }
+
+    private static void WriteReadyFile(
+        ZoneHostOptions options,
+        LegacyContentReleaseWorkspace? releaseWorkspace)
+    {
+        if (string.IsNullOrWhiteSpace(options.ReadyFilePath)) return;
+
+        string path = Path.GetFullPath(options.ReadyFilePath);
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        string temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(
+                temporaryPath,
+                JsonSerializer.Serialize(new
+                {
+                    zoneId = GetString("CRYSTAL_ZONE_ID", "default"),
+                    pid = Environment.ProcessId,
+                    readyAt = DateTimeOffset.UtcNow,
+                    databasePath = Path.Combine(Environment.CurrentDirectory, "Server.MirDB"),
+                    contentRoot = options.ContentRoot,
+                    contentRelease = releaseWorkspace?.RootPath ?? options.ContentRelease,
+                    maps = Envir.Main.MapInfoList.Count,
+                    mapsLoaded = Envir.Main.MapList.Count,
+                    items = Envir.Main.ItemInfoList.Count,
+                    monsters = Envir.Main.MonsterInfoList.Count,
+                    npcs = Envir.Main.NPCInfoList.Count,
+                    quests = Envir.Main.QuestInfoList.Count
+                }) + "\n");
+            File.Move(temporaryPath, path, overwrite: true);
+            _log.Info($"Zone ready file written: {path}");
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void DeleteReadyFile(string? readyFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(readyFilePath)) return;
+
+        try
+        {
+            string path = Path.GetFullPath(readyFilePath);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Could not remove zone ready file: {readyFilePath}", ex);
         }
     }
 
@@ -320,6 +387,7 @@ internal static class Program
             "  --content-release <path>    Signed immutable content snapshot directory (release mode)\n" +
             "  --content-public-key <path> ECDSA P-256 public key used to verify the release signature\n" +
             "  --content-key-id <id>       Expected signing key id for the content release\n" +
+            "  --ready-file <path>         Write a JSON readiness file after the zone is ready\n" +
             "  --startup-timeout <seconds> Maximum time to wait for the zone to become ready (default: 300)\n" +
             "  --log-config <path>         Override log4net.config path\n" +
             "  --check                     Validate database and content file references, then exit\n" +
@@ -328,7 +396,8 @@ internal static class Program
             "  CRYSTAL_ZONE_HOME, CRYSTAL_ZONE_ID, CRYSTAL_ZONE_IP, CRYSTAL_ZONE_PORT,\n" +
             "  CRYSTAL_ZONE_STATUS_PORT, CRYSTAL_ZONE_MAX_USER, CRYSTAL_ZONE_MAX_IP,\n" +
             "  CRYSTAL_ZONE_THREADS, CRYSTAL_ZONE_SAVE_DELAY_MINUTES,\n" +
-            "  CRYSTAL_ZONE_CONTENT_RELEASE, CRYSTAL_ZONE_CONTENT_PUBLIC_KEY, CRYSTAL_ZONE_CONTENT_KEY_ID");
+            "  CRYSTAL_ZONE_CONTENT_RELEASE, CRYSTAL_ZONE_CONTENT_PUBLIC_KEY, CRYSTAL_ZONE_CONTENT_KEY_ID,\n" +
+            "  CRYSTAL_ZONE_READY_FILE");
     }
 }
 
@@ -342,6 +411,7 @@ internal sealed class ZoneHostOptions
     public string? ContentRelease { get; private init; }
     public string? ContentPublicKeyPath { get; private init; }
     public string? ContentKeyId { get; private init; }
+    public string? ReadyFilePath { get; private init; }
 
     public static ZoneHostOptions Parse(string[] args)
     {
@@ -353,6 +423,7 @@ internal sealed class ZoneHostOptions
         string? contentRelease = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_RELEASE")?.Trim();
         string? contentPublicKey = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_PUBLIC_KEY")?.Trim();
         string? contentKeyId = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_KEY_ID")?.Trim();
+        string? readyFile = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_READY_FILE")?.Trim();
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -379,6 +450,9 @@ internal sealed class ZoneHostOptions
                 case "--content-key-id":
                     contentKeyId = RequireValue(args, ref i, arg);
                     break;
+                case "--ready-file":
+                    readyFile = RequireValue(args, ref i, arg);
+                    break;
                 case "--startup-timeout":
                     timeoutSeconds = ParsePositiveInt(RequireValue(args, ref i, arg), arg);
                     break;
@@ -394,6 +468,8 @@ internal sealed class ZoneHostOptions
                         contentPublicKey = arg.Substring("--content-public-key=".Length);
                     else if (arg.StartsWith("--content-key-id=", StringComparison.Ordinal))
                         contentKeyId = arg.Substring("--content-key-id=".Length);
+                    else if (arg.StartsWith("--ready-file=", StringComparison.Ordinal))
+                        readyFile = arg.Substring("--ready-file=".Length);
                     else if (arg.StartsWith("--startup-timeout=", StringComparison.Ordinal))
                         timeoutSeconds = ParsePositiveInt(arg.Substring("--startup-timeout=".Length), "--startup-timeout");
                     else if (arg.StartsWith("--log-config=", StringComparison.Ordinal))
@@ -436,7 +512,8 @@ internal sealed class ZoneHostOptions
             ShowHelp = showHelp,
             ContentRelease = string.IsNullOrWhiteSpace(contentRelease) ? null : Path.GetFullPath(contentRelease),
             ContentPublicKeyPath = string.IsNullOrWhiteSpace(contentPublicKey) ? null : Path.GetFullPath(contentPublicKey),
-            ContentKeyId = string.IsNullOrWhiteSpace(contentKeyId) ? null : contentKeyId
+            ContentKeyId = string.IsNullOrWhiteSpace(contentKeyId) ? null : contentKeyId,
+            ReadyFilePath = string.IsNullOrWhiteSpace(readyFile) ? null : Path.GetFullPath(readyFile)
         };
     }
 

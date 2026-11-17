@@ -1,3 +1,6 @@
+using System.IO.Compression;
+using System.Text.Json;
+using Crystal.Content;
 using Crystal.Control.Api.Audit;
 using Crystal.Control.Api.Auth;
 
@@ -26,6 +29,8 @@ public static class ReleaseEndpoints
         api.MapGet("/releases/{id:long}", GetReleaseAsync)
             .RequireAuthorization(Permissions.ReleaseRead);
         api.MapGet("/releases/{id:long}/manifest", GetReleaseManifestAsync)
+            .RequireAuthorization(Permissions.ReleaseRead);
+        api.MapGet("/releases/{id:long}/artifact", GetReleaseArtifactAsync)
             .RequireAuthorization(Permissions.ReleaseRead);
         api.MapPost("/releases", CreateReleaseAsync)
             .RequireAuthorization(Permissions.ReleaseWrite);
@@ -100,6 +105,115 @@ public static class ReleaseEndpoints
         {
             return Conflict(exception.Message);
         }
+    }
+
+    private static async Task<IResult> GetReleaseArtifactAsync(
+        long id,
+        ContentReleaseService service,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var artifact = await service.GetArtifactAsync(id, cancellationToken);
+            var manifestPath = Path.Combine(artifact.Directory, "manifest.json");
+            var manifest = JsonSerializer.Deserialize<ContentSnapshotManifest>(
+                await File.ReadAllTextAsync(manifestPath, cancellationToken),
+                ContentJson.IndentedOptions)
+                ?? throw new InvalidDataException($"Cannot read release manifest: {manifestPath}");
+
+            context.Response.Headers["X-Crystal-Release-Id"] =
+                artifact.ReleaseId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            context.Response.Headers["X-Crystal-Content-Hash"] = artifact.ContentHash;
+
+            string archivePath = Path.Combine(
+                Path.GetTempPath(),
+                $"crystal-release-{artifact.ReleaseId}-{Guid.NewGuid():N}.zip");
+            try
+            {
+                using (var archive = new ZipArchive(
+                           new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None),
+                           ZipArchiveMode.Create))
+                {
+                    await AddArtifactFileAsync(
+                        archive,
+                        artifact.Directory,
+                        "manifest.json",
+                        cancellationToken);
+                    await AddArtifactFileAsync(
+                        archive,
+                        artifact.Directory,
+                        "summary.json",
+                        cancellationToken);
+                    foreach (var file in manifest.Entities.Values.OrderBy(value => value.File, StringComparer.Ordinal))
+                    {
+                        await AddArtifactFileAsync(
+                            archive,
+                            artifact.Directory,
+                            file.File,
+                            cancellationToken);
+                    }
+                }
+            }
+            catch
+            {
+                TryDeleteFile(archivePath);
+                throw;
+            }
+
+            context.Response.OnCompleted(() =>
+            {
+                TryDeleteFile(archivePath);
+                return Task.CompletedTask;
+            });
+            return Results.File(
+                archivePath,
+                "application/zip",
+                $"{artifact.Version}.zip",
+                enableRangeProcessing: true);
+        }
+        catch (ReleaseNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+        catch (ReleaseSigningNotConfiguredException exception)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Release signing is not configured",
+                detail: exception.Message);
+        }
+        catch (ReleaseConflictException exception)
+        {
+            return Conflict(exception.Message);
+        }
+        catch (InvalidDataException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
+    private static async Task AddArtifactFileAsync(
+        ZipArchive archive,
+        string releaseDirectory,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var root = Path.GetFullPath(releaseDirectory);
+        var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(root, normalized));
+        var rootPrefix = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal) || !File.Exists(fullPath))
+        {
+            throw new InvalidDataException($"Release artifact file is missing or invalid: {relativePath}.");
+        }
+
+        var entry = archive.CreateEntry(relativePath, CompressionLevel.Fastest);
+        await using var source = File.OpenRead(fullPath);
+        await using var target = entry.Open();
+        await source.CopyToAsync(target, cancellationToken);
     }
 
     private static async Task<IResult> CreateReleaseAsync(
@@ -459,5 +573,16 @@ public static class ReleaseEndpoints
             statusCode: StatusCodes.Status409Conflict,
             title: "Release conflict",
             detail: detail);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 }

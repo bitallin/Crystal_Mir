@@ -1,6 +1,6 @@
 # 构建、测试与发布
 
-> 最后更新：2026-11-13
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 解决方案结构
@@ -13,7 +13,9 @@ Server/                      服务端库（GPL）
 Server.MirForms/             服务端宿主 + WinForms 编辑器（GPL）
 Client/                      Windows 客户端（MIT）
 src/Crystal.Content/         内容快照契约、哈希和校验（MIT）
-src/Crystal.Control.Api/     内容、账号、RBAC 和审计 API（ASP.NET Core + Npgsql）
+src/Crystal.Agent.Contracts/ Agent 注册、心跳、命令和结果契约（MIT）
+src/Crystal.ZoneAgent/       单区进程监督、内容 staging 和命令执行（MIT）
+src/Crystal.Control.Api/     内容、账号、RBAC、审计和区服命令 API（ASP.NET Core + Npgsql）
 src/Crystal.ZoneServer/      Linux 区服控制台宿主（GPL 边界，链接 Server.Library）
 tools/Crystal.LegacyImporter 旧二进制导入/导出器（链接 GPL Server.Library）
 db/migrations/               PostgreSQL schema
@@ -28,7 +30,6 @@ AutoPatcherAdmin*            补丁管理工具
 
 ```text
 src/Crystal.GameCore
-src/Crystal.Agent.Contracts
 src/Crystal.Control.Web
 src/Crystal.Patcher
 src/Crystal.Cli
@@ -106,10 +107,21 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 `test-control-api.sh` 同时验证受控 CORS 预检；Control.Web 使用 `?api=` 指定 API 地址，
 API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 
-该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期、只读接口和
-发布生命周期验证。CI 使用 PostgreSQL 16 service container 运行同一脚本；本地已验证 PostgreSQL 12 兼容，
+该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期、只读接口、
+发布生命周期和 Zone API 验证。CI 使用 PostgreSQL 16 service container 运行同一脚本；本地已验证 PostgreSQL 12 兼容，
 并在 PostgreSQL 18.3 上验证发布签名/发布链路。本地设置 `CRYSTAL_DATABASE_URL` 或
 `CRYSTAL_DB_CONNECTION` 后，`./scripts/ci.sh` 也会自动运行该集成测试，否则明确跳过。
+
+Zone Agent 端到端验证：
+
+```bash
+CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal;Password=...' \
+  ./scripts/test-zone-agent.sh
+```
+
+脚本自包含地发布签名内容、启动真实 Control API/Agent/ZoneServer，覆盖注册、stage、两次 activate、rollback、
+篡改发布包拒绝、候选启动失败恢复、结果幂等、Agent 重启恢复和 stop。它可以通过测试代理篡改 ZIP 中的实体字节，
+以验证 Agent 侧哈希校验，而不是只在服务端拒绝。数据库应为独立测试库；脚本会执行全部迁移。
 
 ## 3. 测试策略
 
@@ -124,7 +136,7 @@ API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 ### 3.2 集成测试
 
 - PostgreSQL 内容发布（已实现初版）、内容 CRUD 和回滚（待实现）。
-- 区服启动、Agent 注册、内容拉取、热重载。
+- 区服启动、Agent 注册、内容拉取、staging、进程级激活/回滚和失败恢复。
 - 客户端 manifest 校验、断点续传、回滚。
 - 支付回调、幂等发货、对账。
 
@@ -171,7 +183,7 @@ restore -> build -> unit tests -> integration tests
 ```
 
 它执行构建、回归测试、黄金数据库检查、黄金内容导入、快照重建、旧二进制导出 round-trip，并在 Node
-可用时检查 Control.Web JavaScript 语法。GitHub Actions 配置见
+可用时检查 Control.Web JavaScript 语法；配置数据库时继续运行 Control API 和 Zone Agent 集成。GitHub Actions 配置见
 `.github/workflows/ci.yml`；独立 `control-api-integration` job 使用 PostgreSQL 16 验证迁移、导入和 API。
 
 要求：

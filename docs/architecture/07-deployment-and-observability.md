@@ -14,7 +14,7 @@
 - 日志同时写控制台和 `Logs/zone.log`，SIGTERM 触发保存和优雅退出。
 - 内容引用统一处理 Windows 反斜杠和大小写差异，适配 Linux 大小写敏感文件系统。
 
-运维步骤见 `docs/runbooks/zone-server-linux.md`。Content Agent、热更新和 Prometheus 指标尚未接入。
+运维步骤见 `docs/runbooks/zone-server-linux.md` 和 `docs/runbooks/zone-agent-linux.md`。Prometheus 指标尚未接入。
 
 ### 0.1 ZoneServer 发布模式（M2）
 
@@ -33,8 +33,27 @@ Crystal.ZoneServer \
 `drop`、`recipe`、`script`、`quest`；地图、配置和其余运行文件从 `--content-root` 链接或复制。发布目录和源内容根
 不被修改。签名缺失、快照篡改或物化失败会阻止启动和 ready。未传发布参数时继续使用 legacy 二进制库模式。
 
-该模式不含 Agent、热切换、灰度或在线回滚；换版需要重启区服。冒烟覆盖 legacy、签名发布、未签名、快照篡改和缺失地图
+该模式本身不含 Agent、热切换、灰度或在线回滚；换版需要重启区服。冒烟覆盖 legacy、签名发布、未签名、快照篡改和缺失地图
 五条路径，见 `scripts/zone-smoke.sh`。
+
+### 0.1.1 Zone Agent 进程级换版（M3）
+
+每个区服由一个 `Crystal.ZoneAgent` 监督一个 `Crystal.ZoneServer` 子进程：
+
+```text
+Crystal.ZoneAgent (MIT)
+  -> Control API: register / heartbeat / claim / result
+  -> Control API: release artifact ZIP
+  -> releases/{releaseId}-{contentHash}
+  -> SIGTERM old child
+  -> new child: --content-release ... --ready-file state/ready.json
+```
+
+- Agent 目录：`releases/`、`staging/`、`state/active.json`、`state/ready.json`、`state/command-results/`、`logs/`。
+- 候选 ready 失败时自动恢复上一版本；ZoneServer 意外退出时按退避策略重启当前 active 版本。
+- 允许短暂停机，不做双实例、玩家状态迁移、灰度或 CDN。
+- Agent 不监听入站控制端口，主动访问 Control API；systemd 单元为 `deploy/systemd/crystal-zone-agent.service`。
+- 原有 `deploy/systemd/crystal-zone.service` 保留给 legacy/直接启动模式。
 
 ### 0.2 控制面 Compose 栈（2026-11-13）
 
@@ -124,7 +143,7 @@ docker compose
 | --- | --- | --- |
 | Admin Web | 443 | 公网或办公网 |
 | Control API | 443/8443 | 管理网 + Web |
-| Zone Agent | gRPC 9443 | 私有控制网 |
+| Zone Agent -> Control API | 443/8443 出站 HTTP(S) | 私有控制网；Agent 不监听入站控制端口 |
 | Zone Game | TCP 7000+ | 公网/加速网络 |
 | Status | 3000+ | 私有监控网 |
 | PostgreSQL | 5432 | 私有数据网 |
@@ -132,6 +151,9 @@ docker compose
 | MinIO/S3 | 9000/443 | 私有或 CDN 回源 |
 
 当前服务端默认游戏端口 7000、状态端口 3000，见 `Server/Settings.cs`；正式环境必须改为可配置并纳入区服编排。
+
+Agent 的命令轮询默认 2 秒、心跳 5 秒、租约 60 秒。Control API 命令默认 10 分钟过期，最长 24 小时；
+同一区服同时只允许一个未完成的 activate/rollback/reload/stop 命令。
 
 ## 4. 配置管理
 

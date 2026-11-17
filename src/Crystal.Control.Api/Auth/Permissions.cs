@@ -17,6 +17,8 @@ public static class Permissions
     public const string ReleaseWrite = "release:write";
     public const string ReleasePublish = "release:publish";
     public const string ReleaseRollback = "release:rollback";
+    public const string ZoneRead = "zone:read";
+    public const string ZoneWrite = "zone:write";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -33,8 +35,8 @@ public static class Permissions
         ReleaseRollback,
         AssetRead,
         "asset:write",
-        "zone:read",
-        "zone:write",
+        ZoneRead,
+        ZoneWrite,
         "zone:merge",
         "payment:read",
         "payment:write",

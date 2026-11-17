@@ -85,7 +85,7 @@ flowchart TB
 | 组件 | 职责 |
 | --- | --- |
 | Zone Server | 运行现有 `Envir`/`Map`/对象/AI，承载玩家会话 |
-| Zone Agent | 心跳、指标、命令、内容拉取、健康检查；MVP 可嵌入 Zone Server |
+| Zone Agent | 心跳、指标、命令、内容拉取、健康检查；当前为独立 MIT 进程，管理一个 ZoneServer 子进程 |
 | Login/Gateway | 登录、版本校验、区服列表、会话路由、限流 |
 | Client Launcher | 签名校验、增量下载、原子替换、回滚 |
 | Client | 现有 Crystal Windows 客户端，逐步数据驱动化 |
@@ -96,7 +96,7 @@ flowchart TB
 
 ```text
 编辑草稿 -> 保存 -> 校验 -> 编译内容包 -> 签名 -> 发布
--> 区服拉取 -> 预加载 -> 原子切换 -> 指标观察 -> 回滚或归档
+-> Agent 下载并验签 -> staging -> 进程级切换 -> 心跳观察 -> 回滚或归档
 ```
 
 约束：

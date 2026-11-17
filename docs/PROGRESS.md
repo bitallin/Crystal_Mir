@@ -1,27 +1,28 @@
 # 项目进度台账
 
 > 最后更新：2026-11-17
-> 当前阶段：M1 已完成；M2 内容后台 MVP 已完成本轮范围，10 类内容编辑器、引用、JSONL 导入导出、地图关系、地图预览和 ZoneServer 启动期签名发布消费已闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
+> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready 文件、失败恢复、CLI/systemd）。客户端启动器、灰度/CDN、Control.Web 区服页面、进程内热切换、玩家状态迁移、真实主循环指标和 M0 外部阻塞仍未完成；授权、许可证和 Windows 冒烟按要求本轮跳过
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0011 |
-| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts 构建成功；安全回归与内容快照检查通过 |
+| 架构决策 | 已完成初版 | ADR 0001～0012 |
+| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照和契约边界检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
-| Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
+| Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
-| CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job |
-| 控制面 | M2 已完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、结构/完整性/引用校验、JSONL dry-run/apply/export、脚本源码校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接 10 类草稿编辑、关系面板、预览、发布中心、账号和审计页面 |
+| CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；新增 Control API Zone API 断言和 Zone Agent 自包含 E2E；GitHub Actions 仍使用 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job，远端结果待确认 |
+| 控制面 | M2 完成，M3 区服 API 完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号和审计页面，尚未接区服页面 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
-| 热更新 | 启动期只读已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实热切换仍未实现 |
+| 热更新 | Agent 进程级闭环已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.ZoneAgent` 已实现注册、心跳、命令领取、下载验签、staging、进程级 activate/rollback/reload/stop、ready 检查和失败恢复。客户端启动器、进程内热切换、灰度和玩家状态迁移未实现 |
+| 区服 Agent | 已完成本轮闭环 | 单区单 Agent 单 ZoneServer 子进程；命令结果本地持久化并可重报；意外退出按 2/5/10/30 秒退避重启；玩家数/Tick P95/错误率占位为 0 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
-| 许可证清单 | 进行中 | 代码/外部资源清单已建立；MapEditor 和素材授权待确认 |
+| 许可证清单 | 进行中 | 代码/外部资源清单已建立；授权、许可证和素材合规按要求本轮跳过，MapEditor 和素材授权待确认 |
 
 ## 2. 里程碑状态
 
@@ -29,13 +30,28 @@
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
-| M2 内容后台 MVP | 已完成 | 100% | 10 类内容编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD、地图预览、签名发布启动消费已完成；授权/许可证、Agent、热切换和灰度按范围外处理 |
-| M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
+| M2 内容后台 MVP | 已完成 | 100% | 10 类内容编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD、地图预览、签名发布启动消费已完成；Agent 与进程级换版已由 M3 接手，授权/许可证和灰度仍按范围外处理 |
+| M3 热更新与区服 Agent | 进行中 | 本轮服务端范围完成 | 已完成 Agent 注册/心跳/命令、下载验签、staging、进程级 activate/rollback/reload/stop、ready、失败恢复、CLI/systemd 和 PG16 E2E；客户端启动器、灰度/CDN、Control.Web 区服页面、进程内热切换、玩家状态迁移、真实指标、授权/许可证仍未完成 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-17（M3 Zone Agent 控制闭环与进程级换版）
+
+- 范围：按研究项目口径完成 M3 服务端端到端最小闭环，跳过授权、许可证、Windows 冒烟和客户端启动器；换版允许短暂停机，不做进程内热切换、灰度/CDN、Control.Web 区服页面和玩家状态迁移。
+- 契约：`Crystal.Agent.Contracts` 增加 Zone DTO、命令状态、创建命令请求、命令历史、发布包路由和固定 payload；现有注册/心跳/命令字段保持兼容。
+- schema：新增 `db/migrations/0004_zone_agent_control.sql`，创建 `zone` 和 `zone_command`，包含区服投影、命令状态/类型约束、轮询/历史/租约索引和单生命周期部分唯一索引；不修改现有内容表，区服激活不改变 `content_release.status`。
+- Control API：新增 `ZoneStore`/`ZoneEndpoints`，支持注册、心跳、列表/详情、命令入队/领取/历史、租约过期重投、超时 `expired`、单生命周期冲突、结果幂等/冲突和 `zone:write` 权限；新增 `GET /api/v1/releases/{id}/artifact` 流式 ZIP 下载，只允许已签名 `published`/`active` 发布。
+- Zone Agent：新增 `Crystal.ZoneAgent`，仅引用 MIT 的 `Crystal.Agent.Contracts` 与 `Crystal.Content`；实现注册、心跳、命令轮询、结果本地持久化/重报、ZIP 路径穿越拒绝、manifest/实体/内容哈希和 ECDSA 验签、原子 staging、SIGTERM、ready PID 检查、候选失败恢复上一版本、意外退出退避重启和 active 状态恢复。
+- ZoneServer：新增 `--ready-file <path>` 和 `CRYSTAL_ZONE_READY_FILE`，ready 后原子写入 JSON（含 PID、内容根、计数），退出删除；未指定时 legacy 启动模式和客户端协议不变。
+- 工具与部署：新增 `scripts/zone-control.sh`、`scripts/test-zone-agent.sh`、`deploy/systemd/crystal-zone-agent.service` 和 `deploy/systemd/zone-agent.env.example`；导入器新增 `--drop-manifest` 供最小 E2E 夹具生成缺失掉落路径。
+- 验证：在一次性 PostgreSQL 16 数据库上从零应用 0001～0004，`test-zone-agent.sh` 通过注册、CLI 区服列表、stage、两次 activate、rollback、篡改 ZIP 实体字节拒绝、候选启动失败恢复、重复结果幂等、Agent 重启恢复和 stop；`test-control-api.sh` 通过 Zone API 未知区服、非法心跳、payload 校验、单生命周期 409、租约重投、历史超时 `expired`、结果幂等/冲突和 stop 投影；`scripts/build.sh`、`scripts/test.sh`（358 项物品安全、39 项内容快照、契约边界、80 项内容编辑）、`scripts/check-boundaries.sh`、`scripts/zone-smoke.sh`（legacy/签名发布/未签名/篡改/缺失地图）和 `git diff --check` 通过；在全新 PostgreSQL 16 库上运行完整 `./scripts/ci.sh` 通过（含 Control API 与 Zone Agent 两套集成）。
+- 文档：新增 ADR 0012；同步 ADR 索引、文档地图、系统概览、运行时与模块、数据与内容、热更新、部署与可观测性、安全与合规、构建测试、Control API 参考、Linux ZoneServer/Agent runbook、里程碑和本台账。
+- 未验证：真实 Ubuntu systemd 安装/开机自启/日志轮转、真实玩家会话下的换版、进程内热切换、玩家状态迁移、真实主循环指标、Control.Web 区服页面、Windows 客户端/宿主运行、远端 GitHub Actions PG16/Compose job、授权/许可证/KMS/素材授权。
+- 阻塞/风险：进程级换版仍有短暂停机；同一区服只支持单 Agent，无 HA；Agent 面向端点当前依赖可信私有网络和现有 API key，生产化前需要 mTLS/节点绑定/结果签名；指标为占位值。
+- 下一步：在 staging 主机实际安装 Agent systemd 单元并演练重启/日志/防火墙；接入真实指标；再做客户端启动器、版本门禁、灰度/CDN 和更高等级的高可用换版。
 
 ### 2026-11-17（M2 内容后台 MVP 完成）
 
@@ -434,6 +450,12 @@
 | 2026-11-09 | GPL 边界与代码隔离 | `docs/adr/0004-gpl-boundary.md` |
 | 2026-11-11 | 内容快照签名格式 | `docs/adr/0005-content-signature-format.md` |
 | 2026-11-13 | 内容草稿、修订与发布回滚模型 | `docs/adr/0006-content-drafts-and-release-rollback.md` |
+| 2026-11-16 | 物品编辑器 schema 与校验 | `docs/adr/0007-item-editor-schema-and-validation.md` |
+| 2026-11-16 | 多内容编辑器注册与引用模型 | `docs/adr/0008-multi-content-editor-registry.md` |
+| 2026-11-17 | 地图元数据编辑器与嵌套关系边界 | `docs/adr/0009-map-metadata-editor.md` |
+| 2026-11-17 | M2 多内容编辑、引用、导入导出与地图关系 | `docs/adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md` |
+| 2026-11-17 | ZoneServer 启动期只读消费签名发布 | `docs/adr/0011-zone-server-read-only-signed-content-release.md` |
+| 2026-11-17 | Zone Agent 控制闭环与进程级内容换版 | `docs/adr/0012-zone-agent-process-level-content-switching.md` |
 
 ## 5. 阻塞与风险
 
@@ -447,15 +469,23 @@
 | 许可 | `Crystal.MapEditor` 未发现明确许可证 | 不能随发布包分发 | 联系维护者、确认许可证或替换工具 |
 | 许可 | 服务端 GPL-3.0-only、素材版权 | 分发和商业化受限 | M0 完成合规审查并保留源码归档流程 |
 | 技术 | `Envir`/`Map` 耦合高 | 迁移和热重载风险 | 绞杀者模式 + 黄金样本测试 |
+| 技术 | 当前换版为进程级重启 | 激活/回滚有短暂停机，玩家会话会中断 | 使用维护窗口；后续评估状态迁移/双实例 |
+| 技术 | 单区只支持一个 Agent 和一个 ZoneServer | 无 Agent HA，租约过期重投依赖单实例假设 | 研究环境接受；生产化前补多实例和幂等执行日志 |
+| 安全 | Agent 注册/心跳/领取/结果端点匿名 | 可信内网外暴露会被伪造或接管区服 | 保持内网隔离；生产前补 mTLS、节点绑定、结果签名和授权 |
+| 指标 | 玩家数/Tick P95/错误率固定为 0 | 控制面不能据此做真实健康判断 | metadata 标记 `metricsSource=process-supervisor`，后续接主循环指标 |
+| 许可 | 授权/许可证本轮跳过 | M3 研究闭环不代表可分发结论 | 后续单独合规评审，保留 GPL 源码归档和素材来源清单 |
 
 ## 6. 下一步
 
 1. 推送后确认 GitHub Actions 的 PostgreSQL 16、Compose 和边界检查 job 稳定，并保存失败日志。
-2. 进入 M2：为物品、怪物、地图、NPC、掉落、配方等域实现类型化编辑表单和可视化差异，复用现有草稿 API。
-3. 实现 M3 Zone Agent 服务：注册、心跳、命令队列、内容拉取、staging/activate/rollback 和真实区服热切换。
-4. 在 Ubuntu staging 主机实际安装 systemd 服务，验证开机启动、日志轮转、端口防火墙和进程恢复。
-5. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
-6. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单和 MapEditor 许可证结论。
+2. 在 Ubuntu staging 主机实际安装 `crystal-zone-agent.service`，验证开机自启、日志轮转、端口防火墙、SIGTERM、异常退出重启和失败换版恢复。
+3. 为 Agent 补充生产化安全边界：mTLS/客户端证书、`agent_id` 与 `zone_id` 节点绑定、结果签名/重放保护和审计。
+4. 把真实玩家数、Tick P95 和错误率从 ZoneServer 主循环接入心跳，替换 `process-supervisor` 占位值。
+5. 进入客户端侧 M3：实现启动器、签名 manifest、哈希扫描、增量/全量下载、原子替换、回滚和版本门禁。
+6. 为 Control.Web 增加区服列表/详情、命令历史和换版操作页面，并复用现有 `zone:read`/`zone:write` 权限。
+7. 评估零停机/双实例换版所需玩家状态迁移、会话粘滞和停写协议；当前继续使用维护窗口。
+8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+9. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单和 MapEditor 许可证结论。
 
 ## 7. 更新规则
 

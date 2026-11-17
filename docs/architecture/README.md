@@ -42,6 +42,7 @@
 | 内容编辑器 | 按 `entityType` 注册手工 Schema、类型化自动索引、保存只阻断结构错误、发布校验完整性 | `adr/0007-item-editor-schema-and-validation.md`、`adr/0008-multi-content-editor-registry.md` |
 | M2 多内容与引用 | 10 类内容共享身份、引用、校验和 JSONL 导入导出；地图关系分区写入并维护投影 | `adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md` |
 | 区服发布消费 | ZoneServer 启动期验证签名快照并在隔离目录重建，不原地修改运行内容 | `adr/0011-zone-server-read-only-signed-content-release.md` |
+| 区服换版 | Control API 管命令，独立 Agent 管进程；下载验签后 staging，SIGTERM + ready 文件完成进程级激活/回滚 | `adr/0012-zone-agent-process-level-content-switching.md` |
 
 ## 5. 文档索引
 

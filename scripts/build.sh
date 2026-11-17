@@ -35,6 +35,9 @@ echo "== GameCore =="
 echo "== Agent Contracts =="
 "$DOTNET" build src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj -c "$CONFIGURATION" --nologo
 
+echo "== Zone Agent =="
+"$DOTNET" build src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj -c "$CONFIGURATION" --nologo
+
 echo "== Contract boundary test =="
 "$DOTNET" build Tests/ContractBoundary/ContractBoundary.csproj -c "$CONFIGURATION" --nologo
 

@@ -20,6 +20,11 @@ fi
 TMP="$(mktemp -d)"
 API_PID=""
 cleanup() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "--- Control API log ---" >&2
+    tail -n 160 "$TMP/api.log" 2>/dev/null || true
+  fi
   if [ -n "$API_PID" ]; then
     kill "$API_PID" 2>/dev/null || true
     for _ in $(seq 1 20); do
@@ -598,6 +603,172 @@ if [ "$INVALID_VERSION_STATUS" != "400" ]; then
   exit 1
 fi
 
+ZONE_ID="api-zone-${SUFFIX}"
+ZONE_REGISTER_BODY="$(printf '{"zoneId":"%s","zoneName":"API Zone","agentId":"agent-%s","agentVersion":"0.1.0","protocolVersion":1,"contentSchemaVersion":1,"startedAt":"2026-11-17T00:00:00Z","capabilities":["process-supervisor"]}' "$ZONE_ID" "$SUFFIX")"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_REGISTER_BODY" "$BASE/api/v1/zones/register" >"$TMP/zone-registered.json"
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID" >"$TMP/zone-detail.json"
+curl -fsS --max-time 20 "$BASE/api/v1/zones?limit=200" >"$TMP/zone-list.json"
+
+assert_status() {
+  local expected="$1"
+  local actual="$2"
+  local label="$3"
+  if [ "$actual" != "$expected" ]; then
+    echo "$label: expected HTTP $expected, got $actual." >&2
+    exit 1
+  fi
+}
+
+assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  "$BASE/api/v1/zones/unknown-$SUFFIX")" "Unknown zone lookup"
+assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"unknown-'"$SUFFIX"'","agentId":"missing","observedAt":"2026-11-17T00:00:00Z","status":"online","playerCount":0,"tickP95Ms":0,"errorRate":0}' \
+  "$BASE/api/v1/zones/unknown-$SUFFIX/heartbeat")" "Unknown zone heartbeat"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"banana","playerCount":0,"tickP95Ms":0,"errorRate":0}' \
+  "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Invalid heartbeat status"
+assert_status 401 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data '{"type":"zone.stop"}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands")" "Unauthenticated zone command"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"not-a-command"}' "$BASE/api/v1/zones/$ZONE_ID/commands")" "Invalid zone command type"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"content.activate","payload":{}}' "$BASE/api/v1/zones/$ZONE_ID/commands")" "Missing release payload"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"content.stage","payload":{"releaseId":999999999}}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands")" "Unknown release command"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"zone.stop","expiresAt":"2026-11-19T00:00:00Z"}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands")" "Command expiry over 24 hours"
+assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"zone.stop"}' "$BASE/api/v1/zones/unknown-$SUFFIX/commands")" "Unknown zone command"
+
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' --data '{"type":"content.reload"}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands" >"$TMP/zone-command-reload.json"
+ZONE_RELOAD_COMMAND="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commandId"])' "$TMP/zone-command-reload.json")"
+assert_status 409 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+  --data '{"type":"zone.stop"}' "$BASE/api/v1/zones/$ZONE_ID/commands")" "Concurrent lifecycle command"
+
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID/commands?claim=true&limit=10&leaseSeconds=5" \
+  >"$TMP/zone-command-claimed.json"
+sleep 6
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID/commands?claim=true&limit=10&leaseSeconds=5" \
+  >"$TMP/zone-command-reclaimed.json"
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID/commands?limit=200" \
+  >"$TMP/zone-command-history.json"
+
+ZONE_RESULT_BODY="$(python3 - "$ZONE_RELOAD_COMMAND" "$ZONE_ID" <<'PY'
+import json, sys
+print(json.dumps({
+    "commandId": sys.argv[1],
+    "zoneId": sys.argv[2],
+    "status": "succeeded",
+    "startedAt": "2026-11-17T00:00:01Z",
+    "completedAt": "2026-11-17T00:00:02Z",
+    "error": None,
+    "payload": {"mode": "test"}
+}))
+PY
+)"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_RESULT_BODY" \
+  "$BASE/api/v1/zones/$ZONE_ID/commands/$ZONE_RELOAD_COMMAND/result" >"$TMP/zone-result.json"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_RESULT_BODY" \
+  "$BASE/api/v1/zones/$ZONE_ID/commands/$ZONE_RELOAD_COMMAND/result" >"$TMP/zone-result-repeat.json"
+ZONE_CONFLICT_BODY="$(python3 - "$ZONE_RELOAD_COMMAND" "$ZONE_ID" <<'PY'
+import json, sys
+print(json.dumps({
+    "commandId": sys.argv[1],
+    "zoneId": sys.argv[2],
+    "status": "failed",
+    "startedAt": "2026-11-17T00:00:01Z",
+    "completedAt": "2026-11-17T00:00:03Z",
+    "error": "conflicting final state"
+}))
+PY
+)"
+assert_status 409 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' --data "$ZONE_CONFLICT_BODY" \
+  "$BASE/api/v1/zones/$ZONE_ID/commands/$ZONE_RELOAD_COMMAND/result")" "Conflicting command result"
+assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"commandId":"00000000-0000-0000-0000-000000000000","zoneId":"'"$ZONE_ID"'","status":"succeeded","startedAt":"2026-11-17T00:00:01Z"}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands/00000000-0000-0000-0000-000000000000/result")" "Unknown command result"
+
+EXPIRING_EXPIRES_AT="$(python3 -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat().replace("+00:00", "Z"))')"
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "{\"type\":\"content.reload\",\"expiresAt\":\"$EXPIRING_EXPIRES_AT\"}" \
+  "$BASE/api/v1/zones/$ZONE_ID/commands" >"$TMP/zone-command-expiring.json"
+ZONE_EXPIRING_COMMAND="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commandId"])' "$TMP/zone-command-expiring.json")"
+sleep 3
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID/commands?limit=200" \
+  >"$TMP/zone-command-expired.json"
+
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H 'Content-Type: application/json' --data '{"type":"zone.stop"}' \
+  "$BASE/api/v1/zones/$ZONE_ID/commands" >"$TMP/zone-command-stop.json"
+ZONE_STOP_COMMAND="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commandId"])' "$TMP/zone-command-stop.json")"
+ZONE_STOP_RESULT="$(python3 - "$ZONE_STOP_COMMAND" "$ZONE_ID" <<'PY'
+import json, sys
+print(json.dumps({
+    "commandId": sys.argv[1],
+    "zoneId": sys.argv[2],
+    "status": "succeeded",
+    "startedAt": "2026-11-17T00:00:04Z",
+    "completedAt": "2026-11-17T00:00:05Z",
+    "payload": {"stopped": True}
+}))
+PY
+)"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_STOP_RESULT" \
+  "$BASE/api/v1/zones/$ZONE_ID/commands/$ZONE_STOP_COMMAND/result" >/dev/null
+curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID" >"$TMP/zone-after-stop.json"
+
+python3 - "$TMP" "$ZONE_ID" "$ZONE_RELOAD_COMMAND" "$ZONE_EXPIRING_COMMAND" <<'PY'
+import json, os, sys
+root, zone_id, reload_command, expiring_command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+def load(name):
+    with open(os.path.join(root, name), encoding="utf-8") as f:
+        return json.load(f)
+
+registered = load("zone-registered.json")
+assert registered["zoneId"] == zone_id, registered
+assert registered["status"] == "online", registered
+assert load("zone-detail.json")["agentId"].startswith("agent-"), load("zone-detail.json")
+assert any(zone["zoneId"] == zone_id for zone in load("zone-list.json")["items"]), load("zone-list.json")
+
+claimed = load("zone-command-claimed.json")["items"]
+reclaimed = load("zone-command-reclaimed.json")["items"]
+assert len(claimed) == 1 and claimed[0]["commandId"] == reload_command, claimed
+assert len(reclaimed) == 1 and reclaimed[0]["commandId"] == reload_command, reclaimed
+history = {item["commandId"]: item for item in load("zone-command-history.json")["items"]}
+assert history[reload_command]["attempts"] == 2, history[reload_command]
+assert history[reload_command]["status"] == "delivered", history[reload_command]
+expired = {item["commandId"]: item for item in load("zone-command-expired.json")["items"]}
+assert expired[expiring_command]["status"] == "expired", expired[expiring_command]
+
+result = load("zone-result.json")
+assert result["status"] == "succeeded", result
+assert load("zone-result-repeat.json")["status"] == "succeeded", load("zone-result-repeat.json")
+after_stop = load("zone-after-stop.json")
+assert after_stop["activeReleaseId"] is None, after_stop
+assert after_stop["activeContentHash"] is None, after_stop
+assert after_stop["status"] == "degraded", after_stop
+PY
+
 APPROVER_DRAFT_CREATE_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
   --data "$(printf '{"baseImportRunId":%s,"name":"denied draft"}' "$RUN_ID")" \
@@ -1050,6 +1221,19 @@ curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
 curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
   "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/publish" >/dev/null
 
+# The shared integration database may retain an active release from an earlier run.
+# Release rollback only accepts the active release (or a published release when none is
+# active), so make this run's rollback target active before exercising the endpoint.
+curl -fsS --max-time 20 -H "Authorization: Bearer $APPROVER_ACCESS" \
+  "$BASE/api/v1/releases?limit=200&status=active" >"$TMP/active-releases.json"
+ACTIVE_RELEASE_ID="$(python3 -c 'import json,sys; items=json.load(open(sys.argv[1])).get("items", []); print(items[0]["id"] if items else "")' "$TMP/active-releases.json")"
+if [ -n "$ACTIVE_RELEASE_ID" ] && [ "$ACTIVE_RELEASE_ID" != "$ROLLBACK_RELEASE_ID" ]; then
+  curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+    -H 'Content-Type: application/json' \
+    --data "$(printf '{"reason":"normalize shared test active release","targetReleaseId":%s}' "$ROLLBACK_RELEASE_ID")" \
+    "$BASE/api/v1/releases/$ACTIVE_RELEASE_ID/rollback" >/dev/null
+fi
+
 SHORT_ROLLBACK_REASON_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H "Authorization: Bearer $APPROVER_ACCESS" -H 'Content-Type: application/json' \
   --data '{"reason":"short"}' "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback")"
@@ -1068,10 +1252,18 @@ if [ "$AUTHOR_ROLLBACK_STATUS" != "403" ]; then
 fi
 
 ROLLBACK_REASON="integration rollback ${SUFFIX}"
-curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
+ROLLBACK_EXPLICIT_STATUS="$(curl -sS --max-time 30 -o "$TMP/rollback-explicit.json" -w '%{http_code}' -X POST \
+  -H "Authorization: Bearer $APPROVER_ACCESS" \
   -H 'Content-Type: application/json' \
   --data "$(printf '{"reason":"%s","targetReleaseId":%s}' "$ROLLBACK_REASON" "$RELEASE_ID")" \
-  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback" >"$TMP/rollback-explicit.json"
+  "$BASE/api/v1/releases/$ROLLBACK_RELEASE_ID/rollback")"
+if [ "$ROLLBACK_EXPLICIT_STATUS" != "200" ]; then
+  echo "Explicit rollback failed with HTTP $ROLLBACK_EXPLICIT_STATUS:" >&2
+  cat "$TMP/rollback-explicit.json" >&2
+  curl -sS --max-time 20 -H "Authorization: Bearer $APPROVER_ACCESS" \
+    "$BASE/api/v1/releases/$RELEASE_ID" >&2 || true
+  exit 1
+fi
 
 curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $APPROVER_ACCESS" \
   -H 'Content-Type: application/json' \

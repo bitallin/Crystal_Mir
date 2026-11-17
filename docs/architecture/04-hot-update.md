@@ -79,38 +79,53 @@ Launcher 启动
 ### 3.1 流程
 
 ```text
-Control Plane 发布 release
--> Zone Agent 收到通知或轮询
--> 下载 manifest + 内容包 + 资源引用
--> 校验签名/哈希/版本
--> 构建 staging ContentSnapshot
--> 预加载地图、脚本、资源元数据
--> 运行一致性检查
--> 在安全点原子切换 active snapshot
--> 上报结果和指标
--> 失败则保留旧快照并告警
+Control API 发布签名 release 并写入持久命令
+-> Zone Agent 轮询领取命令（租约 + 过期时间）
+-> 下载发布 ZIP 到本地 staging 临时目录
+-> 拒绝路径穿越并校验 manifest/实体哈希、contentHash 和 ECDSA 签名
+-> 原子移动到 releases/{releaseId}-{contentHash}
+-> 激活时 SIGTERM 旧 ZoneServer，启动候选进程并等待 ready 文件
+-> 成功后更新 active.json、心跳和命令结果
+-> 候选失败则重启上一版本；结果写回 Control API
 ```
 
-### 3.2 M2 当前实现：启动期只读消费
+当前实现是进程级换版，允许短暂停机。`stage` 只下载和验证，不改变运行版本；`activate`、`rollback` 和 `reload`
+会重启 ZoneServer；`stop` 停止子进程并清空 active 状态。命令状态、租约和结果幂等由 `zone_command` 持久化。
+同一区服同时只允许一个未完成的激活、回滚、重载或停机命令。
 
-M2 已实现不依赖 Agent 的第一条区服消费路径：
+### 3.2 M3 当前实现：Agent 闭环
+
+当前闭环为：
 
 ```text
-Control API 发布 release
--> 运维选择已发布版本目录和公钥
--> ZoneServer 校验 manifest 哈希与 ECDSA 签名
--> 在隔离临时目录重建 Server.MirDB
--> 物化 drop/recipe/script/quest，链接或复制地图与运行文件
--> Settings.Load / LoadDB / Envir.Start
--> SIGTERM 后保存并清理临时目录
+Control API
+  -> zone / zone_command / release artifact
+  -> Zone Agent
+       -> releases/、staging/、state/、logs/
+       -> SIGTERM + --content-release + --ready-file
+       -> ZoneServer 子进程
+       -> settings / rebuild / Envir.Start / ready JSON
 ```
 
-启动参数为 `--content-release <dir>`、`--content-public-key <path>` 和 `--content-key-id <id>`，也可用
-`CRYSTAL_ZONE_CONTENT_RELEASE`、`CRYSTAL_ZONE_CONTENT_PUBLIC_KEY`、`CRYSTAL_ZONE_CONTENT_KEY_ID` 注入。
-签名缺失、哈希不匹配、key ID 不匹配或地图/脚本/配方物化失败时，区服启动失败且不进入 ready。
+Agent 目录约定：
 
-未提供发布参数时仍使用 `--content-root` 下的 `Server.MirDB` 和运行文件，legacy 模式保持兼容。该模式只在启动时
-读取发布，不轮询、不热切换、不修改运行中的内容，也不提供 Agent 回滚命令；需要换版时必须重启区服。
+```text
+releases/{releaseId}-{contentHash}/   已验签的不可变发布
+staging/                              下载/解压临时目录
+state/active.json                     当前和上一版本
+state/ready.json                      Agent 等待的 ZoneServer ready 文件
+state/command-results/                已执行命令结果，供重投/重启后重报
+logs/                                 每次 ZoneServer 启动的 stdout/stderr
+```
+
+ZoneServer 仍保留 M2 的启动期消费路径和 legacy 模式。Agent 模式使用 `--content-release <dir>`、
+`--content-public-key <path>`、`--content-key-id <id>` 和 `--ready-file <path>`；也可用
+`CRYSTAL_ZONE_CONTENT_RELEASE`、`CRYSTAL_ZONE_CONTENT_PUBLIC_KEY`、`CRYSTAL_ZONE_CONTENT_KEY_ID`、
+`CRYSTAL_ZONE_READY_FILE` 注入。签名缺失、哈希不匹配、key ID 不匹配、地图/脚本/配方物化失败或 ready 超时
+都会使候选启动失败。未提供发布参数时继续使用 `--content-root` 下的 `Server.MirDB` 和运行文件。
+
+详见 `adr/0012-zone-agent-process-level-content-switching.md`。本轮不做进程内原子切换、灰度/CDN、Control.Web
+区服页面、客户端启动器、玩家状态迁移和许可证/授权新模型。
 
 ### 3.3 快照模型
 
@@ -127,6 +142,8 @@ ContentSnapshot
 运行中的对象只持有不可变快照引用。需要修改对象时，复制到新实例，不原地修改旧快照。
 
 ### 3.4 热重载边界
+
+下表是未来进程内热重载的评估口径，不代表本轮已实现；当前生产路径仍是 Agent 进程级重启。
 
 | 内容 | 是否可热重载 | 约束 |
 | --- | --- | --- |
@@ -163,11 +180,12 @@ ContentSnapshot
 
 | 场景 | 处理 |
 | --- | --- |
-| manifest 签名失败 | 停止更新，使用本地版本，告警 |
-| 下载中断 | 断点续传；多次失败切换 CDN |
-| 哈希不匹配 | 删除临时文件，重试全量 |
-| 内容包加载失败 | 保留旧快照，区服继续运行 |
-| 热重载部分失败 | 整体回滚到旧快照 |
+| manifest/实体哈希或签名失败 | stage 失败，删除临时目录，旧 ZoneServer 继续运行并上报 failed |
+| 下载中断 | 删除不完整 ZIP 和 staging，命令失败；重试时重新下载完整包 |
+| 哈希不匹配 | 删除临时文件，重试全量；Agent 本轮只做一次完整下载并由命令重试驱动 |
+| 候选进程启动失败/ready 超时 | SIGTERM 候选进程，重新启动上一 active 版本；无上一版本则 degraded |
+| Agent 重启 | 读取 `state/active.json`，重新验签本地发布并恢复 active 版本 |
+| ZoneServer 意外退出 | 按 2/5/10/30 秒退避重启 active 版本；持续失败时心跳 degraded |
 | 客户端替换失败 | 从备份目录恢复 |
 | 协议不兼容 | 拒绝登录，提示更新客户端 |
 
@@ -177,6 +195,9 @@ ContentSnapshot
 
 - `release_id`、操作者、时间、渠道、目标区服。
 - 下载耗时、失败原因、重试次数。
-- 热重载耗时、受影响实体数、回滚次数。
+- 命令 ID、状态、租约、attempts、执行耗时和结果错误。
+- 进程 PID、ready 文件、激活/回滚耗时、恢复次数和当前/上一版本。
 - 客户端更新成功率、按版本分布。
+
+本轮 Agent 上报 `metricsSource=process-supervisor`，玩家数、Tick P95 和错误率为 0；真实主循环指标接入留待后续。
 

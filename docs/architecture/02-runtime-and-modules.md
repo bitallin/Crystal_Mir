@@ -1,6 +1,6 @@
 # 运行时与模块边界
 
-> 最后更新：2026-11-13
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 当前运行时事实
@@ -22,8 +22,9 @@
 Crystal.Shared                协议、枚举、纯 DTO（MIT）
 Crystal.Content               内容模型、schema、校验、编译器（MIT）
 Crystal.GameCore              游戏模拟、对象、地图、战斗、AI（GPL 边界）
-Crystal.ZoneServer            区服宿主、网络、内容加载、Agent（GPL 边界）
+Crystal.ZoneServer            区服宿主、网络和内容加载（GPL 边界；Agent 独立进程）
 Crystal.Agent.Contracts       Agent 与控制面的 gRPC/HTTP 契约（MIT）
+Crystal.ZoneAgent             单区进程监督、内容 staging 和命令执行（MIT）
 Crystal.Control.Api           控制面 API（独立许可，不链接 GPL 代码）
 Crystal.Control.Web           管理后台前端
 Crystal.Patcher               清单、签名、差分、发布工具
@@ -37,6 +38,7 @@ src/Crystal.Content           内容快照、哈希、校验（MIT）
 tools/Crystal.ContentTool     内容快照签名与验证 CLI，仅依赖 Crystal.Content（MIT）
 src/Crystal.GameCore          运行时抽象骨架，只依赖 BCL + Shared（M1 不迁移游戏逻辑）
 src/Crystal.Agent.Contracts   Agent 注册、心跳、命令和内容版本契约（MIT，无项目依赖）
+src/Crystal.ZoneAgent         单区 Agent，下载/验签/持久化命令结果并管理 ZoneServer 子进程（MIT）
 src/Crystal.Control.Api       内容、账号、RBAC 和审计 API，ASP.NET Core + Npgsql
 src/Crystal.ZoneServer        Linux 区服控制台宿主，加载旧数据库和内容并监听游戏端口（GPL 边界）
 tools/Crystal.LegacyImporter  二进制导入、快照/PostgreSQL 重建和 PostgreSQL 写入（GPL 边界工具）
@@ -52,13 +54,16 @@ M1 已补齐可编辑内容草稿、逐实体乐观并发、修订记录、草�
 `GET /releases`、manifest、校验报告和回滚元数据，不再展示虚构的区服灰度或 Ed25519 信息。
 地图关系页已可检索当前批次全部地图，配方、Buff 和脚本已读取真实批次，脚本抽屉已读取 AST/编译校验，
 资源域已展示地图格式、尺寸、可走/阻挡/门格，并可通过受权限保护的文件端点下载经路径、大小和 SHA256 校验的资源；
-内容快照支持 ECDSA P-256 签名与验证，坐标画布仍使用原型尺寸，其他资源二进制和真实区服热切换尚未接入。
+内容快照支持 ECDSA P-256 签名与验证，坐标画布仍使用原型尺寸，其他资源二进制尚未接入；进程级换版已由 M3 Agent 接入，进程内热切换仍未实现。
 
 `Crystal.GameCore` 在 M1 只提供运行时边界契约（`IContentSnapshotProvider<TSnapshot>`、
 `IPlayerRepository<TSnapshot>`、`IWorldClock`、`IZoneEventSink`、`IChatTransport` 和运行时事件类型），
 `Crystal.ZoneServer` 只增加项目引用，现有 `Envir`/`Map` 逻辑没有迁移。`Crystal.Agent.Contracts`
-定义稳定的 JSON 字段和命令字符串（`content.stage`、`content.activate`、`content.rollback`、
-`content.reload`、`zone.stop`），但 Control API 在本轮不注册 Agent 路由，Agent 服务属于 M3。
+定义稳定的 JSON 字段、路由和命令字符串（`content.stage`、`content.activate`、`content.rollback`、
+`content.reload`、`zone.stop`）。M3 已注册 Control API 的区服/命令路由并落地独立 `Crystal.ZoneAgent`：
+Agent 领取持久命令、下载并验签发布 ZIP、写入本地 staging、以 SIGTERM/ready 文件执行进程级激活或回滚。
+Agent 不引用 ZoneServer 或 `LegacyRuntime`，只通过 `ZoneExecutable` 启动子进程；详细边界见
+`docs/adr/0012-zone-agent-process-level-content-switching.md`。
 
 ## 3. 依赖规则
 
@@ -66,11 +71,13 @@ M1 已补齐可编辑内容草稿、逐实体乐观并发、修订记录、草�
 Control.Web -> Control.Api -> Content / Shared
 ZoneServer  -> GameCore -> Shared
 ZoneServer  -> Content / Agent.Contracts
-Control.Api -> Agent.Contracts（仅允许 MIT 契约，M1 尚未引用）
+ZoneAgent   -> Agent.Contracts / Content（通过可执行文件边界启动 ZoneServer）
+Control.Api -> Agent.Contracts（仅允许 MIT 契约）
 Patcher     -> Shared / Content.Contracts
 
 禁止：
 Control.Api -> GameCore / ZoneServer
+ZoneAgent    -> Server / LegacyRuntime / ZoneServer 项目引用
 GameCore    -> EF Core / ASP.NET Core / WinForms
 Content     -> GameCore（只能依赖纯契约）
 Shared      -> 任何服务端实现
@@ -119,9 +126,12 @@ Shared      -> 任何服务端实现
 
 ### 步骤 5：Agent 与控制面
 
-- 区服启动后向 Agent 注册，上报心跳、玩家数、Tick 延迟、错误率。
-- 从控制面拉取签名内容包，加载到 staging 快照。
-- 通过命令切换内容版本、重载、停机、备份。
+- 已实现：Agent 启动后向 Control API 注册并上报心跳；玩家数、Tick P95 和错误率本轮固定为 0，并标记
+  `metricsSource=process-supervisor`。
+- 已实现：从 Control API 流式下载签名发布 ZIP，拒绝路径穿越，校验实体哈希、内容哈希和 ECDSA 签名后原子 staging。
+- 已实现：`stage`、`activate`、`rollback`、`reload`、`stop` 持久命令；命令有租约、过期和单生命周期互斥。
+- 已实现：进程级换版、候选 ready 检查和失败后恢复上一版本；意外退出按退避策略重启 active 版本。
+- 待后续：真实主循环指标、玩家状态迁移、进程内原子快照切换、灰度和多 Agent HA。
 
 ### 步骤 6：逻辑数据化
 
@@ -133,7 +143,8 @@ Shared      -> 任何服务端实现
 
 - 世界主循环保持单写入者模型；跨线程操作通过消息队列进入主循环。
 - 内容快照只读，切换时先构建新快照，再原子替换引用。
-- 热重载不能在中途修改正在被引用的可变对象；需要修改时复制对象或延迟到安全点。
+- 当前换版采用进程级重启，不做运行中快照替换；同一区服同一时刻只保留一个 Agent 和一个 ZoneServer 子进程。
+- 热重载不能在中途修改正在被引用的可变对象；未来需要修改时复制对象或延迟到安全点。
 - 玩家数据落库通过主循环产生事件，由独立持久化队列写入，避免阻塞 Tick。
 - 所有区服命令必须幂等，并带 `command_id` 和超时。
 

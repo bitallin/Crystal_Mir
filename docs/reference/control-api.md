@@ -1,7 +1,7 @@
 # Control API 参考
 
 > 最后更新：2026-11-17
-> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、引用、批量导入导出、地图关系与地图预览）
+> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、地图关系与地图预览 + M3 Zone Agent 控制闭环）
 
 ## 1. 位置与边界
 
@@ -25,9 +25,11 @@
 - 草稿脚本源码校验，以及地图关系数组整体替换和刷新点/NPC 行级 CRUD。
 - 草稿 JSONL dry-run、事务应用导入和稳定排序导出。
 - 从导入批次或草稿创建不可变发布版本，校验、编译、ECDSA 签名、发布和回滚。
+- 区服注册、心跳、持久命令队列、租约领取、结果幂等和区服运行投影。
+- 已签名发布 ZIP 下载，以及 `content.stage`/`activate`/`rollback`/`reload`/`zone.stop` 管理入口。
 
 尚未实现：MFA/OIDC、账号删除、解锁接口、CSV 导入、NPC 语句块结构化编辑、`.lib` 图库解析、资源上传、
-Zone Agent 服务和真实区服热切换。
+Control.Web 的区服运维页面、进程内热切换、灰度/CDN、玩家状态迁移和生产级 Agent 授权模型。
 
 ## 2. 配置
 
@@ -534,6 +536,7 @@ JSONL 导入使用与内容快照 `entities/<type>.jsonl` 一致的实体行，�
 GET  /api/v1/releases?limit=50&status=
 GET  /api/v1/releases/{id}
 GET  /api/v1/releases/{id}/manifest
+GET  /api/v1/releases/{id}/artifact
 POST /api/v1/releases
 POST /api/v1/releases/{id}/validate
 POST /api/v1/releases/{id}/compile
@@ -573,6 +576,66 @@ POST /api/v1/releases/{id}/rollback
 - 同一时刻最多一个 `active` 版本，由部分唯一索引保证。重复回滚或状态已变化返回 409。
 - `publish` 只把签名版本标记为可用的 `published`，不会自行设置 `active`。
 
+`GET /releases/{id}/artifact` 仅允许 `published` 或 `active` 且签名有效的发布。响应为 ZIP，包含
+`manifest.json`、`summary.json` 和 `entities/*.jsonl`，并返回 `X-Crystal-Release-Id`、
+`X-Crystal-Content-Hash` 头。Control API 在返回前重新验签 manifest；Agent 仍必须自行校验实体文件大小/SHA256、
+内容哈希和 ZIP 路径。该端点要求 `release:read`。
+
+### 3.9 Zone Agent 控制
+
+```text
+POST /api/v1/zones/register
+POST /api/v1/zones/{zoneId}/heartbeat
+GET  /api/v1/zones?limit=100
+GET  /api/v1/zones/{zoneId}
+GET  /api/v1/zones/{zoneId}/commands?limit=50
+GET  /api/v1/zones/{zoneId}/commands?claim=true&limit=1&leaseSeconds=60
+POST /api/v1/zones/{zoneId}/commands
+POST /api/v1/zones/{zoneId}/commands/{commandId}/result
+```
+
+注册请求：
+
+```json
+{
+  "zoneId": "zone-1",
+  "zoneName": "Zone 1",
+  "agentId": "zone-1-agent",
+  "agentVersion": "0.1.0",
+  "protocolVersion": 1,
+  "contentSchemaVersion": 1,
+  "startedAt": "2026-11-17T00:00:00Z",
+  "capabilities": ["process-supervisor"]
+}
+```
+
+`zoneId` 必须匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`。心跳状态只能是 `online` 或 `degraded`；最后心跳超过 30 秒时
+查询投影显示 `offline`。玩家数、Tick P95 和错误率当前由 Agent 上报为 0，metadata 标记
+`metricsSource=process-supervisor`。
+
+命令创建请求：
+
+```json
+{"type": "content.activate", "payload": {"releaseId": 123}}
+{"type": "content.reload"}
+{"type": "zone.stop"}
+```
+
+- `content.stage`、`content.activate`、`content.rollback` 必须带正整数 `payload.releaseId`，且目标发布必须是
+  `published` 或 `active`、artifact 存在且签名有效。
+- `content.reload`、`zone.stop` 不接受 payload。
+- `expiresAt` 可省略，默认 10 分钟；必须在未来且不超过 24 小时。
+- `content.activate`、`content.rollback`、`content.reload`、`zone.stop` 每个区服同时最多一个未完成命令，冲突返回 409。
+- 命令状态为 `queued -> delivered -> succeeded|failed|rejected`。租约过期后可再次领取；超过 `expiresAt` 转为 `expired`。
+- 领取接口返回 `{"items":[{"commandId","zoneId","type","issuedAt","expiresAt","payload"}]}`；管理查询返回完整
+  `ZoneCommandDto`，包含 `attempts`、租约、错误和结果 payload。
+- 结果请求使用 `AgentCommandResult`；相同终态重复提交返回 200，不同终态返回 409。未知命令返回 404。
+- `succeeded` 的 stage/activate/rollback/reload/stop 会更新 `zone` 投影；`zone.stop` 清空 active release 和哈希。
+- 区服激活不修改全局 `content_release.status`；发布状态仍由发布/回滚 API 管理。
+
+管理命令创建要求 `zone:write`。注册、心跳、领取、结果和区服查询当前按研究项目口径匿名开放；生产化前必须增加
+Agent 双向认证、节点绑定和结果签名。CLI 见 `scripts/zone-control.sh`。
+
 ## 4. 集成验证
 
 ```bash
@@ -584,8 +647,19 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 RBAC 403、登出撤销、账号生命周期、最后管理员保护、审计、健康检查、分页、详情、类型计数、地图关系、怪物掉落、
 配方关系、NPC 脚本关系与 AST、资源元数据和文件字节/SHA256。M2 覆盖 10 类 Schema 的 200/401、类型化 CRUD、
 结构 400、陈旧 revision 409、引用缺失、JSONL dry-run/apply/export、脚本校验、地图关系 CRUD/清理、发布链路、
-默认和显式双版本回滚。测试在 PostgreSQL 16 service container 中运行。
+默认和显式双版本回滚。M3 覆盖区服注册/未知区服、非法心跳、命令 payload、单生命周期冲突、租约重投、
+结果幂等/冲突和 stop 投影。测试在 PostgreSQL 16 service container 中运行。
 测试库应为独立数据库；已有账号时不会再执行 bootstrap。
+
+Zone Agent 端到端验证使用：
+
+```bash
+CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal;Password=...' \
+  ./scripts/test-zone-agent.sh
+```
+
+脚本发布签名内容，启动真实 Control API、Agent 和 ZoneServer，验证注册、staging、两次激活、回滚、发布包篡改拒绝、
+候选启动失败恢复、结果幂等、Agent 重启恢复和 stop。
 
 Compose 栈验证使用：
 
@@ -609,5 +683,8 @@ Compose 栈验证使用：
 - 当前只提供 JSONL 批量导入导出；CSV、服务端异步大文件导入和跨草稿复制未实现。
 - 资源预览只支持地图网格；客户端 `.lib` 图库、物品/怪物图标缩略图和资源上传未实现。
 - 脚本编辑器不提供语句块拖拽、增删排序或脚本执行；完整行为仍由文本源码和服务端解析结果决定。
-- Agent 契约已定义，但 Control API 不注册 Agent 路由。ZoneServer 只支持启动期读取签名发布，不自动热切换 `active` 版本。
-- 授权、许可证和素材合规不在 M2 本轮范围。
+- 区服激活是进程级重启，允许短暂停机；不提供进程内热切换、灰度、CDN、玩家状态迁移或多 Agent HA。
+- 玩家数、Tick P95 和错误率当前固定为 0，仅表达 `metricsSource=process-supervisor`；真实主循环指标待接入。
+- Agent 注册、心跳、命令领取和结果端点在研究环境匿名开放；生产化前需要双向认证、节点绑定和授权模型。
+- Control.Web 尚未提供区服页面；本轮提供 Control API、CLI 和 systemd 单元。
+- 授权、许可证和素材合规不在本轮范围。

@@ -1,11 +1,18 @@
 # Linux 区服部署与运行
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-17
 > 状态：生效
 
 ## 1. 适用范围
 
-在 Ubuntu 20.04+ 主机上部署单个 Crystal 区服。当前区服仍直接使用旧格式 `Server.MirDB`、`Configs/`、`Envir/` 和 `Maps/`，尚未接入内容快照发布和 Zone Agent。
+在 Ubuntu 20.04+ 主机上部署单个 Crystal 区服。当前支持两种互斥模式：
+
+- legacy/直接启动：使用 `crystal-zone.service` 和旧格式 `Server.MirDB`、`Configs/`、`Envir/`、`Maps/`，或手工传入已签名
+  `--content-release` 做启动期消费。
+- Agent 模式：使用 `crystal-zone-agent.service`，由 `Crystal.ZoneAgent` 负责注册、心跳、下载验签、staging、进程级
+  激活/回滚和异常退出重启。安装与换版步骤见 `zone-agent-linux.md`。
+
+同一区服只能启用其中一种 systemd 单元，不能同时占用游戏端口和状态端口。
 
 `Crystal.ZoneServer` 链接 GPL-3.0-only 的 `Server.Library`。对外分发区服二进制时，必须同时提供对应完整源码和构建脚本，参见 `docs/adr/0004-gpl-boundary.md`。
 
@@ -84,6 +91,10 @@ sudo systemctl restart crystal-zone
 | `CRYSTAL_ZONE_MAX_IP` | 单 IP 最大连接数 |
 | `CRYSTAL_ZONE_THREADS` | 怪物处理线程数 |
 | `CRYSTAL_ZONE_SAVE_DELAY_MINUTES` | 自动保存间隔 |
+| `CRYSTAL_ZONE_READY_FILE` | ready JSON 路径；Agent 模式使用，legacy 可留空 |
+| `CRYSTAL_ZONE_CONTENT_RELEASE` | 可选，已验签发布目录；不设置时使用 legacy `Server.MirDB` |
+| `CRYSTAL_ZONE_CONTENT_PUBLIC_KEY` | 发布验签公钥；使用发布模式时必填 |
+| `CRYSTAL_ZONE_CONTENT_KEY_ID` | 期望的发布签名 key id；使用发布模式时必填 |
 
 状态端口和游戏端口使用同一监听地址。若绑定 `0.0.0.0`，用防火墙限制 `3000` 只允许监控网访问：
 
@@ -127,6 +138,8 @@ tail -f /var/lib/crystal/zone/Logs/zone.log
 
 ## 7. 停止、升级与回滚
 
+### 7.1 legacy/直接启动
+
 ```bash
 sudo systemctl stop crystal-zone
 ```
@@ -144,6 +157,32 @@ sudo systemctl start crystal-zone
 ```
 
 回滚时恢复上一版 `/opt/crystal/zone` 和内容备份，再执行 `--check`。数据库和 `Envir/Goods` 等运行数据必须在升级前备份。
+
+### 7.2 Agent 管理模式
+
+Agent 模式下不要直接替换运行目录或手工停止 ZoneServer；使用 Control API/CLI 命令：
+
+```bash
+./scripts/zone-control.sh stage <zoneId> <releaseId>
+./scripts/zone-control.sh activate <zoneId> <releaseId>
+./scripts/zone-control.sh rollback <zoneId> <releaseId>
+./scripts/zone-control.sh reload <zoneId>
+./scripts/zone-control.sh stop <zoneId>
+```
+
+`stage` 只下载和验签，不改变运行版本；`activate`、`rollback` 和 `reload` 会短暂停机并重启 ZoneServer；候选 ready 失败时
+Agent 自动恢复上一 active 版本。完整目录、systemd 和故障处理见 `zone-agent-linux.md`。
+
+### 7.3 ready 文件
+
+手工启动或排查时可指定：
+
+```bash
+sudo -u crystal /opt/crystal/zone/Crystal.ZoneServer   --content-root /var/lib/crystal/zone   --content-release /var/lib/crystal/agent/releases/123-<hash>   --content-public-key /etc/crystal/release-public.pem   --content-key-id local-dev   --ready-file /var/lib/crystal/agent/state/ready.json
+```
+
+ready 文件是原子写入的 JSON，包含 `pid`、`readyAt`、内容根和地图/物品等计数；进程正常或异常退出时会删除。
+不要用旧 ready 文件判断新进程状态，必须核对 `pid`。
 
 ## 8. 故障排查
 

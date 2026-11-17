@@ -27,6 +27,7 @@ fi
 
 if [ -n "${CRYSTAL_DATABASE_URL:-}" ] || [ -n "${CRYSTAL_DB_CONNECTION:-}" ]; then
   ./scripts/test-control-api.sh
+  ./scripts/test-zone-agent.sh
 else
-  echo "Skipping Control API integration: CRYSTAL_DATABASE_URL/CRYSTAL_DB_CONNECTION is not set."
+  echo "Skipping Control API and Zone Agent integration: CRYSTAL_DATABASE_URL/CRYSTAL_DB_CONNECTION is not set."
 fi

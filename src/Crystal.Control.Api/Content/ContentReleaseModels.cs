@@ -39,6 +39,12 @@ public sealed record ReleaseValidationReportDto(
     bool Valid,
     IReadOnlyList<ReleaseValidationIssueDto> Issues);
 
+public sealed record ReleaseArtifactInfo(
+    long ReleaseId,
+    string Version,
+    string ContentHash,
+    string Directory);
+
 public sealed class ReleaseNotFoundException : Exception
 {
     public ReleaseNotFoundException(string message) : base(message)

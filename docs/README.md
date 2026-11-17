@@ -54,7 +54,8 @@ docs/
 │   ├── 0008-multi-content-editor-registry.md
 │   ├── 0009-map-metadata-editor.md
 │   ├── 0010-m2-multi-content-editing-references-import-export-and-map-relations.md
-│   └── 0011-zone-server-read-only-signed-content-release.md
+│   ├── 0011-zone-server-read-only-signed-content-release.md
+│   └── 0012-zone-agent-process-level-content-switching.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源
@@ -71,7 +72,8 @@ docs/
 │   └── README.md                     参考手册索引（schema/包/配置/映射）
 └── runbooks/
     ├── README.md                     运行手册索引（故障与高压操作）
-    └── zone-server-linux.md          Ubuntu 区服部署与运行
+    ├── zone-server-linux.md          Ubuntu 区服部署与运行（legacy/发布模式）
+    └── zone-agent-linux.md           Zone Agent 安装、换版与故障恢复
 ```
 
 ## 4. 文档状态

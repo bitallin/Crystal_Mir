@@ -12,9 +12,9 @@ if (options.ShowHelp)
 
 try
 {
-    if (options.NpcScriptManifestPath is not null)
+    if (options.NpcScriptManifestPath is not null || options.DropManifestPath is not null)
     {
-        return WriteNpcScriptManifest(options);
+        return WriteReferenceManifests(options);
     }
 
     if (options.ExportPath is not null)
@@ -112,25 +112,52 @@ catch (Exception exception)
     return 1;
 }
 
-static int WriteNpcScriptManifest(ImportOptions options)
+static int WriteReferenceManifests(ImportOptions options)
 {
     using var session = LegacyDatabaseSession.Open(options.DatabasePath);
-    var names = session.Envir.NPCInfoList
-        .Select(npc => (npc.FileName ?? string.Empty).Trim().Replace('\\', '/').Trim('/'))
-        .Where(name => name.Length > 0)
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .Order(StringComparer.OrdinalIgnoreCase)
-        .ToArray();
-    var output = Path.GetFullPath(options.NpcScriptManifestPath!);
-    var directory = Path.GetDirectoryName(output);
-    if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-    File.WriteAllLines(output, names);
+    string? npcOutput = null;
+    int? npcCount = null;
+    if (options.NpcScriptManifestPath is not null)
+    {
+        var names = session.Envir.NPCInfoList
+            .Select(npc => (npc.FileName ?? string.Empty).Trim().Replace('\\', '/').Trim('/'))
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        npcOutput = Path.GetFullPath(options.NpcScriptManifestPath);
+        var directory = Path.GetDirectoryName(npcOutput);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        File.WriteAllLines(npcOutput, names);
+        npcCount = names.Length;
+    }
+
+    string? dropOutput = null;
+    int? dropCount = null;
+    if (options.DropManifestPath is not null)
+    {
+        var paths = session.Envir.MonsterInfoList
+            .Select(monster => string.IsNullOrWhiteSpace(monster.DropPath)
+                ? monster.Name
+                : monster.DropPath)
+            .Select(path => (path ?? string.Empty).Trim().Replace('\\', '/').Trim('/'))
+            .Where(path => path.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        dropOutput = Path.GetFullPath(options.DropManifestPath);
+        var directory = Path.GetDirectoryName(dropOutput);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        File.WriteAllLines(dropOutput, paths);
+        dropCount = paths.Length;
+    }
+
     Console.WriteLine(JsonSerializer.Serialize(new
     {
         database = session.SourcePath,
         databaseSha256 = session.SourceHash,
-        output,
-        count = names.Length
+        npcScriptManifest = npcOutput is null ? null : new { output = npcOutput, count = npcCount },
+        dropManifest = dropOutput is null ? null : new { output = dropOutput, count = dropCount }
     }, ContentJson.IndentedOptions));
     return 0;
 }
@@ -271,6 +298,8 @@ internal sealed class ImportOptions
 
     public string? NpcScriptManifestPath { get; init; }
 
+    public string? DropManifestPath { get; init; }
+
     public bool VerifyExport { get; init; } = true;
 
     public bool Force { get; init; }
@@ -295,6 +324,8 @@ internal sealed class ImportOptions
                                Rebuild and export from the latest imported PostgreSQL snapshot
           --npc-script-manifest <path>
                                Write the distinct NPC script names referenced by the database
+          --drop-manifest <path>
+                               Write the distinct monster drop paths referenced by the database
           --no-verify          Skip reloading and comparing an exported database
           --force              Replace snapshot files in a non-empty output directory
                                or replace an existing export file
@@ -314,6 +345,7 @@ internal sealed class ImportOptions
         string? snapshot = null;
         string? postgresSource = null;
         string? npcScriptManifest = null;
+        string? dropManifest = null;
         var databaseWasSpecified = false;
         var outputWasSpecified = false;
         var releaseWasSpecified = false;
@@ -362,6 +394,9 @@ internal sealed class ImportOptions
                 case "--npc-script-manifest":
                     npcScriptManifest = NextValue(args, ref index, argument);
                     break;
+                case "--drop-manifest":
+                    dropManifest = NextValue(args, ref index, argument);
+                    break;
                 case "--no-verify":
                     verifyExport = false;
                     break;
@@ -385,13 +420,13 @@ internal sealed class ImportOptions
                 "--export cannot be combined with --out, --release, --source, --content-root, --dsn, or --schema.");
         }
 
-        if (npcScriptManifest is not null &&
+        if ((npcScriptManifest is not null || dropManifest is not null) &&
             (outputWasSpecified || releaseWasSpecified || source is not null || contentRoot is not null ||
              dsn is not null || schema is not null || export is not null || snapshot is not null ||
              postgresSource is not null))
         {
             throw new ArgumentException(
-                "--npc-script-manifest cannot be combined with snapshot, export, PostgreSQL, or content options.");
+                "--npc-script-manifest and --drop-manifest cannot be combined with snapshot, export, PostgreSQL, or content options.");
         }
 
         if (snapshot is not null && postgresSource is not null)
@@ -434,6 +469,7 @@ internal sealed class ImportOptions
             SnapshotPath = snapshot,
             PostgresSourceConnectionString = postgresSource,
             NpcScriptManifestPath = npcScriptManifest,
+            DropManifestPath = dropManifest,
             VerifyExport = verifyExport,
             Force = force,
             ShowHelp = help
