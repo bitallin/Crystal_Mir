@@ -8,6 +8,35 @@ public static class ContentValidationRules
     public static IEnumerable<ReleaseValidationIssueDto> ValidateEntitySemantics(
         IReadOnlyList<ContentEntity> entities)
     {
+        var mapFileNames = entities
+            .Where(entity =>
+                entity.EntityType == ContentEntityTypes.Map &&
+                entity.Data.ValueKind == JsonValueKind.Object &&
+                entity.Data.TryGetProperty("FileName", out var fileName) &&
+                fileName.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(fileName.GetString()))
+            .Select(entity => new
+            {
+                Entity = entity,
+                FileName = entity.Data.GetProperty("FileName").GetString()!.Trim()
+            });
+
+        foreach (var duplicate in mapFileNames
+                     .GroupBy(item => item.FileName, StringComparer.OrdinalIgnoreCase)
+                     .Where(group => group.Count() > 1))
+        {
+            var contentKeys = duplicate.Select(item => item.Entity.ContentKey).Order(StringComparer.Ordinal).ToArray();
+            foreach (var item in duplicate)
+            {
+                var collidingKeys = contentKeys
+                    .Where(key => !string.Equals(key, item.Entity.ContentKey, StringComparison.Ordinal));
+                yield return new ReleaseValidationIssueDto(
+                    "map-file-name-duplicate",
+                    $"Map file name '{item.FileName}' is also used by {string.Join(", ", collidingKeys)}.",
+                    item.Entity.ContentKey);
+            }
+        }
+
         foreach (var entity in entities)
         {
             if (entity.Data.ValueKind != JsonValueKind.Object) continue;

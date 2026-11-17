@@ -1,7 +1,7 @@
 # Control API 参考
 
 > 最后更新：2026-11-16
-> 状态：生效（M1 草稿/发布闭环 + M2 多内容编辑器框架，已接入 `item`/`monster`）
+> 状态：生效（M1 草稿/发布闭环 + M2 多内容编辑器框架，已接入 `item`/`monster`/`map`）
 
 ## 1. 位置与边界
 
@@ -20,10 +20,11 @@
 - RBAC 权限校验、账号创建/停用/启用、密码修改/重置、角色调整和只读审计查询。
 - API key 机器到机器认证、登录限流和全局限流。
 - 从导入批次创建可编辑草稿、逐实体增改删、修订查询和草稿校验。
-- `item`/`monster` 编辑器 Schema、类型化自动索引创建、全字段结构校验和字段级错误。
+- `item`/`monster`/`map` 编辑器 Schema、类型化自动索引创建、全字段结构校验和字段级错误。
 - 从导入批次或草稿创建不可变发布版本，校验、编译、ECDSA 签名、发布和回滚。
 
-尚未实现：MFA/OIDC、账号删除、解锁接口、地图/NPC/掉落等其余内容域的专用编辑器、Zone Agent 服务和真实区服热切换。
+尚未实现：MFA/OIDC、账号删除、解锁接口、NPC/掉落等其余内容域的专用编辑器、地图嵌套关系 CRUD、
+Zone Agent 服务和真实区服热切换。
 
 ## 2. 配置
 
@@ -185,7 +186,7 @@ POST /api/v1/drafts/{id}/content/{entityType}
 ```
 
 `GET /editor-schemas/{entityType}` 要求 `content:read`，从 Control API 的 `entityType` 注册表返回分组字段定义；
-当前注册 `item` 和 `monster`，两者均为 `schemaVersion=1`，未注册类型返回 404。Schema 由 Control API 手工维护，
+当前注册 `item`、`monster` 和 `map`，均为 `schemaVersion=1`，未注册类型返回 404。Schema 由 Control API 手工维护，
 不引用 GPL 覆盖的 `Shared`/`Server` 程序集。字段包含
 `path`、`label`、`kind`、`required`、`readOnly`、`defaultValue`、`min`、`max`、`options` 和复合字段定义。
 
@@ -198,6 +199,11 @@ POST /api/v1/drafts/{id}/content/{entityType}
   `MaxMAC`、`MinDC`、`MaxDC`、`MinMC`、`MaxMC`、`MinSC`、`MaxSC`、`HP`、`Accuracy`、`Agility`，
   值为 32 位整数。
 - `Drops`、`HasSpawnScript`、`HasDieScript` 是运行时派生数据，不是可编辑字段；怪物编辑器只读取掉落关系。
+- `map` 覆盖 `identity`、`presentation`、`access`、`combat`、`population`、`territory` 六组共 44 个顶层标量字段；
+  `Index` 和 `WeatherParticles` 只读。`Light` 使用 `Normal`、`Dawn`、`Day`、`Evening`、`Night` 枚举；
+  16 位字段限制为 `0..65535`，8 位字段限制为 `0..255`，伤害、组队人数和防火墙数量必须是非负 32 位整数。
+- 地图的 `Movements`、`SafeZones`、`Respawns`、`NPCs`、`MineZones`、`ActiveCoords` 不属于 Schema；
+  保存时原样透传，地图编辑器只展示只读关系摘要。`WeatherParticles` 保持字符串以兼容旧位掩码值。
 - 其他顶层未知字段原样保留，避免旧数据或未来字段在编辑保存时丢失。
 
 类型化创建要求 `content:write`，仅对注册类型开放。物品请求体示例：
@@ -223,6 +229,7 @@ POST /api/v1/drafts/{id}/content/{entityType}
 - 草稿/发布校验报告 `<entityType>-completeness` 和 `<entityType>-content-key` 问题，例如缺少顶层字段、
   空名称、缺少 `Stats.Values`、部分随机属性或 `contentKey != <entityType>.<localIndex>`。
   旧物品内容缺少整个 `RandomStats` 表示全零随机属性，视为合法。
+- 地图 `FileName` 在草稿和发布集合内按 `Trim()` 后大小写不敏感唯一；冲突报告 `map-file-name-duplicate`。
 - 未知字段原样保留，避免旧数据或未来字段在编辑保存时丢失。
 
 ### 3.5 地图目录与内容关系
@@ -436,7 +443,7 @@ GET    /api/v1/drafts/{id}/revisions?entityType=&contentKey=&limit=100
 - 更新必须匹配当前实体 `revision`；删除请求体为 `{ "expectedRevision": 1, "reason": "..." }`。
 - 版本不一致返回 409，响应为 `application/problem+json`。
 - `contentKey` 创建后不可修改。每次变更追加修订记录，包含操作者、原因、前后数据和时间。
-- `item` 和 `monster` 推荐使用类型化创建接口自动分配索引；通用 `PUT` 仍可用于显式索引和旧内容迁移。
+- `item`、`monster` 和 `map` 推荐使用类型化创建接口自动分配索引；通用 `PUT` 仍可用于显式索引和旧内容迁移。
 - `validate` 返回并持久化 `contentHash`、实体数、`valid` 和问题列表；结果同时写入 `content_draft.last_validation`。
 
 ### 3.8 发布、回滚与 Manifest

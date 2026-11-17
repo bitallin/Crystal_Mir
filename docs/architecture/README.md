@@ -40,6 +40,7 @@
 | 许可证边界 | 控制面与 GPL 服务端代码隔离，跨边界只使用 MIT 契约 | `adr/0004-gpl-boundary.md` |
 | 草稿与回滚 | 草稿独立复制、逐实体 revision、发布冻结、回滚切换发布状态 | `adr/0006-content-drafts-and-release-rollback.md` |
 | 内容编辑器 | 按 `entityType` 注册手工 Schema、类型化自动索引、保存只阻断结构错误、发布校验完整性 | `adr/0007-item-editor-schema-and-validation.md`、`adr/0008-multi-content-editor-registry.md` |
+| 地图编辑器边界 | 顶层标量元数据可编辑；传送、安全区、刷新点、NPC、矿区和激活坐标只读；天气字段保持兼容字符串 | `adr/0009-map-metadata-editor.md` |
 
 ## 5. 文档索引
 

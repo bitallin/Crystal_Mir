@@ -14,10 +14,28 @@
 | --- | --- | --- |
 | `item` | 1 | 33 个顶层字段、`Stats.Values` 动态属性、`RandomStats` 下 70 个 0～255 字节字段 |
 | `monster` | 1 | `Index`、`Name`、`Image`、`DropPath`、`AI`、`Effect`、`Level`、`ViewRange`、`CoolEye`、`Light`、`AttackSpeed`、`MoveSpeed`、`Experience`、`CanTame`、`CanPush`、`AutoRev`、`Undead`、`CanRecall`、`IsBoss`、`Stats` |
+| `map` | 1 | 6 个分组共 44 个顶层字段：身份、客户端表现、访问控制、战斗与环境、人口与限制、矿区与攻城；`WeatherParticles` 和 `Index` 只读 |
+
+地图字段分组：
+
+- `identity`：`Index`、`FileName`、`Title`。
+- `presentation`：`MiniMap`、`BigMap`、`Music`、`Light`、`MapDarkLight`、`WeatherParticles`。
+- `access`：`NoTeleport`、`NoReconnect`、`NoReconnectMap`、`NoRandom`、`NoEscape`、`NoRecall`、
+  `NoTownTeleport`、`NoReincarnation`、`NeedHole`、`NoPosition`。
+- `combat`：`Fight`、`NoFight`、`Fire`、`FireDamage`、`Lightning`、`LightningDamage`、`FireWallLimit`、
+  `FireWallCount`、`NoDrug`、`NoThrowItem`、`NoDropPlayer`、`NoDropMonster`。
+- `population`：`NoNames`、`NoMount`、`NeedBridle`、`NoGroup`、`RequiredGroup`、`RequiredGroupSize`、
+  `NoPets`、`NoIntelligentCreatures`、`NoHero`、`NoExperience`。
+- `territory`：`GT`、`GTIndex`、`MineIndex`。
 
 怪物 `Stats.Values` 只允许 `MinAC`、`MaxAC`、`MinMAC`、`MaxMAC`、`MinDC`、`MaxDC`、`MinMC`、`MaxMC`、
 `MinSC`、`MaxSC`、`HP`、`Accuracy`、`Agility`，值为 32 位整数。`Image` 枚举和所有选项由 Control API
 手工清单维护，不引用 `Shared`/`Server` 程序集。
+
+地图编辑器只覆盖 `MapInfo` 顶层标量字段。`Movements`、`SafeZones`、`Respawns`、`NPCs`、`MineZones`、
+`ActiveCoords` 保持只读，通过未知字段透传在保存时原样保留；`WeatherParticles` 保留为只读字符串以兼容
+`"3"` 等无法命名的旧位掩码。地图 `FileName` 在草稿和发布集合内按去空格、大小写不敏感方式唯一，冲突报告
+`map-file-name-duplicate`。
 
 `Drops`、`HasSpawnScript`、`HasDieScript` 属于运行时派生数据，不进入怪物编辑器；未知顶层字段在草稿保存时原样透传。
 保存阶段只阻断结构错误，草稿/发布校验负责报告 `<entityType>-completeness` 和 `<entityType>-content-key` 问题。

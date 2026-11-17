@@ -1,14 +1,14 @@
 # 项目进度台账
 
 > 最后更新：2026-11-16
-> 当前阶段：M1 已完成；M2 已进入多内容编辑框架阶段，物品与怪物垂直切片已打通 Schema、类型化创建、两级校验、字段差异和 Web 闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
+> 当前阶段：M1 已完成；M2 已进入多内容编辑框架阶段，物品、怪物与地图元数据垂直切片已打通 Schema、类型化创建、两级校验、字段差异和 Web 闭环；M0 的 Windows 运行冒烟、systemd 实际安装和素材授权仍为外部阻塞
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0008 |
+| 架构决策 | 已完成初版 | ADR 0001～0009 |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts 构建成功；安全回归与内容快照检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；Jev 内容加载 463 张地图并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` 发布约 74 MB；提供 systemd 单元、安装脚本、发布脚本和部署运行手册；容器内未执行 systemd 实际安装 |
@@ -17,7 +17,7 @@
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；GitHub Actions 增加 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job |
-| 控制面 | 已完成初版并进入 M2 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持复制、增改删、revision 乐观并发、修订和校验；`entityType` 编辑器注册表已注册 `item`、`monster`，支持类型化自动索引创建和两级校验；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接物品/怪物草稿编辑、字段差异、发布中心、账号和审计页面 |
+| 控制面 | 已完成初版并进入 M2 | `Crystal.Control.Api` 内容查询暴露 15 类实体；草稿 API 支持复制、增改删、revision 乐观并发、修订和校验；`entityType` 编辑器注册表已注册 `item`、`monster`、`map`，支持类型化自动索引创建和两级校验；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；`Crystal.Control.Web` 已接物品/怪物/地图草稿编辑、字段差异、发布中心、账号和审计页面 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 未开始 | `Crystal.Agent.Contracts` 已定义注册/心跳/命令契约；Agent 服务、启动器和真实区服热切换尚未实现 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
@@ -29,13 +29,28 @@
 | --- | --- | --- | --- |
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
-| M2 内容后台 MVP | 进行中 | 25% | 多内容编辑器注册表、物品和怪物垂直切片已完成；地图/NPC/掉落等专用编辑器、资源预览和批量导入导出待做 |
+| M2 内容后台 MVP | 进行中 | 35% | 多内容编辑器注册表、物品、怪物和地图元数据垂直切片已完成；NPC/掉落等专用编辑器、地图嵌套关系 CRUD、资源预览和批量导入导出待做 |
 | M3 热更新与区服 Agent | 未开始 | 0% | 依赖 M1/M2 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-16（M2 地图元数据编辑器垂直切片）
+
+- 范围：把 `map` 注册为第三种 Schema 驱动编辑器，复用现有草稿创建、更新、删除、revision 冲突、校验和发布链路；只编辑地图顶层标量元数据，不新增数据库迁移，不改变内容快照格式、客户端协议或 GPL 边界。
+- 后端：新增 `ContentMapEditorSchema.cs`，注册到 `ContentEditorSchemas`；`GET /api/v1/editor-schemas/map` 返回 6 个分组、44 个字段及整数范围、`Light` 枚举和只读信息。`Index`、`WeatherParticles` 只读，后者默认 `"None"`，避免改写旧位掩码字符串。
+- 字段边界：覆盖身份、客户端表现、访问控制、战斗与环境、人口与限制、矿区与攻城；`Movements`、`SafeZones`、`Respawns`、`NPCs`、`MineZones`、`ActiveCoords` 不进入 Schema，保存时通过未知字段透传原样保留。
+- 校验：保存阶段阻断整数类型/范围、字符串、布尔、枚举、`Index == localIndex` 和 `contentKey == map.<localIndex>` 错误；草稿/发布校验生成 `map-completeness`、`map-content-key`，并新增地图 `FileName` 去空格、大小写不敏感的唯一性检查，冲突生成 `map-file-name-duplicate`。
+- 类型化生命周期：服务端继续为新建地图分配下一个 `localIndex`、覆盖 `Index` 并生成 `map.<index>`；新建地图不主动生成嵌套集合，缺失集合按旧模型默认空集合处理。地图更新、删除和包含地图修改的草稿发布继续走既有发布链路。
+- 前端：`map` 加入可编辑类型和编辑器元数据；地图列表在活动草稿下读取草稿数据，点击进入地图编辑抽屉。抽屉增加只读“地图关系”摘要，展示传送、安全区、NPC、刷新点数量与首批明细；新草稿地图或基础批次无关系时显示空状态，不把 404 当作错误。
+- API 集成：`scripts/test-control-api.sh` 覆盖地图 Schema 的 200/44 字段/枚举/只读、标题/小地图/光照/布尔/伤害修改、嵌套集合数量保持、非法范围/枚举/类型/`Index`/`contentKey` 400、stale revision 409、`map-completeness` 与 `map-file-name-duplicate`，以及地图创建/更新/删除和发布闭环。
+- Web 集成：`scripts/test-control-web.sh` 覆盖地图列表、编辑抽屉、字段差异、保存、400 字段错误、409 载入最新 revision、新建/删除、真实关系计数、空关系状态和只读账号无编辑入口；同时修正测试中搜索框跨查询未清空导致的临时记录过滤问题。
+- 验证：`DOTNET=/root/.dotnet/dotnet ./scripts/test-control-api.sh` 在临时 PostgreSQL 16 上通过；随后以 `SKIP_API_SETUP=1` 运行 `./scripts/test-control-web.sh` 通过；带 PostgreSQL 16 的完整 `./scripts/ci.sh` 通过（构建、358 项安全回归、39 项内容快照检查、边界检查、黄金导入/导出、Zone 冒烟和 Control API 集成）；JavaScript/Shell 语法检查和 `git diff --check` 通过。
+- 文档：新增 ADR 0009；同步 ADR 索引、文档地图、架构决策摘要、内容字段清单、Control API 参考与 README、Web README、能力矩阵、里程碑和本台账。
+- 未验证：地图嵌套关系 CRUD、地图文件上传/资源预览、天气 flags 编辑协议、Windows 客户端实际加载修改后的地图元数据、生产环境灰度发布。
+- 下一步：继续 M2 的 NPC 脚本/掉落等专用编辑器，并评估地图关系编辑所需的坐标、引用选择和并发语义；M0 外部阻塞保持不变。
 
 ### 2026-11-16（M2 怪物编辑器垂直切片与多内容编辑框架）
 

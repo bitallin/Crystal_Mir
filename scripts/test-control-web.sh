@@ -282,6 +282,8 @@ with sync_playwright() as playwright:
     page.click('#content-editor [data-action="editor-save"]')
     page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
 
+    page.fill("#content-search-items", "")
+    page.wait_for_timeout(500)
     page.fill("#content-search-items", "UITempItem")
     page.wait_for_timeout(1200)
     page.click('[data-action="open-content-editor-new"][data-entity-type="item"]')
@@ -298,16 +300,6 @@ with sync_playwright() as playwright:
     page.click('#content-editor [data-action="editor-delete-confirm"]')
     page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempItem')", timeout=15000)
-
-    page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
-    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
-    page.locator("#content-table tbody tr.content-row").first.click()
-    page.wait_for_function("document.querySelector('#live-drawer-relations')?.innerText.includes('真实世界关系')", timeout=15000)
-    map_drawer_text = page.locator("#live-drawer-relations").inner_text()
-    assert "360" in map_drawer_text and "map.1" in map_drawer_text, map_drawer_text[:1200]
-    assert "script.BichonProvince.BorderVillage.Transport" in map_drawer_text, map_drawer_text[:1200]
-    assert "Maps/0.map" in map_drawer_text and "10 × 10 · 1 · 1" in map_drawer_text, map_drawer_text[:1200]
-    page.click('[data-action="close-drawer"]')
 
     page.goto(f"{web}/?api={api}#/content/monsters", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
@@ -375,6 +367,8 @@ with sync_playwright() as playwright:
     page.click('#content-editor [data-action="editor-save"]')
     page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
 
+    page.fill("#content-search-monsters", "")
+    page.wait_for_timeout(500)
     page.fill("#content-search-monsters", "UITempMonster")
     page.wait_for_timeout(1200)
     page.click('[data-action="open-content-editor-new"][data-entity-type="monster"]')
@@ -394,6 +388,98 @@ with sync_playwright() as playwright:
     page.click('#content-editor [data-action="editor-delete-confirm"]')
     page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
     page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempMonster')", timeout=15000)
+
+    page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
+    page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    page.fill("#content-search-maps", "Bichon")
+    page.wait_for_timeout(1200)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+    assert page.locator("#content-editor .editor-field").count() == 44
+    assert page.locator('#content-editor [data-edit-path="WeatherParticles"]').is_disabled()
+    assert page.locator('#content-editor [data-edit-path="Movements"]').count() == 0
+    page.wait_for_function("document.querySelector('#content-editor [data-editor-map-relations]')?.innerText.includes('72')", timeout=15000)
+    map_relations_text = page.locator("#content-editor [data-editor-map-relations]").inner_text()
+    assert "360" in map_relations_text and "读取失败" not in map_relations_text, map_relations_text[:1200]
+    page.fill('#content-editor [data-edit-path="Title"]', "BichonProvinceUI")
+    page.fill('#content-editor [data-edit-path="MiniMap"]', "127")
+    page.select_option('#content-editor [data-edit-path="Light"]', "Dawn")
+    page.check('#content-editor [data-edit-path="NoTeleport"]')
+    page.fill('#content-editor [data-edit-path="FireDamage"]', "30")
+    page.fill("#editor-reason", "Web UI map metadata update")
+    page.wait_for_function("document.querySelector('#editor-diff')?.innerText.includes('BichonProvinceUI')", timeout=5000)
+    assert "MiniMap" in page.locator("#editor-diff").inner_text()
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('BichonProvinceUI')", timeout=15000)
+
+    edited_map = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/1", token=admin_token)
+    assert edited_map["revision"] == 2, edited_map
+    assert edited_map["data"]["Title"] == "BichonProvinceUI", edited_map["data"]
+    assert edited_map["data"]["MiniMap"] == 127, edited_map["data"]
+    assert edited_map["data"]["Light"] == "Dawn", edited_map["data"]
+    assert edited_map["data"]["NoTeleport"] is True, edited_map["data"]
+    assert edited_map["data"]["FireDamage"] == 30, edited_map["data"]
+    assert len(edited_map["data"]["Movements"]) == 72, edited_map["data"]
+    assert len(edited_map["data"]["SafeZones"]) == 6, edited_map["data"]
+    assert len(edited_map["data"]["Respawns"]) == 360, edited_map["data"]
+
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+    page.click('#content-editor [data-action="editor-validate"]')
+    page.wait_for_selector("#content-editor [data-editor-validation]", timeout=60000)
+    map_validation_text = page.locator("#content-editor [data-editor-validation]").inner_text()
+    assert "通过" in map_validation_text, map_validation_text[:1200]
+
+    concurrent_map = api_request("GET", f"/api/v1/drafts/{draft_ui_id}/content/map/1", token=admin_token)
+    concurrent_map_data = concurrent_map["data"]
+    concurrent_map_data["Title"] = "BichonProvinceConcurrent"
+    api_request("PUT", f"/api/v1/drafts/{draft_ui_id}/content/map/1", {
+        "contentKey": concurrent_map["contentKey"],
+        "schemaVersion": concurrent_map["schemaVersion"],
+        "data": concurrent_map_data,
+        "expectedRevision": concurrent_map["revision"],
+        "reason": "Web UI simulate concurrent map edit"
+    }, admin_token)
+    page.fill('#content-editor [data-edit-path="Title"]', "BichonProvinceConflictSave")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector("#content-editor [data-editor-conflict]", timeout=15000)
+    assert page.locator('#content-editor [data-edit-path="Title"]').input_value() == "BichonProvinceConflictSave"
+    page.click('#content-editor [data-action="editor-reload"]')
+    page.wait_for_function(
+        "() => document.querySelector('#content-editor [data-edit-path=Title]')?.value === 'BichonProvinceConcurrent'",
+        timeout=15000)
+
+    page.fill('#content-editor [data-edit-path="MiniMap"]', "-1")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_selector('#content-editor .editor-field[data-field-path="MiniMap"].has-error', timeout=15000)
+    assert "between" in page.locator('#content-editor .editor-field[data-field-path="MiniMap"]').inner_text()
+    page.fill('#content-editor [data-edit-path="MiniMap"]', "127")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+
+    page.fill("#content-search-maps", "")
+    page.wait_for_timeout(500)
+    page.fill("#content-search-maps", "UITempMap")
+    page.wait_for_timeout(1200)
+    page.click('[data-action="open-content-editor-new"][data-entity-type="map"]')
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+    assert "保存时自动分配本地索引" in page.locator("#content-editor").inner_text()
+    page.fill('#content-editor [data-edit-path="FileName"]', "UITempMap")
+    page.fill('#content-editor [data-edit-path="Title"]', "UITempMap")
+    page.fill("#editor-reason", "Web UI create temporary map")
+    page.click('#content-editor [data-action="editor-save"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("document.querySelector('#content-table tbody')?.innerText.includes('UITempMap')", timeout=15000)
+    page.locator("#content-table tbody tr.content-row").first.click()
+    page.wait_for_selector('#content-editor[data-editor-entity-type="map"] .js-content-editor', timeout=15000)
+    page.wait_for_function("document.querySelector('#content-editor [data-editor-map-relations]')?.innerText.includes('基础批次没有该地图的关系数据')", timeout=15000)
+    assert "地图关系读取失败" not in page.locator("#content-editor").inner_text()
+    page.click('#content-editor [data-action="editor-delete-request"]')
+    page.wait_for_selector('#content-editor [data-action="editor-delete-confirm"]', timeout=5000)
+    page.click('#content-editor [data-action="editor-delete-confirm"]')
+    page.wait_for_function("!document.querySelector('#content-editor')", timeout=30000)
+    page.wait_for_function("!document.querySelector('#content-table tbody')?.innerText.includes('UITempMap')", timeout=15000)
 
     page.goto(f"{web}/?api={api}#/content/recipes", wait_until="networkidle")
     page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
@@ -698,10 +784,18 @@ with sync_playwright() as playwright:
     assert auditor_page.locator("#content-editor").count() == 0
     assert auditor_page.locator('[data-action="editor-save"]').count() == 0
 
+    auditor_page.goto(f"{web}/?api={api}#/content/maps", wait_until="networkidle")
+    auditor_page.wait_for_selector("#content-table tbody tr.content-row", timeout=15000)
+    assert auditor_page.locator('[data-action="open-content-editor-new"][data-entity-type="map"]').count() == 0
+    auditor_page.locator("#content-table tbody tr.content-row").first.click()
+    auditor_page.wait_for_selector("#live-drawer-relations", timeout=10000)
+    assert auditor_page.locator("#content-editor").count() == 0
+    assert auditor_page.locator('[data-action="editor-save"]').count() == 0
+
     assert not errors, errors
     assert not failed, failed
     assert not finance_errors, finance_errors
     assert not auditor_errors, auditor_errors
-    print("Control Web integration verified: login, live overview, import runs, item/monster draft editors, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, item/monster/map draft editors, content query/search, live map/monster/recipe/script/asset relations, script AST validation, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY

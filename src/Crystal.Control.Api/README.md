@@ -1,7 +1,7 @@
 # Crystal.Control.Api
 
 控制面 API，读取 PostgreSQL 中的内容、账号、角色和审计数据。内容查询暴露 15 类实体；草稿接口支持复制、
-修订、类型化编辑和发布校验，其中 `item`、`monster` 提供 Schema 驱动的结构校验和 Web 编辑器闭环。账号登录、
+修订、类型化编辑和发布校验，其中 `item`、`monster`、`map` 提供 Schema 驱动的结构校验和 Web 编辑器闭环。账号登录、
 会话、RBAC、账号生命周期和审计已提供初版。
 
 ## 运行
@@ -95,10 +95,14 @@ summary 和按实体类型拆分的 JSONL 文件。
 `entityType` 使用 `item`、`monster`、`map`、`npc`、`quest`、`magic`、`gameshop`、`conquest`、`dragon`、`respawn`、`drop`、`recipe`、`buff`、`script`、`asset`，共 15 类。
 `importRunId` 省略时使用最新 `imported` 批次。`sort` 只允许 `index`、`key`、`name`。
 
-当前只注册 `item`、`monster` 两种编辑器 Schema，均为 `schemaVersion=1`。类型化创建仅对注册类型开放，
+当前注册 `item`、`monster`、`map` 三种编辑器 Schema，均为 `schemaVersion=1`。类型化创建仅对注册类型开放，
 服务端会覆盖 `Index` 并生成 `<entityType>.<localIndex>`；保存阻断类型、范围、枚举、布尔值、`Index`/`contentKey`
 和 `Stats.Values` 等结构错误，字段缺失、空名称和内容键不一致由草稿/发布校验报告为
 `<entityType>-completeness`、`<entityType>-content-key`。
+
+地图编辑器覆盖 44 个顶层标量字段，分为身份、客户端表现、访问控制、战斗与环境、人口与限制、矿区与攻城六组。
+传送、安全区、刷新点、NPC、矿区和激活坐标保持只读并通过未知字段透传；`WeatherParticles` 保留为只读字符串以兼容
+旧位掩码。地图 `FileName` 在草稿和发布集合内按去空格、大小写不敏感唯一，冲突报告 `map-file-name-duplicate`。
 
 内容接口要求 `content:read`，账号管理要求 `account:read`/`account:write`，审计查询要求
 `audit:read`，资源文件下载要求 `asset:read`。发布读取、创建/校验/编译/签名和发布分别要求
@@ -121,6 +125,6 @@ CRYSTAL_DATABASE_URL="$CRYSTAL_DB_CONNECTION" ./scripts/test-control-web.sh
 ECDSA P-256 签名密钥，并用 PostgreSQL 的 `content_release` 表验证完整状态流转。
 `test-control-web.sh` 在真实 API 上启动静态后台，用 Playwright 验证登录失败/成功、内容总览、
 导入批次、内容分页检索、搜索焦点、访问令牌刷新、账号创建/停用/启用/重置密码/角色调整、
-脚本 AST/校验、地图尺寸/阻挡、资源下载与 SHA256、物品/怪物草稿编辑与只读权限、角色权限矩阵、审计查询与 CSV 导出、登出、
+脚本 AST/校验、地图尺寸/阻挡、资源下载与 SHA256、物品/怪物/地图草稿编辑与只读权限、角色权限矩阵、审计查询与 CSV 导出、登出、
 财务账号导航/403 和控制台错误；需要 Python Playwright。Web 集成脚本启动 API 时必须设置
 `ControlApi__AssetRoot` 指向测试内容根。

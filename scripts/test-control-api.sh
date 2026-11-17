@@ -161,6 +161,7 @@ curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/asset/1/file" >"$TMP/
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/content/npc/1/script" >"$TMP/npc-script.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/item" >"$TMP/item-schema.json"
 curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/monster" >"$TMP/monster-schema.json"
+curl -fsS --max-time 10 "${AUTH[@]}" "$BASE/api/v1/editor-schemas/map" >"$TMP/map-schema.json"
 UNKNOWN_SCHEMA_STATUS="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "X-Api-Key: $API_KEY" "$BASE/api/v1/editor-schemas/unknown")"
 if [ "$UNKNOWN_SCHEMA_STATUS" != "404" ]; then
   echo "Expected unknown editor schema to return 404, got $UNKNOWN_SCHEMA_STATUS." >&2
@@ -245,6 +246,33 @@ assert {option["value"] for option in stats_field["options"]} == {
 assert all(next(field for field in monster_fields if field["path"] == path)["kind"] == "boolean" for path in (
     "CanTame", "CanPush", "AutoRev", "Undead", "CanRecall", "IsBoss"
 ))
+
+map_schema = load("map-schema.json")
+assert map_schema["entityType"] == "map", map_schema
+assert map_schema["schemaVersion"] == 1, map_schema
+map_sections = {section["id"]: section for section in map_schema["sections"]}
+assert set(map_sections) == {"identity", "presentation", "access", "combat", "population", "territory"}, map_schema["sections"]
+map_fields = [field for section in map_schema["sections"] for field in section.get("fields", [])]
+map_paths = {field["path"] for field in map_fields}
+assert len(map_fields) == 44, map_fields
+assert map_paths == {
+    "Index", "FileName", "Title",
+    "MiniMap", "BigMap", "Music", "Light", "MapDarkLight", "WeatherParticles",
+    "NoTeleport", "NoReconnect", "NoReconnectMap", "NoRandom", "NoEscape", "NoRecall",
+    "NoTownTeleport", "NoReincarnation", "NeedHole", "NoPosition",
+    "Fight", "NoFight", "Fire", "FireDamage", "Lightning", "LightningDamage",
+    "FireWallLimit", "FireWallCount", "NoDrug", "NoThrowItem", "NoDropPlayer", "NoDropMonster",
+    "NoNames", "NoMount", "NeedBridle", "NoGroup", "RequiredGroup", "RequiredGroupSize",
+    "NoPets", "NoIntelligentCreatures", "NoHero", "NoExperience",
+    "GT", "GTIndex", "MineIndex",
+}, map_paths
+assert {"Movements", "SafeZones", "Respawns", "NPCs", "MineZones", "ActiveCoords"}.isdisjoint(map_paths), map_paths
+assert next(field for field in map_fields if field["path"] == "Index")["readOnly"] is True, map_fields
+weather_field = next(field for field in map_fields if field["path"] == "WeatherParticles")
+assert weather_field["kind"] == "string" and weather_field["readOnly"] is True, weather_field
+light_field = next(field for field in map_fields if field["path"] == "Light")
+assert light_field["kind"] == "enum", light_field
+assert [option["value"] for option in light_field["options"]] == ["Normal", "Dawn", "Day", "Evening", "Night"], light_field
 
 map_catalog = load("map-catalog.json")
 assert map_catalog["entityType"] == "map", map_catalog
@@ -594,6 +622,8 @@ curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/item/1" >"$TMP/draft-item.json"
 curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1" >"$TMP/draft-monster.json"
+curl -fsS --max-time 20 -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map/1" >"$TMP/draft-map.json"
 
 python3 - "$TMP/draft-item.json" "$TMP/draft-update-body.json" <<'PY'
 import json, sys
@@ -651,6 +681,78 @@ STALE_MONSTER_REVISION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_
   --data "$DRAFT_MONSTER_UPDATE_BODY" "$BASE/api/v1/drafts/$DRAFT_ID/content/monster/1")"
 if [ "$STALE_MONSTER_REVISION_STATUS" != "409" ]; then
   echo "Expected stale monster revision update to return 409, got $STALE_MONSTER_REVISION_STATUS." >&2
+  exit 1
+fi
+
+python3 - "$TMP/draft-map.json" "$TMP/draft-map-update-body.json" <<'PY'
+import json, sys
+entity = json.load(open(sys.argv[1]))
+data = entity["data"]
+data["Title"] = "BichonProvinceDraft"
+data["MiniMap"] = 126
+data["Light"] = "Dawn"
+data["NoTeleport"] = True
+data["FireDamage"] = 25
+data["LegacyEditorNote"] = {"source": "integration"}
+body = {
+    "contentKey": entity["contentKey"],
+    "schemaVersion": 1,
+    "expectedRevision": entity["revision"],
+    "reason": "integration map draft update",
+    "data": data,
+}
+json.dump(body, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY
+DRAFT_MAP_UPDATE_BODY="$(cat "$TMP/draft-map-update-body.json")"
+curl -fsS --max-time 20 -X PUT -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' --data "$DRAFT_MAP_UPDATE_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map/1" >"$TMP/draft-map-updated.json"
+
+STALE_MAP_REVISION_STATUS="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+  --data "$DRAFT_MAP_UPDATE_BODY" "$BASE/api/v1/drafts/$DRAFT_ID/content/map/1")"
+if [ "$STALE_MAP_REVISION_STATUS" != "409" ]; then
+  echo "Expected stale map revision update to return 409, got $STALE_MAP_REVISION_STATUS." >&2
+  exit 1
+fi
+
+put_invalid_map() {
+  local output="$1"
+  local data="$2"
+  local content_key="${3:-map.1}"
+  curl -sS --max-time 20 -o "$output" -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $AUTHOR_ACCESS" -H 'Content-Type: application/json' \
+    --data "$(printf '{"contentKey":"%s","schemaVersion":1,"expectedRevision":2,"data":%s}' "$content_key" "$data")" \
+    "$BASE/api/v1/drafts/$DRAFT_ID/content/map/1"
+}
+
+INVALID_MAP_RANGE_STATUS="$(put_invalid_map "$TMP/invalid-map-range-error.json" '{"Index":1,"MiniMap":65536}')"
+if [ "$INVALID_MAP_RANGE_STATUS" != "400" ]; then
+  echo "Expected out-of-range map MiniMap to return 400, got $INVALID_MAP_RANGE_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MAP_LIGHT_STATUS="$(put_invalid_map "$TMP/invalid-map-light-error.json" '{"Index":1,"Light":"Noon"}')"
+if [ "$INVALID_MAP_LIGHT_STATUS" != "400" ]; then
+  echo "Expected invalid map Light to return 400, got $INVALID_MAP_LIGHT_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MAP_BOOLEAN_STATUS="$(put_invalid_map "$TMP/invalid-map-boolean-error.json" '{"Index":1,"NoTeleport":"yes"}')"
+if [ "$INVALID_MAP_BOOLEAN_STATUS" != "400" ]; then
+  echo "Expected invalid map boolean to return 400, got $INVALID_MAP_BOOLEAN_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MAP_INDEX_STATUS="$(put_invalid_map "$TMP/invalid-map-index-error.json" '{"Index":2,"Title":"WrongMapIndex"}')"
+if [ "$INVALID_MAP_INDEX_STATUS" != "400" ]; then
+  echo "Expected mismatched map Index to return 400, got $INVALID_MAP_INDEX_STATUS." >&2
+  exit 1
+fi
+
+INVALID_MAP_KEY_STATUS="$(put_invalid_map "$TMP/invalid-map-key-error.json" '{"Index":1,"Title":"WrongMapKey"}' 'map.999999')"
+if [ "$INVALID_MAP_KEY_STATUS" != "400" ]; then
+  echo "Expected mismatched map contentKey to return 400, got $INVALID_MAP_KEY_STATUS." >&2
   exit 1
 fi
 
@@ -791,8 +893,34 @@ curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
 ADDED_MONSTER_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-monster-added.json")"
 ADDED_MONSTER_KEY="monster.${ADDED_MONSTER_INDEX}"
 
+ADDED_MAP_BODY='{"schemaVersion":1,"reason":"integration draft add duplicate map","data":{"FileName":"0","Title":"DuplicateMap"}}'
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$ADDED_MAP_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map" >"$TMP/draft-map-added.json"
+ADDED_MAP_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-map-added.json")"
+ADDED_MAP_KEY="map.${ADDED_MAP_INDEX}"
+
+ADDED_INCOMPLETE_MAP_BODY='{"schemaVersion":1,"reason":"integration draft add incomplete map","data":{"FileName":"DraftIncompleteMap"}}'
+curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data "$ADDED_INCOMPLETE_MAP_BODY" \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map" >"$TMP/draft-map-incomplete-added.json"
+ADDED_INCOMPLETE_MAP_INDEX="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["localIndex"])' "$TMP/draft-map-incomplete-added.json")"
+ADDED_INCOMPLETE_MAP_KEY="map.${ADDED_INCOMPLETE_MAP_INDEX}"
+
 curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $AUTHOR_ACCESS" \
   "$BASE/api/v1/drafts/$DRAFT_ID/validate" >"$TMP/draft-incomplete-report.json"
+
+curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"integration incomplete map draft delete"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map/$ADDED_INCOMPLETE_MAP_INDEX"
+
+curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
+  -H 'Content-Type: application/json' \
+  --data '{"expectedRevision":1,"reason":"integration duplicate map draft delete"}' \
+  "$BASE/api/v1/drafts/$DRAFT_ID/content/map/$ADDED_MAP_INDEX"
 
 curl -fsS --max-time 20 -X DELETE -H "Authorization: Bearer $AUTHOR_ACCESS" \
   -H 'Content-Type: application/json' \
@@ -1314,12 +1442,50 @@ assert "Stats.Values.HP" in load("invalid-monster-stat-range-error.json")["error
 assert "Index" in load("invalid-monster-index-error.json")["errors"], load("invalid-monster-index-error.json")
 assert "contentKey" in load("invalid-monster-key-error.json")["errors"], load("invalid-monster-key-error.json")
 
+draft_map = load("draft-map.json")
+assert draft_map["contentKey"] == "map.1", draft_map
+assert draft_map["data"]["Title"] == "BichonProvince", draft_map["data"]
+assert len(draft_map["data"]["Movements"]) == 72, draft_map["data"]
+assert len(draft_map["data"]["SafeZones"]) == 6, draft_map["data"]
+assert len(draft_map["data"]["Respawns"]) == 360, draft_map["data"]
+draft_map_updated = load("draft-map-updated.json")
+assert draft_map_updated["revision"] == 2, draft_map_updated
+assert draft_map_updated["data"]["Title"] == "BichonProvinceDraft", draft_map_updated["data"]
+assert draft_map_updated["data"]["MiniMap"] == 126, draft_map_updated["data"]
+assert draft_map_updated["data"]["Light"] == "Dawn", draft_map_updated["data"]
+assert draft_map_updated["data"]["NoTeleport"] is True, draft_map_updated["data"]
+assert draft_map_updated["data"]["FireDamage"] == 25, draft_map_updated["data"]
+assert draft_map_updated["data"]["WeatherParticles"] == "None", draft_map_updated["data"]
+assert draft_map_updated["data"]["LegacyEditorNote"] == {"source": "integration"}, draft_map_updated["data"]
+assert len(draft_map_updated["data"]["Movements"]) == 72, draft_map_updated["data"]
+assert len(draft_map_updated["data"]["SafeZones"]) == 6, draft_map_updated["data"]
+assert len(draft_map_updated["data"]["Respawns"]) == 360, draft_map_updated["data"]
+draft_map_added = load("draft-map-added.json")
+assert draft_map_added["revision"] == 1, draft_map_added
+assert draft_map_added["contentKey"] == f"map.{draft_map_added['localIndex']}", draft_map_added
+assert draft_map_added["data"]["Index"] == draft_map_added["localIndex"], draft_map_added
+assert draft_map_added["data"]["FileName"] == "0", draft_map_added
+draft_incomplete_map_added = load("draft-map-incomplete-added.json")
+assert draft_incomplete_map_added["revision"] == 1, draft_incomplete_map_added
+assert draft_incomplete_map_added["contentKey"] == f"map.{draft_incomplete_map_added['localIndex']}", draft_incomplete_map_added
+assert draft_incomplete_map_added["data"]["FileName"] == "DraftIncompleteMap", draft_incomplete_map_added
+
+assert "MiniMap" in load("invalid-map-range-error.json")["errors"], load("invalid-map-range-error.json")
+assert "Light" in load("invalid-map-light-error.json")["errors"], load("invalid-map-light-error.json")
+assert "NoTeleport" in load("invalid-map-boolean-error.json")["errors"], load("invalid-map-boolean-error.json")
+assert "Index" in load("invalid-map-index-error.json")["errors"], load("invalid-map-index-error.json")
+assert "contentKey" in load("invalid-map-key-error.json")["errors"], load("invalid-map-key-error.json")
+
 incomplete_report = load("draft-incomplete-report.json")
 assert incomplete_report["valid"] is False, incomplete_report
 assert any(issue["code"] == "item-completeness" and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 assert any(issue["message"] == "Missing required item field 'Stats.Values'." and issue["contentKey"] == draft_item_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 assert any(issue["code"] == "monster-completeness" and issue["contentKey"] == draft_monster_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
 assert any(issue["message"] == "Missing required monster field 'Stats.Values'." and issue["contentKey"] == draft_monster_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["code"] == "map-completeness" and issue["contentKey"] == draft_incomplete_map_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["message"] == "Missing required map field 'Title'." and issue["contentKey"] == draft_incomplete_map_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["code"] == "map-file-name-duplicate" and issue["contentKey"] == draft_map_added["contentKey"] for issue in incomplete_report["issues"]), incomplete_report
+assert any(issue["code"] == "map-file-name-duplicate" and issue["contentKey"] == "map.1" for issue in incomplete_report["issues"]), incomplete_report
 
 invalid_report = load("draft-invalid-report.json")
 assert invalid_report["valid"] is False, invalid_report
@@ -1336,6 +1502,11 @@ assert any(revision["action"] == "delete" and revision["contentKey"] == draft_it
 assert any(revision["action"] == "update" and revision["contentKey"] == "monster.1" and revision["reason"] == "integration monster draft update" for revision in revisions), revisions
 assert any(revision["action"] == "create" and revision["contentKey"] == draft_monster_added["contentKey"] for revision in revisions), revisions
 assert any(revision["action"] == "delete" and revision["contentKey"] == draft_monster_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "update" and revision["contentKey"] == "map.1" and revision["reason"] == "integration map draft update" for revision in revisions), revisions
+assert any(revision["action"] == "create" and revision["contentKey"] == draft_map_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "delete" and revision["contentKey"] == draft_map_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "create" and revision["contentKey"] == draft_incomplete_map_added["contentKey"] for revision in revisions), revisions
+assert any(revision["action"] == "delete" and revision["contentKey"] == draft_incomplete_map_added["contentKey"] for revision in revisions), revisions
 assert any(revision["beforeData"] is not None and revision["afterData"] is not None for revision in revisions), revisions
 
 draft_release_created = load("draft-release-created.json")
@@ -1381,4 +1552,4 @@ assert any(e["action"] == "draft.validate" and e["result"] == "failure" for e in
 assert any(e["action"] == "release.rollback" and e["result"] == "success" and e["metadata"].get("targetReleaseId") == created["id"] for e in events), events
 PY
 
-echo "Control API integration verified (run $RUN_ID, 15 entity types, item/monster editors, drafts/revisions, auth/RBAC/audit/relations/release lifecycle, explicit/default rollback)."
+echo "Control API integration verified (run $RUN_ID, 15 entity types, item/monster/map editors, drafts/revisions, auth/RBAC/audit/relations/release lifecycle, explicit/default rollback)."

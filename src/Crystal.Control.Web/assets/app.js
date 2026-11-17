@@ -78,10 +78,11 @@
   }
 
   const LIVE_ENTITY_TYPES = new Set(["item", "monster", "map", "npc", "quest", "magic", "gameshop", "conquest", "dragon", "respawn", "drop", "recipe", "buff", "script", "asset"]);
-  const EDITABLE_ENTITY_TYPES = new Set(["item", "monster"]);
+  const EDITABLE_ENTITY_TYPES = new Set(["item", "monster", "map"]);
   const EDITOR_META = Object.freeze({
     item: { typeId: "items", singular: "物品", eyebrow: "ITEM", icon: "sword" },
-    monster: { typeId: "monsters", singular: "怪物", eyebrow: "MONSTER", icon: "monster" }
+    monster: { typeId: "monsters", singular: "怪物", eyebrow: "MONSTER", icon: "monster" },
+    map: { typeId: "maps", singular: "地图", eyebrow: "MAP", icon: "map" }
   });
 
   const ROUTE_PERMISSIONS = Object.freeze({
@@ -3601,6 +3602,36 @@
     return `<div class="detail-section"><div class="detail-section-title"><span>掉落关系（只读）</span><span class="tag gold">${esc(editor.drops?.dropContentKey || "当前批次")}</span></div>${body}</div>`;
   }
 
+  function contentEditorMapRelationsMarkup(editor) {
+    if (editor.entityType !== "map" || editor.mode === "create") return "";
+    const relations = editor.mapRelations;
+    const movements = relations?.movements || [];
+    const safeZones = relations?.safeZones || [];
+    const npcs = relations?.npcs || [];
+    const respawns = relations?.respawns?.items || [];
+    const respawnTotal = relations?.respawns?.total || 0;
+    const body = editor.mapRelationsLoading
+      ? `<div class="empty-inline">${I("refresh", 14)} 正在读取只读地图关系...</div>`
+      : editor.mapRelationsError
+        ? `<div class="empty-inline">地图关系读取失败：${esc(editor.mapRelationsError)}</div>`
+        : relations?.map
+          ? `<div class="data-list">
+              <div class="data-row"><span>传送 / 出入口</span><strong>${formatNumber(movements.length)}</strong></div>
+              <div class="data-row"><span>安全区</span><strong>${formatNumber(safeZones.length)}</strong></div>
+              <div class="data-row"><span>NPC</span><strong>${formatNumber(npcs.length)}</strong></div>
+              <div class="data-row"><span>刷新点</span><strong>${formatNumber(respawnTotal)}</strong></div>
+            </div>
+            ${movements.length ? `<div class="detail-section-title mt-16"><span>首批传送</span></div><div class="data-list">${movements.slice(0, 6).map(move => `<div class="data-row"><span>${esc(move.targetMap?.title || move.targetMap?.fileName || `地图 ${move.targetMapIndex}`)}</span><strong class="mono">${esc(pointText(move.source))} → ${esc(pointText(move.destination))}</strong></div>`).join("")}</div>` : ""}
+            ${npcs.length ? `<div class="detail-section-title mt-16"><span>首批 NPC</span></div><div class="data-list">${npcs.slice(0, 6).map(npc => `<div class="data-row"><span>${esc(npc.name || npc.contentKey)}</span><strong class="mono">${esc(pointText(npc.location))}</strong></div>`).join("")}</div>` : ""}
+            ${respawns.length ? `<div class="detail-section-title mt-16"><span>首批刷新点</span></div><div class="data-list">${respawns.slice(0, 6).map(respawn => `<div class="data-row"><span>${esc(respawn.monsterName || `怪物 ${respawn.monsterIndex}`)}</span><strong>${esc(respawn.count)} 只 · ${esc(pointText(respawn.location))}</strong></div>`).join("")}</div>` : ""}`
+          : `<div class="empty-inline">基础批次没有该地图的关系数据。</div>`;
+    return `<div class="detail-section" data-editor-map-relations><div class="detail-section-title"><span>地图关系（只读）</span><span class="tag blue">嵌套集合不直接编辑</span></div>${body}</div>`;
+  }
+
+  function editorEntityTitle(editor, fallback) {
+    return editor.data?.Name || editor.data?.Title || editor.data?.FileName || fallback;
+  }
+
   function renderContentEditorDrawer() {
     const editor = state.live.editor;
     if (!editor) {
@@ -3609,7 +3640,7 @@
     }
     const meta = editorMeta(editor.entityType) || { singular: editor.entityType, eyebrow: editor.entityType.toUpperCase(), icon: "file" };
     const schema = editor.schema;
-    const title = editor.mode === "create" ? `新建${meta.singular}` : (editor.data?.Name || editor.contentKey || `编辑${meta.singular}`);
+    const title = editor.mode === "create" ? `新建${meta.singular}` : editorEntityTitle(editor, editor.contentKey || `编辑${meta.singular}`);
     const contentKey = editor.contentKey || `${editor.entityType}.自动分配`;
     if (editor.loading || !schema) {
       modalRoot.innerHTML = `<div class="drawer-backdrop"><aside class="drawer drawer-wide"><div class="drawer-head"><span class="cell-icon" style="width:38px;height:38px">${I(meta.icon, 18)}</span><div class="drawer-head-copy"><div class="eyebrow">${esc(meta.eyebrow)} · DRAFT</div><h2>${esc(title)}</h2><p>草稿 #${esc(editor.draftId)} · ${esc(contentKey)}</p></div>${iconButton("close", "关闭", 'data-action="close-drawer"')}</div><div class="drawer-body"><div class="empty-inline">${I("refresh", 14)} 正在读取 Schema 与草稿实体...</div></div></aside></div>`;
@@ -3626,7 +3657,7 @@
       ? `<div class="alert-item danger"><span class="alert-mark" style="color:var(--red);background:var(--red-soft)">${I("alert", 13)}</span><div class="alert-copy"><strong>保存前校验未通过</strong><span>${esc(generalError)}</span></div></div>`
       : "";
     const deleteConfirm = editor.confirmDelete
-      ? `<div class="editor-delete-confirm">${I("alert", 15)}<div><strong>删除 ${esc(editor.data?.Name || contentKey)}？</strong><span>删除会写入草稿修订并保留可审计记录，发布前仍需运行完整校验。</span></div><div class="flex gap-6">${btn("取消", "", "btn-secondary btn-sm", 'data-action="editor-delete-cancel"')}${btn("确认删除", "trash", "btn-danger btn-sm", 'data-action="editor-delete-confirm"')}</div></div>`
+      ? `<div class="editor-delete-confirm">${I("alert", 15)}<div><strong>删除 ${esc(editorEntityTitle(editor, contentKey))}？</strong><span>删除会写入草稿修订并保留可审计记录，发布前仍需运行完整校验。</span></div><div class="flex gap-6">${btn("取消", "", "btn-secondary btn-sm", 'data-action="editor-delete-cancel"')}${btn("确认删除", "trash", "btn-danger btn-sm", 'data-action="editor-delete-confirm"')}</div></div>`
       : "";
 
     modalRoot.innerHTML = `
@@ -3650,6 +3681,7 @@
                 <div id="editor-diff">${E.renderDiff(editor.originalData, editor.data, schema)}</div>
                 ${contentEditorValidationMarkup(editor.validation)}
                 ${contentEditorDropsMarkup(editor)}
+                ${contentEditorMapRelationsMarkup(editor)}
               </aside>
             </div>
           </div>
@@ -3716,6 +3748,42 @@
     }
   }
 
+  async function hydrateContentEditorMapRelations() {
+    const editor = state.live.editor;
+    if (!editor || editor.entityType !== "map" || editor.mode === "create") return;
+    editor.mapRelationsLoading = true;
+    editor.mapRelationsError = null;
+    renderContentEditorDrawer();
+    try {
+      const relations = await API.getMapRelations(editor.localIndex, {
+        importRunId: state.live.run?.id,
+        respawnPage: 1,
+        respawnPageSize: 10
+      });
+      if (state.live.editor !== editor) return;
+      editor.mapRelations = relations;
+    } catch (error) {
+      if (state.live.editor !== editor) return;
+      if (error?.status === 404) {
+        editor.mapRelations = {
+          importRunId: state.live.run?.id,
+          map: null,
+          movements: [],
+          safeZones: [],
+          npcs: [],
+          respawns: { page: 1, pageSize: 10, total: 0, items: [] }
+        };
+      } else {
+        editor.mapRelationsError = draftErrorMessage(error);
+      }
+    } finally {
+      if (state.live.editor === editor) {
+        editor.mapRelationsLoading = false;
+        renderContentEditorDrawer();
+      }
+    }
+  }
+
   async function openContentEditorDrawer(entityType, localIndex, key, options = {}) {
     const meta = editorMeta(entityType);
     if (!meta) {
@@ -3760,7 +3828,10 @@
         validation: null,
         drops: null,
         dropsLoading: false,
-        dropsError: null
+        dropsError: null,
+        mapRelations: null,
+        mapRelationsLoading: false,
+        mapRelationsError: null
       };
       renderContentEditorDrawer();
       if (isCreate) return;
@@ -3778,6 +3849,7 @@
       };
       renderContentEditorDrawer();
       void hydrateContentEditorDrops();
+      void hydrateContentEditorMapRelations();
     } catch (error) {
       if (error?.status === 401) {
         handleApiFailure(error);
@@ -3871,10 +3943,14 @@
         reason: "",
         drops: null,
         dropsLoading: false,
-        dropsError: null
+        dropsError: null,
+        mapRelations: null,
+        mapRelationsLoading: false,
+        mapRelationsError: null
       };
       renderContentEditorDrawer();
       void hydrateContentEditorDrops();
+      void hydrateContentEditorMapRelations();
       showToast(`已载入 revision ${entity.revision}`);
     } catch (error) {
       if (error?.status === 401) handleApiFailure(error);

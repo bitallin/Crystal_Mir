@@ -25,7 +25,13 @@ public static class ContentEditorSchemas
                 ContentMonsterEditorSchema.SchemaVersion,
                 ContentMonsterEditorSchema.Schema,
                 ContentMonsterEditorSchema.ValidateStructure,
-                ContentMonsterEditorSchema.ValidateCompleteness)
+                ContentMonsterEditorSchema.ValidateCompleteness),
+            [ContentMapEditorSchema.EntityType] = new(
+                ContentMapEditorSchema.EntityType,
+                ContentMapEditorSchema.SchemaVersion,
+                ContentMapEditorSchema.Schema,
+                ContentMapEditorSchema.ValidateStructure,
+                ContentMapEditorSchema.ValidateCompleteness)
         };
 
     public static bool TryGet(string entityType, out ContentEditorSchemaDefinition definition)
