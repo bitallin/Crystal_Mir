@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using Crystal.GameCore;
 using Crystal.LegacyRuntime;
 using log4net;
 using log4net.Config;
@@ -19,6 +20,7 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        DateTimeOffset processStartedAt = DateTimeOffset.UtcNow;
         ZoneHostOptions options;
 
         try
@@ -47,6 +49,7 @@ internal static class Program
         Directory.SetCurrentDirectory(options.ContentRoot);
         ConfigureLogging(options);
         DeleteReadyFile(options.ReadyFilePath);
+        DeleteMetricsFile(options.MetricsFilePath);
 
         LegacyContentReleaseWorkspace? releaseWorkspace = null;
         try
@@ -108,7 +111,22 @@ internal static class Program
                 $"npcs={Envir.Main.NPCInfoList.Count}, quests={Envir.Main.QuestInfoList.Count}");
             WriteReadyFile(options, releaseWorkspace);
 
-            return await WaitForShutdownAsync(shutdown.Token);
+            using var metricsStop = new CancellationTokenSource();
+            using var metricsToken = CancellationTokenSource.CreateLinkedTokenSource(
+                shutdown.Token,
+                metricsStop.Token);
+            Task metricsTask = RunMetricsLoopAsync(options, processStartedAt, metricsToken.Token);
+            int exitCode = await WaitForShutdownAsync(shutdown.Token);
+            metricsStop.Cancel();
+            try
+            {
+                await metricsTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            return exitCode;
         }
         catch (OperationCanceledException)
         {
@@ -123,7 +141,124 @@ internal static class Program
         {
             StopZone();
             DeleteReadyFile(options.ReadyFilePath);
+            DeleteMetricsFile(options.MetricsFilePath);
             releaseWorkspace?.Dispose();
+        }
+    }
+
+    private static async Task RunMetricsLoopAsync(
+        ZoneHostOptions options,
+        DateTimeOffset processStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(options.MetricsFilePath)) return;
+
+        var sampler = new RuntimeMetricsSampler(TimeSpan.FromSeconds(60));
+        DateTimeOffset lastWrite = DateTimeOffset.MinValue;
+        long lastCompletedTicks = -1;
+        long lastErrorCount = -1;
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                long completedTicks = Envir.Main.CompletedTicks;
+                long errorCount = MessageQueue.Instance.ErrorCount;
+                if (completedTicks != lastCompletedTicks || errorCount != lastErrorCount)
+                {
+                    sampler.Record(now, Envir.LastRunTime, completedTicks, errorCount);
+                    lastCompletedTicks = completedTicks;
+                    lastErrorCount = errorCount;
+                }
+
+                if (now - lastWrite < TimeSpan.FromSeconds(1)) continue;
+
+                RuntimeMetricsSnapshot snapshot = sampler.Snapshot(
+                    Envir.Main.PlayerCount,
+                    completedTicks,
+                    errorCount,
+                    now);
+                var metrics = new ZoneRuntimeMetrics(
+                    ZoneRuntimeMetricsJson.CurrentSchemaVersion,
+                    GetString("CRYSTAL_ZONE_ID", "default"),
+                    Environment.ProcessId,
+                    processStartedAt,
+                    now,
+                    snapshot.PlayerCount,
+                    snapshot.TickP95Ms,
+                    snapshot.ErrorRate,
+                    snapshot.CompletedTicks,
+                    snapshot.ErrorCount,
+                    snapshot.SampleCount,
+                    snapshot.WindowSeconds);
+                lastWrite = now;
+                try
+                {
+                    await WriteMetricsFileAsync(options.MetricsFilePath, metrics, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Zone metrics write failed: {options.MetricsFilePath}", ex);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Zone metrics loop stopped unexpectedly.", ex);
+        }
+    }
+
+    private static async Task WriteMetricsFileAsync(
+        string path,
+        ZoneRuntimeMetrics metrics,
+        CancellationToken cancellationToken)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+        string temporaryPath = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(
+                temporaryPath,
+                ZoneRuntimeMetricsJson.Serialize(metrics),
+                cancellationToken);
+            File.Move(temporaryPath, fullPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void DeleteMetricsFile(string? metricsFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(metricsFilePath)) return;
+
+        try
+        {
+            string path = Path.GetFullPath(metricsFilePath);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Could not remove zone metrics file: {metricsFilePath}", ex);
         }
     }
 
@@ -388,6 +523,7 @@ internal static class Program
             "  --content-public-key <path> ECDSA P-256 public key used to verify the release signature\n" +
             "  --content-key-id <id>       Expected signing key id for the content release\n" +
             "  --ready-file <path>         Write a JSON readiness file after the zone is ready\n" +
+            "  --metrics-file <path>       Write runtime metrics JSON after the zone is ready\n" +
             "  --startup-timeout <seconds> Maximum time to wait for the zone to become ready (default: 300)\n" +
             "  --log-config <path>         Override log4net.config path\n" +
             "  --check                     Validate database and content file references, then exit\n" +
@@ -397,7 +533,7 @@ internal static class Program
             "  CRYSTAL_ZONE_STATUS_PORT, CRYSTAL_ZONE_MAX_USER, CRYSTAL_ZONE_MAX_IP,\n" +
             "  CRYSTAL_ZONE_THREADS, CRYSTAL_ZONE_SAVE_DELAY_MINUTES,\n" +
             "  CRYSTAL_ZONE_CONTENT_RELEASE, CRYSTAL_ZONE_CONTENT_PUBLIC_KEY, CRYSTAL_ZONE_CONTENT_KEY_ID,\n" +
-            "  CRYSTAL_ZONE_READY_FILE");
+            "  CRYSTAL_ZONE_READY_FILE, CRYSTAL_ZONE_METRICS_FILE");
     }
 }
 
@@ -412,6 +548,7 @@ internal sealed class ZoneHostOptions
     public string? ContentPublicKeyPath { get; private init; }
     public string? ContentKeyId { get; private init; }
     public string? ReadyFilePath { get; private init; }
+    public string? MetricsFilePath { get; private init; }
 
     public static ZoneHostOptions Parse(string[] args)
     {
@@ -424,6 +561,7 @@ internal sealed class ZoneHostOptions
         string? contentPublicKey = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_PUBLIC_KEY")?.Trim();
         string? contentKeyId = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_CONTENT_KEY_ID")?.Trim();
         string? readyFile = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_READY_FILE")?.Trim();
+        string? metricsFile = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_METRICS_FILE")?.Trim();
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -453,6 +591,9 @@ internal sealed class ZoneHostOptions
                 case "--ready-file":
                     readyFile = RequireValue(args, ref i, arg);
                     break;
+                case "--metrics-file":
+                    metricsFile = RequireValue(args, ref i, arg);
+                    break;
                 case "--startup-timeout":
                     timeoutSeconds = ParsePositiveInt(RequireValue(args, ref i, arg), arg);
                     break;
@@ -470,6 +611,8 @@ internal sealed class ZoneHostOptions
                         contentKeyId = arg.Substring("--content-key-id=".Length);
                     else if (arg.StartsWith("--ready-file=", StringComparison.Ordinal))
                         readyFile = arg.Substring("--ready-file=".Length);
+                    else if (arg.StartsWith("--metrics-file=", StringComparison.Ordinal))
+                        metricsFile = arg.Substring("--metrics-file=".Length);
                     else if (arg.StartsWith("--startup-timeout=", StringComparison.Ordinal))
                         timeoutSeconds = ParsePositiveInt(arg.Substring("--startup-timeout=".Length), "--startup-timeout");
                     else if (arg.StartsWith("--log-config=", StringComparison.Ordinal))
@@ -513,7 +656,8 @@ internal sealed class ZoneHostOptions
             ContentRelease = string.IsNullOrWhiteSpace(contentRelease) ? null : Path.GetFullPath(contentRelease),
             ContentPublicKeyPath = string.IsNullOrWhiteSpace(contentPublicKey) ? null : Path.GetFullPath(contentPublicKey),
             ContentKeyId = string.IsNullOrWhiteSpace(contentKeyId) ? null : contentKeyId,
-            ReadyFilePath = string.IsNullOrWhiteSpace(readyFile) ? null : Path.GetFullPath(readyFile)
+            ReadyFilePath = string.IsNullOrWhiteSpace(readyFile) ? null : Path.GetFullPath(readyFile),
+            MetricsFilePath = string.IsNullOrWhiteSpace(metricsFile) ? null : Path.GetFullPath(metricsFile)
         };
     }
 

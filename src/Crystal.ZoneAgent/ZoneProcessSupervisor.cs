@@ -83,6 +83,7 @@ internal sealed class ZoneProcessSupervisor
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        startInfo.Environment["CRYSTAL_ZONE_ID"] = _options.ZoneId;
         if (startInfo.FileName == "dotnet")
         {
             startInfo.ArgumentList.Add(_options.ZoneExecutable);
@@ -98,6 +99,8 @@ internal sealed class ZoneProcessSupervisor
         startInfo.ArgumentList.Add(_options.ContentKeyId);
         startInfo.ArgumentList.Add("--ready-file");
         startInfo.ArgumentList.Add(_options.ReadyFilePath);
+        startInfo.ArgumentList.Add("--metrics-file");
+        startInfo.ArgumentList.Add(_options.MetricsFilePath);
         startInfo.ArgumentList.Add("--startup-timeout");
         startInfo.ArgumentList.Add(Math.Ceiling(_options.ReadyTimeout.TotalSeconds).ToString(
             System.Globalization.CultureInfo.InvariantCulture));

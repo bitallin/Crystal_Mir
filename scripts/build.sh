@@ -44,6 +44,9 @@ echo "== Contract boundary test =="
 echo "== Content editor test =="
 "$DOTNET" build Tests/ContentEditor/ContentEditor.csproj -c "$CONFIGURATION" --nologo
 
+echo "== Zone metrics test =="
+"$DOTNET" build Tests/ZoneMetrics/ZoneMetrics.csproj -c "$CONFIGURATION" --nologo
+
 echo "== Control API =="
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo
 

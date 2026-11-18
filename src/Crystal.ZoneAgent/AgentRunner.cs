@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Crystal.Agent.Contracts;
+using Crystal.GameCore;
 
 namespace Crystal.ZoneAgent;
 
@@ -39,6 +40,7 @@ internal sealed class AgentRunner : IDisposable
     private ActiveReleaseState? _active;
     private volatile bool _suppressRestart;
     private int _restartFailures;
+    private int _metricsMisses;
 
     public AgentRunner(AgentOptions options)
     {
@@ -194,12 +196,34 @@ internal sealed class AgentRunner : IDisposable
     {
         var active = GetActive();
         int? pid = _supervisor.ProcessId;
+        RuntimeMetrics runtimeMetrics = ReadRuntimeMetrics(pid);
+        if (runtimeMetrics.IsValid)
+        {
+            _metricsMisses = 0;
+        }
+        else if (pid is null)
+        {
+            _metricsMisses = 0;
+        }
+        else if (pid is not null)
+        {
+            _metricsMisses++;
+            if (_metricsMisses >= 3) status = AgentStatuses.Degraded;
+        }
+
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["metricsSource"] = "process-supervisor",
+            ["metricsSource"] = runtimeMetrics.Source,
             ["restartFailures"] = _restartFailures.ToString(System.Globalization.CultureInfo.InvariantCulture)
         };
         if (pid is not null) metadata["zonePid"] = pid.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (runtimeMetrics.Metrics is { } metrics)
+        {
+            metadata["metricsObservedAt"] = metrics.ObservedAt.ToString("O");
+            metadata["metricsWindowSeconds"] = metrics.WindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            metadata["metricsSampleCount"] = metrics.SampleCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        if (!string.IsNullOrWhiteSpace(runtimeMetrics.Error)) metadata["metricsError"] = runtimeMetrics.Error;
         if (active is not null)
         {
             metadata["activeReleaseDirectory"] = active.ReleaseDirectory;
@@ -225,11 +249,48 @@ internal sealed class AgentRunner : IDisposable
                 status,
                 active?.ReleaseId,
                 active?.ContentHash,
-                PlayerCount: 0,
-                TickP95Ms: 0,
-                ErrorRate: 0,
+                PlayerCount: runtimeMetrics.Metrics?.PlayerCount ?? 0,
+                TickP95Ms: runtimeMetrics.Metrics?.TickP95Ms ?? 0,
+                ErrorRate: runtimeMetrics.Metrics?.ErrorRate ?? 0,
                 Metadata: metadata),
             cancellationToken);
+    }
+
+    private RuntimeMetrics ReadRuntimeMetrics(int? pid)
+    {
+        if (pid is null) return new RuntimeMetrics("process-stopped", null, null);
+        if (!File.Exists(_options.MetricsFilePath))
+        {
+            return new RuntimeMetrics("unavailable", null, "Metrics file is missing.");
+        }
+
+        try
+        {
+            string json = File.ReadAllText(_options.MetricsFilePath);
+            bool valid = ZoneRuntimeMetricsJson.TryParse(
+                json,
+                _options.ZoneId,
+                pid.Value,
+                TimeSpan.FromSeconds(15),
+                DateTimeOffset.UtcNow,
+                out ZoneRuntimeMetrics? metrics,
+                out string? error);
+            return valid
+                ? new RuntimeMetrics("zone-runtime", metrics, null)
+                : new RuntimeMetrics("unavailable", null, error);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new RuntimeMetrics("unavailable", null, exception.Message);
+        }
+    }
+
+    private sealed record RuntimeMetrics(
+        string Source,
+        ZoneRuntimeMetrics? Metrics,
+        string? Error)
+    {
+        public bool IsValid => Metrics is not null;
     }
 
     private async Task CommandLoopAsync(CancellationToken cancellationToken)

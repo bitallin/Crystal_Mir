@@ -1,15 +1,15 @@
 # 项目进度台账
 
-> 最后更新：2026-11-17
-> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready 文件、失败恢复、CLI/systemd）。客户端启动器、灰度/CDN、Control.Web 区服页面、进程内热切换、玩家状态迁移、真实主循环指标和 M0 外部阻塞仍未完成；授权、许可证和 Windows 冒烟按要求本轮跳过
+> 最后更新：2026-11-18
+> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标和 Control.Web 区服闭环已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情与五类命令）。客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证和 M0 外部阻塞仍未完成；授权、许可证和 Windows 冒烟按要求本轮跳过
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0012 |
-| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照和契约边界检查通过 |
+| 架构决策 | 已完成初版 | ADR 0001～0013 |
+| 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照、区服指标和契约边界检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
@@ -17,10 +17,10 @@
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；新增 Control API Zone API 断言和 Zone Agent 自包含 E2E；GitHub Actions 仍使用 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job，远端结果待确认 |
-| 控制面 | M2 完成，M3 区服 API 完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号和审计页面，尚未接区服页面 |
+| 控制面 | M2 完成，M3 区服闭环完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号、审计以及真实区服总览/详情、指标、命令历史和五类生命周期操作 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
-| 热更新 | Agent 进程级闭环已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.ZoneAgent` 已实现注册、心跳、命令领取、下载验签、staging、进程级 activate/rollback/reload/stop、ready 检查和失败恢复。客户端启动器、进程内热切换、灰度和玩家状态迁移未实现 |
-| 区服 Agent | 已完成本轮闭环 | 单区单 Agent 单 ZoneServer 子进程；命令结果本地持久化并可重报；意外退出按 2/5/10/30 秒退避重启；玩家数/Tick P95/错误率占位为 0 |
+| 热更新 | Agent 进程级闭环已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.ZoneAgent` 已实现注册、心跳、命令领取、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件读取和失败恢复。客户端启动器、进程内热切换、灰度和玩家状态迁移未实现 |
+| 区服 Agent | 已完成本轮闭环 | 单区单 Agent 单 ZoneServer 子进程；命令结果本地持久化并可重报；意外退出按 2/5/10/30 秒退避重启；ZoneServer 每 100 ms 采样、60 秒窗口、每秒原子写指标文件，Agent 校验 schema/zoneId/PID/15 秒时效后上报真实玩家数、Tick P95、错误率和重启失败次数，失效时归零并标记来源 |
 | 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
 | 许可证清单 | 进行中 | 代码/外部资源清单已建立；授权、许可证和素材合规按要求本轮跳过，MapEditor 和素材授权待确认 |
 
@@ -31,12 +31,25 @@
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
 | M2 内容后台 MVP | 已完成 | 100% | 10 类内容编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD、地图预览、签名发布启动消费已完成；Agent 与进程级换版已由 M3 接手，授权/许可证和灰度仍按范围外处理 |
-| M3 热更新与区服 Agent | 进行中 | 本轮服务端范围完成 | 已完成 Agent 注册/心跳/命令、下载验签、staging、进程级 activate/rollback/reload/stop、ready、失败恢复、CLI/systemd 和 PG16 E2E；客户端启动器、灰度/CDN、Control.Web 区服页面、进程内热切换、玩家状态迁移、真实指标、授权/许可证仍未完成 |
+| M3 热更新与区服 Agent | 进行中 | 本轮服务端/Web 范围完成 | 已完成 Agent 注册/心跳/命令、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件、失败恢复、CLI/systemd、PG16 E2E、真实指标和 Control.Web 区服闭环；客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、授权/许可证仍未完成 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-18（真实区服指标与 Control.Web 区服闭环）
+
+- 范围：把 ZoneServer 的真实玩家数、世界 Tick P95、错误率和 Agent 重启次数接入现有心跳，并将 Control.Web 区服总览/详情从静态样例切换到真实 API，开放 stage、activate、rollback、reload、stop 五类命令；不修改游戏主循环行为、客户端协议、Control API DTO 或数据库 schema，授权、许可证和素材合规继续跳过。
+- GameCore：新增 `RuntimeMetricsSampler` 和版本化 JSON 编解码；60 秒窗口、100 ms 采样、最近秩 P95，按 `completedTicks` 去重世界循环样本；错误率按窗口首尾异常/Tick 增量计算并封顶 1。新增 `Tests/ZoneMetrics`，覆盖 P95、窗口淘汰、错误率上限、无 Tick 样本、计数去重、非法 JSON 和 zoneId/PID/时效校验。
+- ZoneServer：`Envir` 增加已完成世界循环计数，`MessageQueue.Enqueue(Exception)` 只增加异常计数；新增 `--metrics-file` / `CRYSTAL_ZONE_METRICS_FILE`，ready 后独立循环每秒原子写入指标文件，进程启动时间在 `Main` 入口捕获，写入失败只记录日志且不终止区服，退出时删除文件。
+- Agent：启动 ZoneServer 时传入 `state/metrics.json`；每次心跳校验 schema、zoneId、PID、15 秒时效和数值范围，有效时上报真实指标，无效或过期时上报 0 并标记 `metricsSource=unavailable`，子进程停止后标记 `process-stopped`；连续三次失效且进程仍运行时降级。保留 `restartFailures`、`zonePid` 和发布目录字段，新增 `metricsObservedAt`、`metricsWindowSeconds`、`metricsSampleCount`、`metricsError`。
+- Control.Web：接入现有 `GET /zones`、`GET /zones/{id}`、`GET/POST /zones/{id}/commands` 和发布列表接口；区服列表/详情展示真实在线数、Tick P95、错误率、重启次数、Agent/进程状态、active/staged 版本、内容哈希、最后心跳和命令历史。五类命令要求 `zone:write`、二次确认和发布版本选择；离线或在途命令时禁用，409 显示明确冲突提示；列表每 5 秒、详情每 2 秒刷新并在离开路由后清理定时器。`process-stopped` 显示零值而非“指标不可用”。
+- 文档：新增 ADR 0013 并登记 ADR 索引；同步文档地图、架构 02/03/04/07、Control API 参考、ZoneServer/Agent 运行手册、能力矩阵、里程碑、Control.Web README 和本台账；ADR 0012 标记为被 0013 扩展。
+- 验证：`./scripts/build.sh`、`./scripts/test.sh`、`./scripts/check-boundaries.sh` 全部通过；在全新 PostgreSQL 16.16 数据库上分别运行 `./scripts/test-control-api.sh`、`./scripts/test-zone-agent.sh`、`./scripts/test-control-web.sh` 全部通过。Control API 覆盖非零玩家数/Tick P95/错误率投影、metadata 完整保留和越界拒绝；Zone Agent 覆盖真实指标文件、`zone-runtime` 心跳、正 Tick P95、重启后新 PID 和 stop 后归零/`process-stopped`；Control Web 覆盖真实列表/详情、五类命令请求体与历史、409 冲突、离线禁用和只读账号。Node `--check`、Shell `bash -n` 和 `git diff --check` 通过。
+- 未验证/范围外：无客户端连接时只验证玩家数为 0；非零玩家数和真实客户端错误需 Windows 冒烟。真实 Ubuntu systemd 安装、客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、多 Agent HA、Prometheus/OpenTelemetry 汇聚、授权、许可证、KMS 和素材合规不在本轮。
+- 阻塞/风险：100 ms 采样不保证覆盖每个内部循环，指标适合研究环境趋势；指标文件是同机非权威缓存，依赖 PID/zoneId/时效校验；生产化前需补远端汇聚、告警和 Windows 验证。
+- 下一步：完成 Windows 客户端连接与真实玩家数/错误率冒烟；接入长期指标存储和告警；推进客户端启动器、版本门禁和零停机换版研究。
 
 ### 2026-11-17（M3 Zone Agent 控制闭环与进程级换版）
 
@@ -456,6 +469,7 @@
 | 2026-11-17 | M2 多内容编辑、引用、导入导出与地图关系 | `docs/adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md` |
 | 2026-11-17 | ZoneServer 启动期只读消费签名发布 | `docs/adr/0011-zone-server-read-only-signed-content-release.md` |
 | 2026-11-17 | Zone Agent 控制闭环与进程级内容换版 | `docs/adr/0012-zone-agent-process-level-content-switching.md` |
+| 2026-11-18 | 区服运行时指标文件桥接 | `docs/adr/0013-zone-runtime-metrics-file.md` |
 
 ## 5. 阻塞与风险
 
@@ -472,7 +486,7 @@
 | 技术 | 当前换版为进程级重启 | 激活/回滚有短暂停机，玩家会话会中断 | 使用维护窗口；后续评估状态迁移/双实例 |
 | 技术 | 单区只支持一个 Agent 和一个 ZoneServer | 无 Agent HA，租约过期重投依赖单实例假设 | 研究环境接受；生产化前补多实例和幂等执行日志 |
 | 安全 | Agent 注册/心跳/领取/结果端点匿名 | 可信内网外暴露会被伪造或接管区服 | 保持内网隔离；生产前补 mTLS、节点绑定、结果签名和授权 |
-| 指标 | 玩家数/Tick P95/错误率固定为 0 | 控制面不能据此做真实健康判断 | metadata 标记 `metricsSource=process-supervisor`，后续接主循环指标 |
+| 指标 | 指标来自同机 ZoneServer 本地文件，100 ms 采样不保证覆盖每个内部循环；无客户端时只能验证玩家数为 0 | 研究环境趋势可用，但不能替代生产级 Prometheus/OpenTelemetry；真实客户端错误仍需 Windows 冒烟 | 保留 `metricsSource`/`metricsError` 降级标记；后续接远端汇聚、告警和 Windows 冒烟 |
 | 许可 | 授权/许可证本轮跳过 | M3 研究闭环不代表可分发结论 | 后续单独合规评审，保留 GPL 源码归档和素材来源清单 |
 
 ## 6. 下一步
@@ -480,12 +494,11 @@
 1. 推送后确认 GitHub Actions 的 PostgreSQL 16、Compose 和边界检查 job 稳定，并保存失败日志。
 2. 在 Ubuntu staging 主机实际安装 `crystal-zone-agent.service`，验证开机自启、日志轮转、端口防火墙、SIGTERM、异常退出重启和失败换版恢复。
 3. 为 Agent 补充生产化安全边界：mTLS/客户端证书、`agent_id` 与 `zone_id` 节点绑定、结果签名/重放保护和审计。
-4. 把真实玩家数、Tick P95 和错误率从 ZoneServer 主循环接入心跳，替换 `process-supervisor` 占位值。
-5. 进入客户端侧 M3：实现启动器、签名 manifest、哈希扫描、增量/全量下载、原子替换、回滚和版本门禁。
-6. 为 Control.Web 增加区服列表/详情、命令历史和换版操作页面，并复用现有 `zone:read`/`zone:write` 权限。
-7. 评估零停机/双实例换版所需玩家状态迁移、会话粘滞和停写协议；当前继续使用维护窗口。
-8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
-9. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单和 MapEditor 许可证结论。
+4. 进入客户端侧 M3：实现启动器、签名 manifest、哈希扫描、增量/全量下载、原子替换、回滚和版本门禁。
+5. 评估零停机/双实例换版所需玩家状态迁移、会话粘滞和停写协议；当前继续使用维护窗口。
+6. 接入 Prometheus/OpenTelemetry 指标汇聚、长期存储和告警；补充 Windows 客户端连接后的非零玩家数与真实错误率验证。
+7. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+8. 清点客户端 `Data/Map/Sound` 的合法来源，补齐外部资源清单和 MapEditor 许可证结论。
 
 ## 7. 更新规则
 

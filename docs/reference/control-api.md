@@ -1,7 +1,7 @@
 # Control API 参考
 
-> 最后更新：2026-11-17
-> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、地图关系与地图预览 + M3 Zone Agent 控制闭环）
+> 最后更新：2026-11-18
+> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、地图关系与地图预览 + M3 Zone Agent、真实运行时指标与 Control.Web 区服闭环）
 
 ## 1. 位置与边界
 
@@ -27,9 +27,11 @@
 - 从导入批次或草稿创建不可变发布版本，校验、编译、ECDSA 签名、发布和回滚。
 - 区服注册、心跳、持久命令队列、租约领取、结果幂等和区服运行投影。
 - 已签名发布 ZIP 下载，以及 `content.stage`/`activate`/`rollback`/`reload`/`zone.stop` 管理入口。
+- Agent 从 ZoneServer 指标文件读取并校验玩家数、Tick P95、错误率；Control.Web 使用现有区服/命令/发布接口展示
+  真实指标、active/staged 版本、命令历史，并提供五类生命周期命令。
 
 尚未实现：MFA/OIDC、账号删除、解锁接口、CSV 导入、NPC 语句块结构化编辑、`.lib` 图库解析、资源上传、
-Control.Web 的区服运维页面、进程内热切换、灰度/CDN、玩家状态迁移和生产级 Agent 授权模型。
+进程内热切换、灰度/CDN、玩家状态迁移、Prometheus/OpenTelemetry 汇聚和生产级 Agent 授权模型。
 
 ## 2. 配置
 
@@ -610,8 +612,26 @@ POST /api/v1/zones/{zoneId}/commands/{commandId}/result
 ```
 
 `zoneId` 必须匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`。心跳状态只能是 `online` 或 `degraded`；最后心跳超过 30 秒时
-查询投影显示 `offline`。玩家数、Tick P95 和错误率当前由 Agent 上报为 0，metadata 标记
-`metricsSource=process-supervisor`。
+查询投影显示 `offline`。玩家数、Tick P95 和错误率由 Agent 从 ZoneServer 指标文件读取后写入现有心跳字段；metadata
+保留 `restartFailures`、`zonePid` 和发布目录字段，并增加：
+
+```json
+{
+  "metricsSource": "zone-runtime",
+  "metricsObservedAt": "2026-11-18T00:00:10Z",
+  "metricsWindowSeconds": "60",
+  "metricsSampleCount": "600",
+  "metricsError": "optional validation error"
+}
+```
+
+- `metricsSource=zone-runtime`：schema、zoneId、PID、时间范围和 15 秒时效均有效。
+- `metricsSource=unavailable`：文件缺失、无法读取或校验失败；玩家数、Tick P95 和错误率上报 0。
+- `metricsSource=process-stopped`：Agent 没有运行中的 ZoneServer 子进程；三项指标上报 0。
+- `restartFailures` 是 Agent 独立重启失败计数，不属于游戏错误率。
+- Tick P95 基于 60 秒窗口、100 ms 采样和最近秩法；错误率为窗口异常增量/Tick 增量，上限 1。
+
+Control API 不新增路由、DTO 或数据库列；`AgentHeartbeatRequest`、`ZoneDto`、`zone`/`zone_command` schema 保持兼容。
 
 命令创建请求：
 
@@ -648,7 +668,8 @@ RBAC 403、登出撤销、账号生命周期、最后管理员保护、审计、
 配方关系、NPC 脚本关系与 AST、资源元数据和文件字节/SHA256。M2 覆盖 10 类 Schema 的 200/401、类型化 CRUD、
 结构 400、陈旧 revision 409、引用缺失、JSONL dry-run/apply/export、脚本校验、地图关系 CRUD/清理、发布链路、
 默认和显式双版本回滚。M3 覆盖区服注册/未知区服、非法心跳、命令 payload、单生命周期冲突、租约重投、
-结果幂等/冲突和 stop 投影。测试在 PostgreSQL 16 service container 中运行。
+结果幂等/冲突、stop 投影，以及非零玩家数、Tick P95、错误率与 metadata 的查询投影；越界错误率返回 400。
+测试在 PostgreSQL 16 service container 中运行。
 测试库应为独立数据库；已有账号时不会再执行 bootstrap。
 
 Zone Agent 端到端验证使用：
@@ -659,7 +680,8 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 ```
 
 脚本发布签名内容，启动真实 Control API、Agent 和 ZoneServer，验证注册、staging、两次激活、回滚、发布包篡改拒绝、
-候选启动失败恢复、结果幂等、Agent 重启恢复和 stop。
+候选启动失败恢复、结果幂等、Agent 重启恢复、真实指标文件、心跳 `zone-runtime`、Tick P95 为正、Agent 重启后不复用旧 PID
+指标，以及 stop 后指标归零并标记 `process-stopped`。
 
 Compose 栈验证使用：
 
@@ -684,7 +706,8 @@ Compose 栈验证使用：
 - 资源预览只支持地图网格；客户端 `.lib` 图库、物品/怪物图标缩略图和资源上传未实现。
 - 脚本编辑器不提供语句块拖拽、增删排序或脚本执行；完整行为仍由文本源码和服务端解析结果决定。
 - 区服激活是进程级重启，允许短暂停机；不提供进程内热切换、灰度、CDN、玩家状态迁移或多 Agent HA。
-- 玩家数、Tick P95 和错误率当前固定为 0，仅表达 `metricsSource=process-supervisor`；真实主循环指标待接入。
+- 指标来自同机 ZoneServer 本地文件，不属于签名内容包；生产级远端汇聚、告警和长期存储尚未实现。
+- 100 ms 采样不保证覆盖每个内部循环；无客户端连接时只能验证玩家数为 0，非零玩家数和真实客户端错误仍需 Windows 冒烟。
 - Agent 注册、心跳、命令领取和结果端点在研究环境匿名开放；生产化前需要双向认证、节点绑定和授权模型。
-- Control.Web 尚未提供区服页面；本轮提供 Control API、CLI 和 systemd 单元。
+- Control.Web 区服页面只使用现有 API，不新增路由；离线或已有生命周期命令时禁用写操作，409 显示服务端冲突原因。
 - 授权、许可证和素材合规不在本轮范围。

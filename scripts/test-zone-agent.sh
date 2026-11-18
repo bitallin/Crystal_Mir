@@ -409,6 +409,50 @@ PY
   return 1
 }
 
+wait_zone_metrics() {
+  local expected_source="$1"
+  local require_positive="$2"
+  local deadline=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if api GET "/api/v1/zones/$ZONE_ID" >"$TMP/zone.json" 2>/dev/null; then
+      if python3 - "$TMP/zone.json" "$expected_source" "$require_positive" <<'PY'
+import json,sys
+zone=json.load(open(sys.argv[1]))
+metadata=zone.get("metadata") or {}
+source=metadata.get("metricsSource")
+positive=sys.argv[3] == "1"
+ok=source == sys.argv[2]
+if positive:
+    ok = ok and float(zone.get("tickP95Ms") or 0) > 0
+else:
+    ok = ok and float(zone.get("playerCount") or 0) == 0
+    ok = ok and float(zone.get("tickP95Ms") or 0) == 0
+    ok = ok and float(zone.get("errorRate") or 0) == 0
+raise SystemExit(0 if ok else 1)
+PY
+      then return 0; fi
+    fi
+    sleep 0.5
+  done
+  echo "Zone metrics did not reach $expected_source (positive=$require_positive)." >&2
+  return 1
+}
+
+wait_metrics_file() {
+  local deadline=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if [ -f "$AGENT_HOME/state/metrics.json" ] && python3 - "$AGENT_HOME/state/metrics.json" <<'PY'
+import json,sys
+metrics=json.load(open(sys.argv[1]))
+raise SystemExit(0 if metrics.get("tickP95Ms", 0) > 0 and metrics.get("completedTicks", 0) > 0 and metrics.get("sampleCount", 0) > 0 else 1)
+PY
+    then return 0; fi
+    sleep 0.5
+  done
+  echo "Zone metrics file was not populated." >&2
+  return 1
+}
+
 create_command() {
   local type="$1"
   local body="$2"
@@ -484,6 +528,19 @@ ACTIVATE_1="$(create_command content.activate ",\"payload\":{\"releaseId\":$RELE
   python3 -c 'import json,sys; print(json.load(sys.stdin)["commandId"])')"
 [ "$(wait_command "$ACTIVATE_1" 300)" = "succeeded" ] || { echo "First activation failed." >&2; exit 1; }
 [ -f "$AGENT_HOME/state/ready.json" ] || { echo "Zone ready file was not created." >&2; exit 1; }
+wait_metrics_file || exit 1
+python3 - "$AGENT_HOME/state/metrics.json" "$AGENT_HOME/state/ready.json" "$ZONE_ID" <<'PY'
+import json,sys
+metrics=json.load(open(sys.argv[1]))
+ready=json.load(open(sys.argv[2]))
+assert metrics["schemaVersion"] == 1, metrics
+assert metrics["zoneId"] == sys.argv[3], metrics
+assert metrics["pid"] == ready["pid"], (metrics, ready)
+assert metrics["tickP95Ms"] > 0, metrics
+assert metrics["completedTicks"] > 0, metrics
+assert metrics["sampleCount"] > 0, metrics
+PY
+wait_zone_metrics zone-runtime 1 || exit 1
 api GET "/api/v1/zones/$ZONE_ID" >"$TMP/zone.json"
 [ "$(json_value "$TMP/zone.json" 'activeReleaseId')" = "$RELEASE_ID_1" ] || { echo "Active release 1 not recorded." >&2; exit 1; }
 
@@ -529,7 +586,10 @@ DUPLICATE_STATUS="$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' -X POS
   "$BASE/api/v1/zones/$ZONE_ID/commands/$ROLLBACK_ID/result")"
 [ "$DUPLICATE_STATUS" = "200" ] || { echo "Duplicate command result was not idempotent: $DUPLICATE_STATUS." >&2; exit 1; }
 
-# Agent restart must restore the persisted active release.
+# Agent restart must restore the persisted active release without reusing old process metrics.
+api GET "/api/v1/zones/$ZONE_ID" >"$TMP/zone.json"
+OLD_ZONE_PID="$(json_value "$TMP/zone.json" 'metadata.zonePid')"
+[ -n "$OLD_ZONE_PID" ] || { echo "Zone PID was not reported before Agent restart." >&2; exit 1; }
 kill -TERM "$AGENT_PID"
 for _ in $(seq 1 160); do kill -0 "$AGENT_PID" 2>/dev/null || break; sleep 0.1; done
 wait "$AGENT_PID" 2>/dev/null || true
@@ -545,12 +605,31 @@ done
 [ -f "$AGENT_HOME/state/ready.json" ] || { echo "Restarted Agent did not restore the zone." >&2; exit 1; }
 api GET "/api/v1/zones/$ZONE_ID" >"$TMP/zone.json"
 [ "$(json_value "$TMP/zone.json" 'activeReleaseId')" = "$RELEASE_ID_1" ] || { echo "Restarted Agent lost active release." >&2; exit 1; }
+NEW_ZONE_PID="$(json_value "$AGENT_HOME/state/ready.json" 'pid')"
+[ "$NEW_ZONE_PID" != "$OLD_ZONE_PID" ] || { echo "Restarted ZoneServer reused the old PID." >&2; exit 1; }
+wait_metrics_file || exit 1
+python3 - "$AGENT_HOME/state/metrics.json" "$NEW_ZONE_PID" "$OLD_ZONE_PID" <<'PY'
+import json,sys
+metrics=json.load(open(sys.argv[1]))
+assert metrics["pid"] == int(sys.argv[2]), metrics
+assert metrics["pid"] != int(sys.argv[3]), metrics
+PY
+wait_zone_metrics zone-runtime 1 || exit 1
 
 STOP_RESPONSE="$(CRYSTAL_CONTROL_URL="$BASE" CRYSTAL_CONTROL_API_KEY="$API_KEY" \
   "$ROOT/scripts/zone-control.sh" stop "$ZONE_ID")"
 STOP_COMMAND="$(printf '%s' "$STOP_RESPONSE" | sed -n 's/^commandId=//p')"
 [ "$(wait_command "$STOP_COMMAND" 120)" = "succeeded" ] || { echo "Stop command failed." >&2; exit 1; }
+wait_zone_metrics process-stopped 0 || exit 1
 api GET "/api/v1/zones/$ZONE_ID" >"$TMP/zone.json"
 [ "$(json_value "$TMP/zone.json" 'activeReleaseId')" = "None" ] || { echo "Stop did not clear active release." >&2; exit 1; }
+[ "$(json_value "$TMP/zone.json" 'metadata.metricsSource')" = "process-stopped" ] || { echo "Stopped zone did not report process-stopped." >&2; exit 1; }
+python3 - "$TMP/zone.json" <<'PY'
+import json, sys
+zone = json.load(open(sys.argv[1]))
+assert int(zone.get("playerCount") or 0) == 0, zone
+assert float(zone.get("tickP95Ms") or 0) == 0, zone
+assert float(zone.get("errorRate") or 0) == 0, zone
+PY
 
-echo "Zone Agent E2E passed: register, stage, activate, rollback, failure restore, idempotent result, agent restart and stop."
+echo "Zone Agent E2E passed: register, runtime metrics, stage, activate, rollback, failure restore, idempotent result, agent restart without stale metrics and process-stopped zeros."

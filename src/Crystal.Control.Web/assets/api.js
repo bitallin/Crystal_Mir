@@ -504,6 +504,25 @@
     return request("/api/v1/roles");
   }
 
+  function listZones(limit = 200) {
+    return request(`/api/v1/zones?limit=${encodeURIComponent(limit)}`);
+  }
+
+  function getZone(zoneId) {
+    return request(`/api/v1/zones/${encodeURIComponent(zoneId)}`);
+  }
+
+  function listZoneCommands(zoneId, limit = 200) {
+    return request(`/api/v1/zones/${encodeURIComponent(zoneId)}/commands?limit=${encodeURIComponent(limit)}`);
+  }
+
+  function createZoneCommand(zoneId, type, payload = null) {
+    return request(`/api/v1/zones/${encodeURIComponent(zoneId)}/commands`, {
+      method: "POST",
+      body: payload === null ? { type } : { type, payload }
+    });
+  }
+
   function restoreSession() {
     session = readSession();
     return session;
@@ -519,6 +538,7 @@
     createDraft,
     createDraftEntity,
     createRelease,
+    createZoneCommand,
     deleteDraftEntity,
     getContentByKey,
     getContentOptions,
@@ -535,6 +555,7 @@
     getReleaseManifest,
     getScriptValidation,
     getUser,
+    getZone,
     isAuthenticated,
     listAccounts,
     listAuditEvents,
@@ -544,6 +565,8 @@
     listMapCatalog,
     listRoles,
     listReleases,
+    listZoneCommands,
+    listZones,
     login,
     logout,
     me,

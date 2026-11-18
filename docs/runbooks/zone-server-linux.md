@@ -1,6 +1,6 @@
 # Linux 区服部署与运行
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 适用范围
@@ -92,6 +92,7 @@ sudo systemctl restart crystal-zone
 | `CRYSTAL_ZONE_THREADS` | 怪物处理线程数 |
 | `CRYSTAL_ZONE_SAVE_DELAY_MINUTES` | 自动保存间隔 |
 | `CRYSTAL_ZONE_READY_FILE` | ready JSON 路径；Agent 模式使用，legacy 可留空 |
+| `CRYSTAL_ZONE_METRICS_FILE` | 运行时指标 JSON 路径；Agent 模式使用，legacy 可留空 |
 | `CRYSTAL_ZONE_CONTENT_RELEASE` | 可选，已验签发布目录；不设置时使用 legacy `Server.MirDB` |
 | `CRYSTAL_ZONE_CONTENT_PUBLIC_KEY` | 发布验签公钥；使用发布模式时必填 |
 | `CRYSTAL_ZONE_CONTENT_KEY_ID` | 期望的发布签名 key id；使用发布模式时必填 |
@@ -184,6 +185,32 @@ sudo -u crystal /opt/crystal/zone/Crystal.ZoneServer   --content-root /var/lib/c
 ready 文件是原子写入的 JSON，包含 `pid`、`readyAt`、内容根和地图/物品等计数；进程正常或异常退出时会删除。
 不要用旧 ready 文件判断新进程状态，必须核对 `pid`。
 
+### 7.4 指标文件
+
+ZoneServer ready 后可通过 `--metrics-file <path>` 或 `CRYSTAL_ZONE_METRICS_FILE` 每秒原子写入运行时指标：
+
+```json
+{
+  "schemaVersion": 1,
+  "zoneId": "zone-1",
+  "pid": 1234,
+  "processStartedAt": "2026-11-18T00:00:00Z",
+  "observedAt": "2026-11-18T00:00:10Z",
+  "playerCount": 37,
+  "tickP95Ms": 42.5,
+  "errorRate": 0.03,
+  "completedTicks": 12345,
+  "errorCount": 7,
+  "sampleCount": 600,
+  "windowSeconds": 60
+}
+```
+
+- 采样窗口 60 秒，每 100 ms 检查一次世界循环计数；P95 使用最近秩法。
+- 错误率为窗口异常增量/Tick 增量，上限 1；没有 Tick 但有异常时按 1 处理。
+- 指标文件在启动和退出时删除；写入失败只记日志，不终止区服。
+- Agent 会校验 `schemaVersion`、`zoneId`、`pid`、时间范围和 15 秒时效；手工排查时也必须核对 PID，不能只看文件名。
+
 ## 8. 故障排查
 
 | 现象 | 检查 |
@@ -194,3 +221,6 @@ ready 文件是原子写入的 JSON，包含 `pid`、`readyAt`、内容根和地
 | 权限错误 | `/var/lib/crystal/zone` 必须属于 `crystal` |
 | 客户端连不上 | 检查 `CRYSTAL_ZONE_IP`、云安全组和 `7000/tcp` |
 | 日志未生成 | 检查工作目录和 `Logs/` 写权限 |
+| 指标一直为空 | 确认传入 `--metrics-file`/`CRYSTAL_ZONE_METRICS_FILE`；检查目录写权限和日志中的指标写入错误 |
+| 指标显示 unavailable | 核对 `schemaVersion`、`zoneId`、`pid`、`observedAt` 和 15 秒时效；旧 PID 文件不可复用 |
+| Tick P95 为 0 | 世界循环尚未完成采样或区服刚启动；等待一个采样窗口后复查 |

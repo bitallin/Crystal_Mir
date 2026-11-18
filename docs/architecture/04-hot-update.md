@@ -1,6 +1,6 @@
 # 热更新架构
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 两条更新通道
@@ -85,6 +85,8 @@ Control API 发布签名 release 并写入持久命令
 -> 拒绝路径穿越并校验 manifest/实体哈希、contentHash 和 ECDSA 签名
 -> 原子移动到 releases/{releaseId}-{contentHash}
 -> 激活时 SIGTERM 旧 ZoneServer，启动候选进程并等待 ready 文件
+-> ZoneServer ready 后每秒原子写出指标文件
+-> Agent 每次心跳校验并上报指标；Control.Web 读取区服投影和命令历史
 -> 成功后更新 active.json、心跳和命令结果
 -> 候选失败则重启上一版本；结果写回 Control API
 ```
@@ -114,6 +116,7 @@ releases/{releaseId}-{contentHash}/   已验签的不可变发布
 staging/                              下载/解压临时目录
 state/active.json                     当前和上一版本
 state/ready.json                      Agent 等待的 ZoneServer ready 文件
+state/metrics.json                    ZoneServer 原子写出的 60 秒运行时指标
 state/command-results/                已执行命令结果，供重投/重启后重报
 logs/                                 每次 ZoneServer 启动的 stdout/stderr
 ```
@@ -124,8 +127,35 @@ ZoneServer 仍保留 M2 的启动期消费路径和 legacy 模式。Agent 模式
 `CRYSTAL_ZONE_READY_FILE` 注入。签名缺失、哈希不匹配、key ID 不匹配、地图/脚本/配方物化失败或 ready 超时
 都会使候选启动失败。未提供发布参数时继续使用 `--content-root` 下的 `Server.MirDB` 和运行文件。
 
-详见 `adr/0012-zone-agent-process-level-content-switching.md`。本轮不做进程内原子切换、灰度/CDN、Control.Web
-区服页面、客户端启动器、玩家状态迁移和许可证/授权新模型。
+详见 `adr/0012-zone-agent-process-level-content-switching.md`。Control.Web 已使用现有区服、命令和发布查询接口
+实现区服总览/详情、真实指标、命令历史和 stage/activate/rollback/reload/stop 操作，不新增 API 路由或 DTO。
+本轮仍不做进程内原子切换、灰度/CDN、客户端启动器、玩家状态迁移和许可证/授权新模型。
+
+### 3.2.1 运行时指标桥接
+
+ZoneServer 通过 `--metrics-file <path>` / `CRYSTAL_ZONE_METRICS_FILE` 在 ready 后写出：
+
+```json
+{
+  "schemaVersion": 1,
+  "zoneId": "zone-1",
+  "pid": 1234,
+  "processStartedAt": "2026-11-18T00:00:00Z",
+  "observedAt": "2026-11-18T00:00:10Z",
+  "playerCount": 37,
+  "tickP95Ms": 42.5,
+  "errorRate": 0.03,
+  "completedTicks": 12345,
+  "errorCount": 7,
+  "sampleCount": 600,
+  "windowSeconds": 60
+}
+```
+
+采样由 `Crystal.GameCore` 的 MIT 采样器完成：60 秒窗口、100 ms 采样、最近秩 P95，按 `completedTicks` 去重世界循环样本；
+错误率为窗口内异常增量除以 Tick 增量并封顶 1。Agent 只接受 schema、zoneId、PID、时间范围和 15 秒时效均有效的文件；
+无效时上报 0 并标记 `metricsSource=unavailable`，进程停止时标记 `process-stopped`，连续三次失效且子进程仍运行则降级。
+指标写入失败不会终止 ZoneServer。详见 `adr/0013-zone-runtime-metrics-file.md`。
 
 ### 3.3 快照模型
 
@@ -186,6 +216,8 @@ ContentSnapshot
 | 候选进程启动失败/ready 超时 | SIGTERM 候选进程，重新启动上一 active 版本；无上一版本则 degraded |
 | Agent 重启 | 读取 `state/active.json`，重新验签本地发布并恢复 active 版本 |
 | ZoneServer 意外退出 | 按 2/5/10/30 秒退避重启 active 版本；持续失败时心跳 degraded |
+| 指标文件缺失/过期/PID 不匹配 | 心跳三项指标归零并标记 `metricsSource=unavailable`；连续三次失败时 degraded |
+| ZoneServer 已停止 | 指标归零并标记 `metricsSource=process-stopped` |
 | 客户端替换失败 | 从备份目录恢复 |
 | 协议不兼容 | 拒绝登录，提示更新客户端 |
 
@@ -196,8 +228,9 @@ ContentSnapshot
 - `release_id`、操作者、时间、渠道、目标区服。
 - 下载耗时、失败原因、重试次数。
 - 命令 ID、状态、租约、attempts、执行耗时和结果错误。
-- 进程 PID、ready 文件、激活/回滚耗时、恢复次数和当前/上一版本。
+- 进程 PID、ready 文件、激活/回滚耗时、恢复次数、当前/上一版本和指标窗口/样本数。
 - 客户端更新成功率、按版本分布。
 
-本轮 Agent 上报 `metricsSource=process-supervisor`，玩家数、Tick P95 和错误率为 0；真实主循环指标接入留待后续。
+Agent 上报 `metricsSource=zone-runtime|unavailable|process-stopped`；`restartFailures` 继续独立展示，
+不与玩家数、Tick P95 或错误率混用。
 

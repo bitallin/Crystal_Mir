@@ -1,6 +1,6 @@
 # Crystal 通用传奇引擎：技术文档
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 文档状态：生效
 
 ## 1. 文档目标
@@ -55,7 +55,8 @@ docs/
 │   ├── 0009-map-metadata-editor.md
 │   ├── 0010-m2-multi-content-editing-references-import-export-and-map-relations.md
 │   ├── 0011-zone-server-read-only-signed-content-release.md
-│   └── 0012-zone-agent-process-level-content-switching.md
+│   ├── 0012-zone-agent-process-level-content-switching.md
+│   └── 0013-zone-runtime-metrics-file.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源

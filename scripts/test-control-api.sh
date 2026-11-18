@@ -607,6 +607,10 @@ ZONE_ID="api-zone-${SUFFIX}"
 ZONE_REGISTER_BODY="$(printf '{"zoneId":"%s","zoneName":"API Zone","agentId":"agent-%s","agentVersion":"0.1.0","protocolVersion":1,"contentSchemaVersion":1,"startedAt":"2026-11-17T00:00:00Z","capabilities":["process-supervisor"]}' "$ZONE_ID" "$SUFFIX")"
 curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
   --data "$ZONE_REGISTER_BODY" "$BASE/api/v1/zones/register" >"$TMP/zone-registered.json"
+ZONE_HEARTBEAT_BODY="$(printf '{"zoneId":"%s","agentId":"agent-%s","observedAt":"2026-11-17T00:00:01Z","status":"online","playerCount":37,"tickP95Ms":42.5,"errorRate":0.03,"metadata":{"metricsSource":"zone-runtime","metricsObservedAt":"2026-11-17T00:00:01Z","metricsWindowSeconds":"60","metricsSampleCount":"600","restartFailures":"1","zonePid":"4321"}}' "$ZONE_ID" "$SUFFIX")"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_HEARTBEAT_BODY" "$BASE/api/v1/zones/$ZONE_ID/heartbeat" \
+  >"$TMP/zone-heartbeat.json"
 curl -fsS --max-time 20 "$BASE/api/v1/zones/$ZONE_ID" >"$TMP/zone-detail.json"
 curl -fsS --max-time 20 "$BASE/api/v1/zones?limit=200" >"$TMP/zone-list.json"
 
@@ -630,6 +634,18 @@ assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PO
   -H 'Content-Type: application/json' \
   --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"banana","playerCount":0,"tickP95Ms":0,"errorRate":0}' \
   "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Invalid heartbeat status"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"online","playerCount":0,"tickP95Ms":0,"errorRate":1.5}' \
+  "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Invalid heartbeat error rate"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"online","playerCount":-1,"tickP95Ms":0,"errorRate":0}' \
+  "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Negative heartbeat player count"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"online","playerCount":0,"tickP95Ms":-0.1,"errorRate":0}' \
+  "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Negative heartbeat tick P95"
 assert_status 401 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H 'Content-Type: application/json' --data '{"type":"zone.stop"}' \
   "$BASE/api/v1/zones/$ZONE_ID/commands")" "Unauthenticated zone command"
@@ -643,9 +659,10 @@ assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PO
   -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
   --data '{"type":"content.stage","payload":{"releaseId":999999999}}' \
   "$BASE/api/v1/zones/$ZONE_ID/commands")" "Unknown release command"
+TOO_FAR_EXPIRES_AT="$(python3 -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(hours=25)).isoformat().replace("+00:00", "Z"))')"
 assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
-  --data '{"type":"zone.stop","expiresAt":"2026-11-19T00:00:00Z"}' \
+  --data "{\"type\":\"zone.stop\",\"expiresAt\":\"$TOO_FAR_EXPIRES_AT\"}" \
   "$BASE/api/v1/zones/$ZONE_ID/commands")" "Command expiry over 24 hours"
 assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
@@ -747,8 +764,20 @@ def load(name):
 registered = load("zone-registered.json")
 assert registered["zoneId"] == zone_id, registered
 assert registered["status"] == "online", registered
-assert load("zone-detail.json")["agentId"].startswith("agent-"), load("zone-detail.json")
-assert any(zone["zoneId"] == zone_id for zone in load("zone-list.json")["items"]), load("zone-list.json")
+detail = load("zone-detail.json")
+assert detail["agentId"].startswith("agent-"), detail
+assert detail["playerCount"] == 37, detail
+assert detail["tickP95Ms"] == 42.5, detail
+assert detail["errorRate"] == 0.03, detail
+assert detail["metadata"]["metricsSource"] == "zone-runtime", detail
+assert detail["metadata"]["metricsObservedAt"] == "2026-11-17T00:00:01Z", detail
+assert detail["metadata"]["metricsWindowSeconds"] == "60", detail
+assert detail["metadata"]["metricsSampleCount"] == "600", detail
+assert detail["metadata"]["restartFailures"] == "1", detail
+assert detail["metadata"]["zonePid"] == "4321", detail
+listed = next(zone for zone in load("zone-list.json")["items"] if zone["zoneId"] == zone_id)
+assert listed["playerCount"] == 37 and listed["tickP95Ms"] == 42.5 and listed["errorRate"] == 0.03, listed
+assert listed["metadata"]["metricsSource"] == "zone-runtime", listed
 
 claimed = load("zone-command-claimed.json")["items"]
 reclaimed = load("zone-command-reclaimed.json")["items"]

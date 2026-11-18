@@ -1,6 +1,6 @@
 # 部署与可观测性
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 0. 当前实现（2026-11-10）
@@ -14,7 +14,9 @@
 - 日志同时写控制台和 `Logs/zone.log`，SIGTERM 触发保存和优雅退出。
 - 内容引用统一处理 Windows 反斜杠和大小写差异，适配 Linux 大小写敏感文件系统。
 
-运维步骤见 `docs/runbooks/zone-server-linux.md` 和 `docs/runbooks/zone-agent-linux.md`。Prometheus 指标尚未接入。
+运维步骤见 `docs/runbooks/zone-server-linux.md` 和 `docs/runbooks/zone-agent-linux.md`。ZoneServer 已通过本地
+指标文件向 Agent 提供真实玩家数、Tick P95 和错误率，再由现有心跳写入 Control API；Prometheus/OpenTelemetry
+远端汇聚尚未接入。
 
 ### 0.1 ZoneServer 发布模式（M2）
 
@@ -46,13 +48,17 @@ Crystal.ZoneAgent (MIT)
   -> Control API: release artifact ZIP
   -> releases/{releaseId}-{contentHash}
   -> SIGTERM old child
-  -> new child: --content-release ... --ready-file state/ready.json
+  -> new child: --content-release ... --ready-file state/ready.json --metrics-file state/metrics.json
+  -> read/validate state/metrics.json on every heartbeat
 ```
 
-- Agent 目录：`releases/`、`staging/`、`state/active.json`、`state/ready.json`、`state/command-results/`、`logs/`。
+- Agent 目录：`releases/`、`staging/`、`state/active.json`、`state/ready.json`、`state/metrics.json`、
+  `state/command-results/`、`logs/`。
 - 候选 ready 失败时自动恢复上一版本；ZoneServer 意外退出时按退避策略重启当前 active 版本。
 - 允许短暂停机，不做双实例、玩家状态迁移、灰度或 CDN。
 - Agent 不监听入站控制端口，主动访问 Control API；systemd 单元为 `deploy/systemd/crystal-zone-agent.service`。
+- Agent 校验指标文件 schema、zoneId、PID 和 15 秒时效；无效/过期时上报 0 并标记 `unavailable`，
+  子进程停止时标记 `process-stopped`，连续三次失效且子进程仍在运行则降级。
 - 原有 `deploy/systemd/crystal-zone.service` 保留给 legacy/直接启动模式。
 
 ### 0.2 控制面 Compose 栈（2026-11-13）
@@ -188,8 +194,13 @@ PR -> 构建 -> 单元/集成测试 -> 安全扫描 -> 制品
 
 ### 6.2 指标
 
-- 使用 Prometheus 指标命名规范。
-- 关键指标：`zone_tick_duration_ms`、`zone_players`、`zone_connections`、`content_reload_duration_ms`、`release_failures_total`、`payment_delivery_latency_ms`。
+- 当前链路：ZoneServer 每 100 ms 采样、60 秒窗口、每秒原子写 `state/metrics.json`；Agent 心跳上报
+  `playerCount`、`tickP95Ms`、`errorRate`，metadata 带 `metricsSource`、`metricsObservedAt`、
+  `metricsWindowSeconds`、`metricsSampleCount` 和 `restartFailures`。
+- Tick P95 使用最近秩法；错误率为窗口异常增量/Tick 增量并封顶 1。`restartFailures` 单独展示，不混入错误率。
+- Control.Web 区服总览每 5 秒刷新，详情和命令历史每 2 秒刷新，离开路由后清理定时器。
+- 后续接入 Prometheus/OpenTelemetry 时沿用 `zone_tick_duration_ms`、`zone_players`、`zone_connections`、
+  `content_reload_duration_ms`、`release_failures_total`、`payment_delivery_latency_ms` 等命名。
 - 每个区服带 `zone_id` 标签，避免高基数标签滥用。
 
 ### 6.3 追踪

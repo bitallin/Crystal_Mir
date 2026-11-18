@@ -120,6 +120,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -172,6 +173,27 @@ with sync_playwright() as playwright:
         with urllib.request.urlopen(request, timeout=60) as response:
             payload = response.read().decode("utf-8")
             return json.loads(payload) if payload else None
+
+    admin_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
+    zone_stamp = str(time.time_ns())
+    zone_live_id = f"web-zone-{zone_stamp}"
+    zone_offline_id = f"web-offline-{zone_stamp}"
+    zone_agent_id = f"web-agent-{zone_stamp}"
+
+    def register_zone(zone_id, zone_name):
+        return api_request("POST", "/api/v1/zones/register", {
+            "zoneId": zone_id,
+            "zoneName": zone_name,
+            "agentId": zone_agent_id,
+            "agentVersion": "web-e2e",
+            "protocolVersion": 1,
+            "contentSchemaVersion": 1,
+            "startedAt": "2026-11-18T00:00:00Z",
+            "capabilities": ["process-supervisor"]
+        }, admin_token)
+
+    register_zone(zone_live_id, "Web Live Zone")
+    register_zone(zone_offline_id, "Web Offline Zone")
 
     def open_first_draft_editor(route, type_id, entity_type, query=None):
         page.goto(f"{web}/?api={api}#/{route}", wait_until="networkidle")
@@ -1028,6 +1050,155 @@ with sync_playwright() as playwright:
     assert "区服灰度" not in release_page_text, release_page_text[:1200]
     assert "已回滚版本" in release_page_text, release_page_text[:1200]
 
+    admin_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
+    zone_release = release1
+
+    def heartbeat_zone(zone_id):
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return api_request("POST", f"/api/v1/zones/{zone_id}/heartbeat", {
+            "zoneId": zone_id,
+            "agentId": zone_agent_id,
+            "observedAt": now,
+            "status": "online",
+            "activeReleaseId": zone_release["id"],
+            "activeContentHash": zone_release["contentHash"],
+            "playerCount": 37,
+            "tickP95Ms": 42.5,
+            "errorRate": 0.03,
+            "metadata": {
+                "metricsSource": "zone-runtime",
+                "metricsObservedAt": now,
+                "metricsWindowSeconds": "60",
+                "metricsSampleCount": "600",
+                "restartFailures": "2",
+                "zonePid": "4321",
+                "previousReleaseId": str(release2["id"])
+            }
+        }, admin_token)
+
+    def complete_zone_command(zone_id, command_id, payload=None):
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return api_request("POST", f"/api/v1/zones/{zone_id}/commands/{command_id}/result", {
+            "commandId": command_id,
+            "zoneId": zone_id,
+            "status": "succeeded",
+            "startedAt": now,
+            "completedAt": now,
+            "error": None,
+            "payload": payload
+        }, admin_token)
+
+    heartbeat_zone(zone_live_id)
+    zone_detail_url = f"{web}/?api={api}#/zone/{zone_live_id}"
+    page.goto(f"{web}/?api={api}#/zones", wait_until="networkidle")
+    live_zone_row = page.locator("#zone-table tbody tr", has_text=zone_live_id)
+    live_zone_row.wait_for(timeout=15000)
+    live_zone_text = live_zone_row.inner_text()
+    assert "37" in live_zone_text and "42.5" in live_zone_text and "3.00%" in live_zone_text, live_zone_text
+
+    page.locator("#zone-table tbody tr", has_text=zone_live_id).click()
+    page.wait_for_selector("#zone-command-table", timeout=15000)
+    page.wait_for_function(
+        "zoneId => { const text = document.querySelector('.main-content')?.innerText.toLowerCase() || ''; return text.includes(zoneId.toLowerCase()) && text.includes('zone-runtime'); }",
+        arg=zone_live_id,
+        timeout=15000)
+    zone_detail_text = page.locator(".main-content").inner_text()
+    assert "42.5" in zone_detail_text and "3.00" in zone_detail_text, zone_detail_text[:1500]
+    assert "37" in zone_detail_text and zone_release["version"] in zone_detail_text, zone_detail_text[:1500]
+    assert "4321" in zone_detail_text and str(release2["id"]) in zone_detail_text, zone_detail_text[:1500]
+    command_buttons = page.locator('[data-action="open-modal"][data-modal="zone-command"]')
+    assert command_buttons.count() == 5, command_buttons.count()
+
+    command_ids = []
+    release_commands = {
+        "content.stage": True,
+        "content.activate": True,
+        "content.rollback": True,
+        "content.reload": False
+    }
+    for command_type, needs_release in release_commands.items():
+        heartbeat_zone(zone_live_id)
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#zone-command-table", timeout=15000)
+        button = page.locator(f'[data-action="open-modal"][data-modal="zone-command"][data-command="{command_type}"]')
+        button.wait_for(timeout=15000)
+        assert button.is_enabled(), command_type
+        button.click()
+        page.wait_for_selector('.modal [data-action="submit-zone-command"]', timeout=5000)
+        expected_body = {"type": command_type}
+        if needs_release:
+            select = page.locator('.modal select[name="releaseId"]')
+            select.wait_for(timeout=5000)
+            select.select_option(value=str(zone_release["id"]))
+            expected_body["payload"] = {"releaseId": zone_release["id"]}
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f"/zones/{zone_live_id}/commands")) as response_info:
+            page.click('.modal [data-action="submit-zone-command"]')
+        response = response_info.value
+        assert response.status == 201, (command_type, response.status)
+        posted = response.request.post_data_json
+        assert posted == expected_body, (command_type, posted, expected_body)
+        created = response.json()
+        command_ids.append(created["commandId"])
+        if needs_release:
+            assert created["releaseId"] == zone_release["id"], created
+            complete_zone_command(zone_live_id, created["commandId"], {"contentHash": zone_release["contentHash"]})
+        else:
+            assert created["releaseId"] is None, created
+            complete_zone_command(zone_live_id, created["commandId"], {"contentHash": zone_release["contentHash"]})
+        page.wait_for_function("!document.querySelector('.modal')", timeout=15000)
+
+    # A stale modal must surface the API's lifecycle conflict and the page must disable writes while it is queued.
+    heartbeat_zone(zone_live_id)
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#zone-command-table", timeout=15000)
+    page.click('[data-action="open-modal"][data-modal="zone-command"][data-command="content.reload"]')
+    page.wait_for_selector('.modal [data-action="submit-zone-command"]', timeout=5000)
+    conflict_command = api_request("POST", f"/api/v1/zones/{zone_live_id}/commands", {
+        "type": "content.reload"
+    }, admin_token)
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f"/zones/{zone_live_id}/commands")) as response_info:
+        page.click('.modal [data-action="submit-zone-command"]')
+    assert response_info.value.status == 409, response_info.value.status
+    page.wait_for_function("document.body.innerText.includes('unfinished lifecycle command')", timeout=10000)
+    page.click('.modal [data-action="close-modal"]')
+    page.reload(wait_until="networkidle")
+    page.wait_for_function("document.querySelector('.main-content')?.innerText.includes('已有生命周期命令')", timeout=15000)
+    assert page.locator('[data-action="open-modal"][data-modal="zone-command"]:disabled').count() == 5
+    complete_zone_command(zone_live_id, conflict_command["commandId"], {"contentHash": zone_release["contentHash"]})
+
+    heartbeat_zone(zone_live_id)
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#zone-command-table tbody tr", timeout=15000)
+    page.click('[data-action="open-modal"][data-modal="zone-command"][data-command="zone.stop"]')
+    page.wait_for_selector('.modal [data-action="submit-zone-command"]', timeout=5000)
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f"/zones/{zone_live_id}/commands")) as response_info:
+        page.click('.modal [data-action="submit-zone-command"]')
+    response = response_info.value
+    assert response.status == 201, response.status
+    assert response.request.post_data_json == {"type": "zone.stop"}, response.request.post_data_json
+    stop_command = response.json()
+    command_ids.append(stop_command["commandId"])
+    complete_zone_command(zone_live_id, stop_command["commandId"], {"stopped": True})
+    page.wait_for_function("!document.querySelector('.modal')", timeout=15000)
+    page.reload(wait_until="networkidle")
+    page.wait_for_function("document.querySelector('#zone-command-table tbody')?.innerText.includes('停止区服')", timeout=15000)
+    command_history_text = page.locator("#zone-command-table tbody").inner_text()
+    for label in ["下载并暂存", "激活内容", "回滚内容", "重载当前版本", "停止区服"]:
+        assert label in command_history_text, command_history_text[:2000]
+    assert len(command_ids) == 5, command_ids
+
+    # The registered-but-stale zone must become offline through the 30 second heartbeat projection.
+    offline_deadline = time.time() + 40
+    while time.time() < offline_deadline:
+        offline_zone = api_request("GET", f"/api/v1/zones/{zone_offline_id}", token=admin_token)
+        if offline_zone["status"] == "offline":
+            break
+        time.sleep(1)
+    assert offline_zone["status"] == "offline", offline_zone
+    page.goto(f"{web}/?api={api}#/zone/{zone_offline_id}", wait_until="networkidle")
+    page.wait_for_function("document.querySelector('.main-content')?.innerText.includes('区服已离线')", timeout=15000)
+    assert page.locator('[data-action="open-modal"][data-modal="zone-command"]:disabled').count() == 5
+
     page.goto(f"{web}/?api={api}#/accounts", wait_until="networkidle")
     page.wait_for_selector("#account-table tbody tr", timeout=15000)
     page.wait_for_function("!document.querySelector('#account-table tbody').innerText.includes('正在从 Control API')", timeout=15000)
@@ -1140,6 +1311,13 @@ with sync_playwright() as playwright:
     auditor_page.fill('input[name="password"]', f"{ui_password}Reset")
     auditor_page.click("button.login-submit")
     auditor_page.wait_for_function("location.hash === '#/dashboard'", timeout=15000)
+    auditor_page.goto(f"{web}/?api={api}#/zones", wait_until="networkidle")
+    auditor_page.wait_for_selector("#zone-table tbody tr", timeout=15000)
+    assert auditor_page.locator('[data-action="open-modal"][data-modal="zone-command"]').count() == 0
+    auditor_page.locator("#zone-table tbody tr", has_text=zone_live_id).click()
+    auditor_page.wait_for_selector("#zone-command-table", timeout=15000)
+    assert auditor_page.locator('[data-action="open-modal"][data-modal="zone-command"]').count() == 0
+    assert "只读账号" in auditor_page.locator(".main-content").inner_text()
     assert auditor_page.locator('[data-nav-item="content-releases"]').count() == 1
     auditor_page.goto(f"{web}/?api={api}#/content-releases", wait_until="networkidle")
     auditor_page.wait_for_selector("#release-table tbody tr", timeout=15000)
@@ -1199,6 +1377,6 @@ with sync_playwright() as playwright:
     assert not failed, failed
     assert not finance_errors, finance_errors
     assert not auditor_errors, auditor_errors
-    print("Control Web integration verified: login, live overview, import runs, ten draft editors, content query/search, map relation CRUD/stale recovery, JSONL dry-run/apply/export, live relations, script AST validation, map preview, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, read-only editor permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
+    print("Control Web integration verified: login, live overview, import runs, ten draft editors, content query/search, map relation CRUD/stale recovery, JSONL dry-run/apply/export, live relations, script AST validation, map preview, asset download/hash, buffs, live release create/validate/compile/sign/publish/manifest/rollback, live zones/metrics/commands/offline/409/read-only permissions, accounts, roles, token refresh, audit export, RBAC 403, logout, CORS.")
     browser.close()
 PY

@@ -34,6 +34,7 @@
     contentQueries: Object.create(null),
     focusContentSearch: null,
     contextPromise: null,
+    zoneRefreshTimer: null,
     inflight: new Set(),
     failed: new Set()
   };
@@ -48,6 +49,10 @@
       accounts: null,
       roles: null,
       releases: null,
+      zones: null,
+      zoneDetail: null,
+      zoneCommands: null,
+      zoneReleases: null,
       drafts: null,
       draftsLoaded: false,
       draftsPromise: null,
@@ -187,6 +192,8 @@
     delivered: ["已发货", "success"], paid: ["已支付", "info"], refunded: ["已退款", "violet"],
     success: ["成功", "success"], pending: ["待处理", "warning"], denied: ["已拒绝", "danger"],
     locked: ["已锁定", "danger"], online: ["在线", "success"], away: ["暂离", "warning"],
+    degraded: ["降级", "warning"], offline: ["离线", "danger"], queued: ["排队中", "neutral"],
+    expired: ["已过期", "neutral"], rejected: ["已拒绝", "danger"],
     up: ["正常", "success"], warn: ["注意", "warning"], down: ["异常", "danger"],
     ready: ["就绪", "success"], warning: ["待确认", "warning"], danger: ["高风险", "danger"],
     low: ["低", "success"], medium: ["中", "warning"], high: ["高", "danger"]
@@ -270,7 +277,11 @@
       if (type) return { title: type.label, parent: "内容中心", icon: type.icon };
     }
     if (route.startsWith("zone/")) {
-      const zone = ZONE_BY_ID[route.split("/")[1]] || D.ZONES[0];
+      const zoneId = route.split("/")[1];
+      const liveZone = state.live.zoneDetail?.zoneId === zoneId
+        ? state.live.zoneDetail
+        : (state.live.zones?.items || []).find(item => item.zoneId === zoneId);
+      const zone = liveZone || ZONE_BY_ID[zoneId] || D.ZONES[0];
       return { title: zone.name, parent: "区服运营", icon: "server" };
     }
     return META[route] || { title: "页面未找到", parent: "MIR CONTROL", icon: "help" };
@@ -1752,9 +1763,95 @@
     showToast(`Control API：${state.apiError}`, "danger");
   }
 
+  function clearZoneRefresh() {
+    if (state.zoneRefreshTimer !== null) {
+      window.clearTimeout(state.zoneRefreshTimer);
+      state.zoneRefreshTimer = null;
+    }
+  }
+
+  function scheduleZoneRefresh(route, delay) {
+    clearZoneRefresh();
+    state.zoneRefreshTimer = window.setTimeout(() => {
+      state.zoneRefreshTimer = null;
+      if (state.route !== route) return;
+      if (route === "zones") {
+        void loadZones(true);
+      } else if (route.startsWith("zone/")) {
+        void loadZoneDetail(route.slice(5), true);
+      }
+    }, delay);
+  }
+
+  async function loadZones(force = false) {
+    if (state.inflight.has("zones")) return;
+    if (!force && state.live.zones) return;
+    state.inflight.add("zones");
+    try {
+      const payload = await API.listZones(200);
+      state.live.zones = { ...payload, loadedAt: new Date().toISOString() };
+      state.failed.delete("zones");
+    } catch (error) {
+      if (error?.status === 401) throw error;
+      state.live.zones = { items: [], error };
+      if (!error?.status) state.apiStatus = "degraded";
+    } finally {
+      state.inflight.delete("zones");
+    }
+    if (state.route === "zones") render();
+  }
+
+  async function loadZoneDetail(zoneId, force = false) {
+    if (!zoneId) return;
+    if (!force && state.live.zoneDetail?.zoneId === zoneId && state.live.zoneCommands?.zoneId === zoneId) return;
+    const key = `zone:${zoneId}`;
+    if (state.inflight.has(key)) return;
+    state.inflight.add(key);
+    try {
+      const releasesPromise = state.live.zoneReleases
+        ? Promise.resolve(state.live.zoneReleases)
+        : API.listReleases(200).catch(error => {
+          if (error?.status === 401) throw error;
+          return { items: [], error };
+        });
+      const [zone, commands, releases] = await Promise.all([
+        API.getZone(zoneId),
+        API.listZoneCommands(zoneId, 200),
+        releasesPromise
+      ]);
+      state.live.zoneDetail = { ...zone, loadedAt: new Date().toISOString() };
+      state.live.zoneCommands = { zoneId, ...commands, loadedAt: new Date().toISOString() };
+      state.live.zoneReleases = releases;
+      state.failed.delete(key);
+    } catch (error) {
+      if (error?.status === 401) throw error;
+      if (!state.live.zoneDetail || state.live.zoneDetail.zoneId !== zoneId) {
+        state.live.zoneDetail = { zoneId, error };
+      }
+      state.failed.add(key);
+      if (!error?.status) state.apiStatus = "degraded";
+    } finally {
+      state.inflight.delete(key);
+    }
+    if (state.route === `zone/${zoneId}`) render();
+  }
+
   async function hydrateRoute(route) {
     if (!isLive() || !canAccessRoute(route)) return;
     try {
+      if (route === "zones") {
+        await loadZones();
+        scheduleZoneRefresh(route, 5000);
+        return;
+      }
+
+      if (route.startsWith("zone/")) {
+        const zoneId = decodeURIComponent(route.slice(5));
+        await loadZoneDetail(zoneId);
+        scheduleZoneRefresh(route, 2000);
+        return;
+      }
+
       if (route.startsWith("content/")) {
         const typeId = route.split("/")[1];
         const type = CONTENT_BY_ID[typeId];
@@ -2653,7 +2750,164 @@
       </div>`;
   }
 
+  function zoneMetadata(zone, key) {
+    const metadata = zone?.metadata;
+    return metadata && typeof metadata === "object" ? metadata[key] : null;
+  }
+
+  function zoneMetricsLive(zone) {
+    return zoneMetadata(zone, "metricsSource") === "zone-runtime";
+  }
+
+  function zoneMetricsAvailable(zone) {
+    return zoneMetricsLive(zone) || zoneMetadata(zone, "metricsSource") === "process-stopped";
+  }
+
+  function zoneMetricText(zone, value, suffix = "", digits = 0) {
+    if (!zoneMetricsAvailable(zone) || value === null || value === undefined) return "—";
+    return `${Number(value).toFixed(digits)}${suffix}`;
+  }
+
+  function zoneCommandTypeLabel(type) {
+    return {
+      "content.stage": "下载并暂存",
+      "content.activate": "激活内容",
+      "content.rollback": "回滚内容",
+      "content.reload": "重载当前版本",
+      "zone.stop": "停止区服"
+    }[type] || type || "—";
+  }
+
+  function zoneHasInflightCommand(commands) {
+    return (commands || []).some(command => command.status === "queued" || command.status === "delivered");
+  }
+
+  function zoneActionDisabled(zone, commands) {
+    return !hasPermission("zone:write") || !zone || zone.status === "offline" || zoneHasInflightCommand(commands);
+  }
+
+  function zoneCommandButton(zone, commands, command, label, iconName, tone = "btn-secondary") {
+    const disabled = zoneActionDisabled(zone, commands);
+    return `<button class="btn ${tone}" data-action="open-modal" data-modal="zone-command" data-zone-id="${esc(zone.zoneId)}" data-command="${esc(command)}"${disabled ? " disabled" : ""}>${I(iconName, 13)}${esc(label)}</button>`;
+  }
+
   function renderZones() {
+    if (!isLive()) return renderDemoZones();
+
+    const payload = state.live.zones;
+    const zones = payload?.items || [];
+    const loading = !payload && !state.failed.has("zones");
+    const error = payload?.error;
+    const online = zones.filter(zone => zone.status === "online").length;
+    const degraded = zones.filter(zone => zone.status === "degraded").length;
+    const offline = zones.filter(zone => zone.status === "offline").length;
+    const players = zones.reduce((sum, zone) => sum + (zoneMetricsLive(zone) ? Number(zone.playerCount) || 0 : 0), 0);
+    const tickValues = zones.filter(zoneMetricsLive).map(zone => Number(zone.tickP95Ms) || 0);
+    const averageTick = tickValues.length ? tickValues.reduce((sum, value) => sum + value, 0) / tickValues.length : null;
+    const versions = new Map();
+    zones.forEach(zone => {
+      const key = zone.activeReleaseVersion || "未激活";
+      versions.set(key, (versions.get(key) || 0) + 1);
+    });
+    const topVersion = Array.from(versions.entries()).sort((a, b) => b[1] - a[1])[0];
+
+    return `
+      <div class="page">
+        ${pageHeader({ title: "区服总览", description: "区服 Agent、内容版本、在线人数、Tick P95、错误率和重启次数均来自真实心跳。", eyebrow: "ZONE FLEET", actions: `${linkBtn("管理开区模板", "zone-templates", "copy")}${btn("刷新区服", "refresh", "btn-primary", 'data-action="refresh-zones"')}` })}
+        <section class="grid grid-4">
+          ${kpi({ label: "在线玩家", value: players.toLocaleString(), icon: "users", tone: "blue", meta: "仅统计指标有效的区服" })}
+          ${kpi({ label: "区服状态", value: String(online), unit: `/ ${zones.length}`, icon: "server", tone: degraded || offline ? "gold" : "green", meta: `${degraded} 降级 · ${offline} 离线` })}
+          ${kpi({ label: "平均 Tick P95", value: averageTick === null ? "—" : averageTick.toFixed(1), unit: averageTick === null ? "" : "ms", icon: "gauge", tone: "gold", meta: "阈值 50ms" })}
+          ${kpi({ label: "主版本", value: topVersion ? topVersion[0] : "—", icon: "rocket", tone: "violet", meta: topVersion ? `${topVersion[1]} 个区服` : "等待首个区服注册" })}
+        </section>
+        ${error ? `<div class="risk-box mt-16">${I("alert", 15)}<span>${esc(error.message || "区服列表读取失败")}</span></div>` : ""}
+        <section class="card mt-16">
+          <div class="card-head"><div><h2 class="card-title">区服 Agent</h2><p class="card-subtitle">最近心跳超过 30 秒由 Control API 投影为离线</p></div><span class="tag ${loading ? "gold" : "green"}">${loading ? "加载中" : `${zones.length} 个区服`}</span></div>
+          <div class="toolbar"><div class="toolbar-left"><label class="search-field">${I("search", 13)}<input data-table-filter="#zone-table" placeholder="搜索区服、Agent、版本..."></label></div><div class="toolbar-right"><span class="small muted">每 5 秒刷新</span>${iconButton("refresh", "刷新区服状态", 'data-action="refresh-zones"')}</div></div>
+          <div class="table-wrap"><table id="zone-table"><thead><tr><th>区服</th><th>状态</th><th>在线</th><th>Tick P95</th><th>错误率</th><th>重启</th><th>内容版本</th><th>最后心跳</th><th></th></tr></thead><tbody>
+            ${zones.map(zone => {
+              const restartFailures = zoneMetadata(zone, "restartFailures") ?? "0";
+              const metricsClass = Number(zone.tickP95Ms) > 50 ? "warning-text" : "";
+              return `<tr class="content-row" data-route="zone/${esc(zone.zoneId)}"><td><div class="cell-stack"><span class="zone-mark">${esc((zone.zoneName || zone.zoneId).slice(0, 1))}</span><div><div class="cell-main">${esc(zone.zoneName || zone.zoneId)}</div><div class="cell-sub mono">${esc(zone.zoneId)} · ${esc(zone.agentId)}</div></div></div></td><td>${status(zone.status)}</td><td><span class="cell-main">${zoneMetricsAvailable(zone) ? Number(zone.playerCount).toLocaleString() : "—"}</span><div class="cell-sub">Agent 心跳</div></td><td class="${metricsClass}">${zoneMetricText(zone, zone.tickP95Ms, " ms", 1)}</td><td>${zoneMetricText(zone, Number(zone.errorRate) * 100, "%", 2)}</td><td>${esc(restartFailures)}</td><td class="mono small">${esc(zone.activeReleaseVersion || "—")}</td><td class="muted">${esc(formatDateTime(zone.lastHeartbeatAt))}</td><td><div class="table-actions">${iconButton("chevronRight", "查看区服")}</div></td></tr>`;
+            }).join("") || `<tr><td colspan="9">${emptyState("还没有区服注册", "启动 Zone Agent 后，注册与心跳会自动出现在这里。", "server")}</td></tr>`}
+          </tbody></table></div>
+        </section>
+      </div>`;
+  }
+
+  function renderZoneDetail(zoneId) {
+    if (!isLive()) return renderDemoZoneDetail(ZONE_BY_ID[zoneId] || D.ZONES[0]);
+
+    const detail = state.live.zoneDetail?.zoneId === zoneId ? state.live.zoneDetail : null;
+    const zone = detail || (state.live.zones?.items || []).find(item => item.zoneId === zoneId);
+    const commandsPayload = state.live.zoneCommands?.zoneId === zoneId ? state.live.zoneCommands : null;
+    const commands = commandsPayload?.items || [];
+    const busy = zoneHasInflightCommand(commands);
+    const canWrite = hasPermission("zone:write");
+    const disabled = zoneActionDisabled(zone, commands);
+    const metricsSource = zoneMetadata(zone, "metricsSource") || "unavailable";
+    const restartFailures = zoneMetadata(zone, "restartFailures") ?? "0";
+    const metricsObservedAt = zoneMetadata(zone, "metricsObservedAt");
+    const previousReleaseId = zoneMetadata(zone, "previousReleaseId");
+
+    if (!zone) {
+      return `<div class="page">${pageHeader({ title: "区服详情", description: "等待区服数据。", eyebrow: "ZONE DETAIL" })}${state.live.zoneDetail?.error ? `<div class="risk-box">${I("alert", 15)}<span>${esc(state.live.zoneDetail.error.message || "区服读取失败")}</span></div>` : emptyState("区服未找到", "请确认 Agent 已注册，或返回区服总览刷新。", "server")}</div>`;
+    }
+
+    const actionButtons = `
+      ${zoneCommandButton(zone, commands, "content.stage", "下载暂存", "download")}
+      ${zoneCommandButton(zone, commands, "content.activate", "激活版本", "rocket", "btn-primary")}
+      ${zoneCommandButton(zone, commands, "content.rollback", "回滚版本", "rotate")}
+      ${zoneCommandButton(zone, commands, "content.reload", "重载内容", "refresh")}
+      ${zoneCommandButton(zone, commands, "zone.stop", "停止区服", "square", "btn-danger")}`;
+
+    return `
+      <div class="page">
+        <div class="page-actions" style="justify-content:flex-start;padding:0 0 16px"><button class="btn btn-ghost btn-sm" data-action="navigate" data-route="zones">${I("chevronLeft", 12)}返回区服总览</button></div>
+        <section class="zone-hero">
+          <div class="zone-hero-main"><div class="zone-hero-mark">${esc((zone.zoneName || zone.zoneId).slice(0, 1))}</div><div><div class="eyebrow" style="color:#e4bb70">ZONE · ${esc(zone.zoneId)}</div><h2>${esc(zone.zoneName || zone.zoneId)}</h2><p>${esc(zone.agentId)} · Agent ${esc(zone.agentVersion)} · protocol v${zone.protocolVersion} · content schema v${zone.contentSchemaVersion}</p><div class="hero-meta">${status(zone.status)}<span class="hero-tag">${esc(zone.activeReleaseVersion || "未激活")}</span><span class="hero-tag">${zoneMetricsAvailable(zone) ? `${Number(zone.playerCount).toLocaleString()} 在线` : "指标不可用"}</span>${busy ? `<span class="hero-tag">命令执行中</span>` : ""}</div></div></div>
+          <div class="zone-hero-meta">${canWrite ? `<div class="flex gap-6" style="flex-wrap:wrap;justify-content:flex-end">${actionButtons}</div>` : `<span class="tag">只读账号</span>`}</div>
+        </section>
+        ${!canWrite ? `<div class="risk-box mt-16">${I("shield", 15)}<span>当前账号只有 zone:read 权限，可以查看状态和命令历史，不能发起区服命令。</span></div>` : ""}
+        ${zone.status === "offline" ? `<div class="risk-box mt-16">${I("alert", 15)}<span>区服已离线，写操作已禁用。请先检查 Agent 进程、网络和最后心跳时间。</span></div>` : ""}
+        ${busy ? `<div class="risk-box mt-16">${I("clock", 15)}<span>已有生命周期命令处于排队或执行状态，完成前会禁用新的换版操作。</span></div>` : ""}
+        <section class="grid grid-4 mt-16">
+          ${kpi({ label: "在线玩家", value: zoneMetricsAvailable(zone) ? Number(zone.playerCount).toLocaleString() : "—", icon: "users", tone: "blue", meta: `指标来源 ${metricsSource}` })}
+          ${kpi({ label: "Tick P95", value: zoneMetricsAvailable(zone) ? Number(zone.tickP95Ms).toFixed(1) : "—", unit: zoneMetricsAvailable(zone) ? "ms" : "", icon: "gauge", tone: "green", meta: "最近 60 秒采样窗口" })}
+          ${kpi({ label: "错误率", value: zoneMetricsAvailable(zone) ? (Number(zone.errorRate) * 100).toFixed(2) : "—", unit: zoneMetricsAvailable(zone) ? "%" : "", icon: "alert", tone: Number(zone.errorRate) > 0 ? "red" : "green", meta: "异常日志 / 世界 Tick" })}
+          ${kpi({ label: "重启失败", value: String(restartFailures), icon: "refresh", tone: Number(restartFailures) ? "gold" : "violet", meta: metricsObservedAt ? `指标时间 ${formatDateTime(metricsObservedAt)}` : "等待指标文件" })}
+        </section>
+        <section class="grid grid-2 mt-16">
+          <article class="card"><div class="card-head"><div><h2 class="card-title">运行与内容</h2><p class="card-subtitle">Agent 心跳和当前发布投影</p></div>${status(zone.status)}</div><div class="card-body data-list">
+            <div class="data-row"><span>Agent</span><strong class="mono">${esc(zone.agentId)} · ${esc(zone.agentVersion)}</strong></div>
+            <div class="data-row"><span>启动时间</span><strong>${esc(formatDateTime(zone.startedAt))}</strong></div>
+            <div class="data-row"><span>最后心跳</span><strong>${esc(formatDateTime(zone.lastHeartbeatAt))}</strong></div>
+            <div class="data-row"><span>Zone PID</span><strong class="mono">${esc(zoneMetadata(zone, "zonePid") || "—")}</strong></div>
+            <div class="data-row"><span>Active</span><strong class="mono">${esc(zone.activeReleaseVersion || "—")}</strong></div>
+            <div class="data-row"><span>Active hash</span><strong class="mono small">${esc(zone.activeContentHash || "—")}</strong></div>
+            <div class="data-row"><span>Staged</span><strong class="mono">${esc(zone.stagedReleaseVersion || "—")}</strong></div>
+            <div class="data-row"><span>Staged hash</span><strong class="mono small">${esc(zone.stagedContentHash || "—")}</strong></div>
+            <div class="data-row"><span>上一版</span><strong class="mono">${esc(previousReleaseId || "—")}</strong></div>
+          </div></article>
+          <article class="card"><div class="card-head"><div><h2 class="card-title">指标与故障</h2><p class="card-subtitle">由 Agent 从 ZoneServer 指标文件读取并校验</p></div><span class="tag ${metricsSource === "zone-runtime" ? "green" : "gold"}">${esc(metricsSource)}</span></div><div class="card-body data-list">
+            <div class="data-row"><span>指标时间</span><strong>${esc(formatDateTime(metricsObservedAt))}</strong></div>
+            <div class="data-row"><span>窗口 / 样本</span><strong>${esc(zoneMetadata(zone, "metricsWindowSeconds") || "—")}s / ${esc(zoneMetadata(zone, "metricsSampleCount") || "—")}</strong></div>
+            <div class="data-row"><span>指标错误</span><strong class="warning-text">${esc(zoneMetadata(zone, "metricsError") || "—")}</strong></div>
+            <div class="data-row"><span>最近退出码</span><strong class="mono">${esc(zoneMetadata(zone, "lastExitCode") || "—")}</strong></div>
+            <div class="data-row"><span>最近错误</span><strong class="warning-text">${esc(zoneMetadata(zone, "lastError") || "—")}</strong></div>
+            <div class="data-row"><span>日志路径</span><strong class="mono small">${esc(zoneMetadata(zone, "lastLogPath") || "—")}</strong></div>
+          </div></article>
+        </section>
+        <section class="card mt-16">
+          <div class="card-head"><div><h2 class="card-title">命令历史</h2><p class="card-subtitle">队列、租约、执行结果与幂等重报</p></div><div class="flex gap-6">${iconButton("refresh", "刷新命令", 'data-action="refresh-zone" data-zone-id="' + esc(zone.zoneId) + '"')}<span class="tag">每 2 秒刷新</span></div></div>
+          <div class="table-wrap"><table id="zone-command-table"><thead><tr><th>命令</th><th>类型</th><th>状态</th><th>版本</th><th>尝试</th><th>创建</th><th>完成</th><th>结果</th></tr></thead><tbody>
+            ${commands.map(command => `<tr><td class="mono small">${esc(String(command.commandId).slice(0, 8))}</td><td>${esc(zoneCommandTypeLabel(command.type))}</td><td>${status(command.status, command.status === "delivered" ? "执行中" : undefined)}</td><td class="mono">${esc(command.releaseId || "—")}</td><td>${esc(command.attempts)}</td><td class="muted">${esc(formatDateTime(command.issuedAt))}</td><td class="muted">${esc(formatDateTime(command.completedAt))}</td><td class="small ${command.error ? "warning-text" : "muted"}">${esc(command.error || (command.resultPayload ? JSON.stringify(command.resultPayload) : "—"))}</td></tr>`).join("") || `<tr><td colspan="8">${emptyState("暂无命令", "下载暂存、激活、回滚、重载或停止命令会显示在这里。", "queue")}</td></tr>`}
+          </tbody></table></div>
+        </section>
+      </div>`;
+  }
+
+  function renderDemoZones() {
     const openZones = D.ZONES.filter(zone => zone.status === "open");
     const players = openZones.reduce((sum, zone) => sum + zone.players, 0);
     return `
@@ -2693,7 +2947,7 @@
       </div>`;
   }
 
-  function renderZoneDetail(zone) {
+  function renderDemoZoneDetail(zone) {
     const actions = `${btn("进入维护", "pause", "btn-secondary", 'data-action="open-modal" data-modal="zone-maintenance"')}${btn("GM 操作", "command", "btn-secondary", 'data-action="navigate" data-route="gm"')}${btn("切换内容版本", "rocket", "btn-primary", 'data-action="open-modal" data-modal="publish-release"')}`;
     const zonePlayers = D.ONLINE_PLAYERS.filter(player => player.zone.includes(zone.short));
     const playerRows = zonePlayers.length ? zonePlayers : D.ONLINE_PLAYERS.slice(0, 3);
@@ -3287,7 +3541,7 @@
       if (CONTENT_BY_ID[id]) return renderContentLibrary(CONTENT_BY_ID[id]);
     }
     if (route === "zones") return renderZones();
-    if (route.startsWith("zone/")) return renderZoneDetail(ZONE_BY_ID[route.split("/")[1]] || D.ZONES[0]);
+    if (route.startsWith("zone/")) return renderZoneDetail(route.split("/")[1]);
     if (route === "zone-templates") return renderZoneTemplates();
     if (route === "gm") return renderGm();
     if (route === "announcements") return renderAnnouncements();
@@ -3337,6 +3591,7 @@
 
   function render() {
     state.route = routeFromHash();
+    clearZoneRefresh();
     if (state.route === "login") {
       app.innerHTML = loginPage();
       document.title = "登录 · MIR Control";
@@ -4721,7 +4976,113 @@
     }).join("");
   }
 
+  function zoneActionError(error) {
+    if (error?.status === 401) {
+      handleApiFailure(error);
+      return;
+    }
+    if (error?.status === 403) {
+      showToast("当前账号缺少 zone:write 权限。", "danger");
+      return;
+    }
+    const details = error?.problem?.errors;
+    const message = details
+      ? Object.values(details).flat().join(" ")
+      : error?.problem?.detail || error?.message || "区服命令创建失败。";
+    showToast(message, "danger");
+  }
+
+  function zoneCommandReleaseOptions(command, zone) {
+    const items = (state.live.zoneReleases?.items || [])
+      .filter(release => release.status === "published" || release.status === "active")
+      .sort((left, right) => Number(right.id) - Number(left.id));
+    let selectedId = Number(zone.activeReleaseId) || null;
+    if (command === "content.activate") {
+      selectedId = Number(zone.stagedReleaseId) || selectedId;
+    } else if (command === "content.rollback") {
+      selectedId = Number(zoneMetadata(zone, "previousReleaseId")) || selectedId;
+    }
+    return { items, selectedId };
+  }
+
+  function openZoneCommandModal(zoneId, command) {
+    const zone = state.live.zoneDetail?.zoneId === zoneId
+      ? state.live.zoneDetail
+      : (state.live.zones?.items || []).find(item => item.zoneId === zoneId);
+    if (!zone) {
+      showToast("区服数据尚未加载。", "danger");
+      return;
+    }
+    if (!hasPermission("zone:write")) {
+      showToast("当前账号缺少 zone:write 权限。", "danger");
+      return;
+    }
+    const commands = state.live.zoneCommands?.zoneId === zoneId ? state.live.zoneCommands.items || [] : [];
+    if (zoneActionDisabled(zone, commands)) {
+      showToast(zone.status === "offline" ? "区服离线，不能创建命令。" : "已有生命周期命令在途，请等待完成。", "danger");
+      return;
+    }
+
+    const needsRelease = ["content.stage", "content.activate", "content.rollback"].includes(command);
+    const releases = needsRelease ? zoneCommandReleaseOptions(command, zone) : { items: [], selectedId: null };
+    if (needsRelease && releases.items.length === 0) {
+      showToast("没有可用的 published/active 发布版本。", "danger");
+      return;
+    }
+
+    const label = zoneCommandTypeLabel(command);
+    const restart = command !== "content.stage";
+    const dangerous = command === "zone.stop" || command === "content.rollback";
+    const releaseField = needsRelease
+      ? `<div class="field"><label>目标版本</label><select name="releaseId">${releases.items.map(release => `<option value="${release.id}"${Number(release.id) === Number(releases.selectedId) ? " selected" : ""}>#${release.id} · ${esc(release.version)} · ${esc(release.status)} · ${esc(String(release.contentHash).slice(0, 12))}</option>`).join("")}</select><div class="field-hint">只允许 published 或 active 且签名有效的版本。</div></div>`
+      : "";
+    modalShell({
+      title: `${label} · ${zone.zoneName || zone.zoneId}`,
+      desc: "命令会进入持久队列，由 Zone Agent 领取并在本地执行。",
+      iconName: dangerous ? "alert" : restart ? "refresh" : "download",
+      body: `<form class="js-form">
+        ${releaseField}
+        <div class="data-list"><div class="data-row"><span>区服</span><strong class="mono">${esc(zone.zoneId)}</strong></div><div class="data-row"><span>当前版本</span><strong class="mono">${esc(zone.activeReleaseVersion || "—")}</strong></div><div class="data-row"><span>Agent</span><strong class="mono">${esc(zone.agentId)}</strong></div></div>
+        <div class="risk-box" style="${dangerous ? "background:var(--red-soft);border-color:#f0cccc;color:#7b2929" : restart ? "background:var(--orange-soft);border-color:#f2d9c4;color:#7b3f21" : ""}">${I("alert", 15)}<span>${command === "zone.stop" ? "停止后需要重新执行激活命令才能恢复区服。玩家会话会中断。" : restart ? "该命令会触发 ZoneServer 进程级重启，允许短暂停机；候选版本启动失败时 Agent 会恢复上一版本。" : "该命令只下载、验签并暂存发布包，不会重启当前区服。"}</span></div>
+      </form>`,
+      foot: `${btn("取消", "", "btn-secondary", 'data-action="close-modal"')}${btn(`确认${label}`, dangerous ? "alert" : "check", dangerous ? "btn-danger" : "btn-primary", `data-action="submit-zone-command" data-zone-id="${esc(zone.zoneId)}" data-command="${esc(command)}"`)}`
+    });
+  }
+
+  async function submitZoneCommandFromModal(button) {
+    if (!isLive()) {
+      closeOverlays();
+      showToast("演示模式不会创建真实区服命令。");
+      return;
+    }
+    const zoneId = button?.dataset.zoneId;
+    const command = button?.dataset.command;
+    if (!zoneId || !command) return;
+    const form = modalForm();
+    const needsRelease = ["content.stage", "content.activate", "content.rollback"].includes(command);
+    const releaseId = needsRelease ? Number(formValue(form, "releaseId")) : null;
+    if (needsRelease && (!Number.isFinite(releaseId) || releaseId <= 0)) {
+      showToast("请选择有效的发布版本。", "danger");
+      return;
+    }
+    button.disabled = true;
+    try {
+      await API.createZoneCommand(zoneId, command, needsRelease ? { releaseId } : null);
+      closeOverlays();
+      state.live.zoneDetail = null;
+      state.live.zoneCommands = null;
+      showToast(`命令已入队：${zoneCommandTypeLabel(command)}`);
+      await loadZoneDetail(zoneId, true);
+    } catch (error) {
+      zoneActionError(error);
+      button.disabled = false;
+    }
+  }
+
   function openModal(name, dataset = {}) {
+    if (name === "zone-command" && isLive()) {
+      return openZoneCommandModal(dataset.zoneId, dataset.command);
+    }
     if (name === "create-content" && isLive()) {
       const entityType = CONTENT_BY_ID[dataset.type]?.entity;
       if (isEditableEntityType(entityType)) return openNewContentEditor(entityType);
@@ -5016,6 +5377,9 @@
       if (action === "export-audit") { exportAuditCsv(); return; }
       if (action === "download-asset") { void downloadAssetFromDrawer(actionEl); return; }
       if (action === "preview-asset") { void previewAssetFromDrawer(actionEl); return; }
+      if (action === "refresh-zones") { void loadZones(true).catch(handleApiFailure); return; }
+      if (action === "refresh-zone") { void loadZoneDetail(actionEl.dataset.zoneId, true).catch(handleApiFailure); return; }
+      if (action === "submit-zone-command") { void submitZoneCommandFromModal(actionEl); return; }
       if (action === "refresh-releases") { void loadReleaseCenterData(true).catch(handleApiFailure); return; }
       if (action === "release-perform") { void runReleaseAction(actionEl.dataset.op, Number(actionEl.dataset.id)); return; }
       if (action === "open-release-detail") { openLiveReleaseDetail(Number(actionEl.dataset.id)); return; }

@@ -1,12 +1,13 @@
 # Zone Agent Linux 安装、换版与恢复
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效（研究项目闭环；未执行真实 systemd 安装演练）
 
 ## 1. 适用范围与边界
 
 本手册用于一个区服由一个 `Crystal.ZoneAgent` 监督一个 `Crystal.ZoneServer` 子进程的 Linux 部署。
-Agent 负责注册、心跳、命令领取、发布包下载/验签、本地 staging、SIGTERM 和 ready 检查；Control API 不直接操作进程。
+Agent 负责注册、心跳、命令领取、发布包下载/验签、本地 staging、SIGTERM、ready 检查和运行时指标读取；
+Control API 不直接操作进程。
 
 当前模型接受短暂停机：
 
@@ -30,7 +31,7 @@ dotnet publish src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj \
 ./scripts/publish-zone.sh artifacts/zone-publish
 ```
 
-Agent 只引用 `Crystal.Agent.Contracts` 和 `Crystal.Content`；`check-boundaries.sh` 必须通过。ZoneServer 仍为 GPL
+Agent 只引用 MIT 的 `Crystal.Agent.Contracts`、`Crystal.Content` 和 `Crystal.GameCore`；`check-boundaries.sh` 必须通过。ZoneServer 仍为 GPL
 边界内程序，分发时按 `adr/0004-gpl-boundary.md` 提供完整源码和构建脚本。
 
 准备：
@@ -59,6 +60,7 @@ releases/{releaseId}-{contentHash}/   已验签发布目录
 staging/                              临时 ZIP 和解压目录
 state/active.json                     当前/上一版本、内容哈希和激活时间
 state/ready.json                      ZoneServer ready 文件（含 pid）
+state/metrics.json                    ZoneServer 原子写出的运行时指标（含 pid）
 state/command-results/                已执行命令结果
 logs/zone-{releaseId}-{time}.log      子进程 stdout/stderr
 ```
@@ -124,11 +126,23 @@ CRYSTAL_CONTROL_API_KEY=change-me \
 ```bash
 sudo -u crystal cat /var/lib/crystal/agent/state/ready.json
 sudo -u crystal cat /var/lib/crystal/agent/state/active.json
+sudo -u crystal cat /var/lib/crystal/agent/state/metrics.json
 sudo -u crystal ls -l /var/lib/crystal/agent/releases
 sudo -u crystal tail -f /var/lib/crystal/agent/logs/zone-*.log
 ```
 
 `ready.json` 的 `pid` 必须与当前 ZoneServer 子进程一致；`active.json` 必须记录当前 release ID、版本、内容哈希和目录。
+
+Agent 通过 `--metrics-file` 把 `state/metrics.json` 传给 ZoneServer。每次心跳读取并校验 `schemaVersion`、`zoneId`、
+`pid`、时间范围和 15 秒时效：
+
+- `metricsSource=zone-runtime`：采用文件中的玩家数、Tick P95 和错误率。
+- `metricsSource=unavailable`：文件缺失、无法读取、PID/zoneId 不匹配或过期；三项指标上报 0，metadata 记录
+  `metricsError`。
+- `metricsSource=process-stopped`：当前没有运行中的 ZoneServer 子进程；三项指标上报 0。
+- 连续三次失效且子进程仍在运行时，Agent 心跳降级为 `degraded`，随后成功读取会恢复。
+
+`state/metrics.json` 是 Agent/ZoneServer 同机桥接文件，不是发布包或审计事实源；不要手工修改。旧 PID 的残留文件会被拒绝。
 
 ## 6. Stage、激活与回滚
 
@@ -237,6 +251,8 @@ Agent 无法恢复 active 版本。
 | activate 超时 | ZoneServer 日志、端口占用、地图/Envir 文件、`ready.json` 是否写入且 pid 匹配 |
 | 候选失败后区服仍不可用 | `active.json` 上一版本目录、旧版本 artifact 完整性、内容根依赖 |
 | 心跳显示 offline | systemd 状态、Agent 日志、最后心跳时间和 Control API 数据库 |
+| 指标显示 unavailable | `state/metrics.json` 是否存在、权限、zoneId/PID、`observedAt` 是否在 15 秒内；查看 `metricsError` |
+| stop 后指标未归零 | 等待下一次心跳；确认 Agent 已识别子进程停止并上报 `metricsSource=process-stopped` |
 | 端口冲突 | 停止 `crystal-zone.service`；检查 `CRYSTAL_ZONE_PORT`/`CRYSTAL_ZONE_STATUS_PORT` |
 | 权限错误 | `/var/lib/crystal/agent` 和 `/var/lib/crystal/zone` 属于 `crystal`；公钥可读 |
 
@@ -249,3 +265,4 @@ Agent 无法恢复 active 版本。
 - 旧/新 active 版本。
 - 命令 ID、开始/完成时间、是否发生自动恢复。
 - ZoneServer ready 日志和异常退出日志路径。
+- 指标来源、窗口、采样数、Tick P95、错误率和重启失败次数。

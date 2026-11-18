@@ -28,6 +28,7 @@ internal sealed class AgentOptions
     public string LogsDirectory => Path.Combine(AgentHome, "logs");
     public string ActiveStatePath => Path.Combine(StateDirectory, "active.json");
     public string ReadyFilePath => Path.Combine(StateDirectory, "ready.json");
+    public string MetricsFilePath => Path.Combine(StateDirectory, "metrics.json");
     public string CommandResultsDirectory => Path.Combine(StateDirectory, "command-results");
 
     public static AgentOptions Parse(string[] args)

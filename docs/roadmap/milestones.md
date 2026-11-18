@@ -1,6 +1,6 @@
 # 里程碑
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 0. 估算假设
@@ -103,8 +103,8 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 
 ## M3 热更新与区服 Agent
 
-**状态**：进行中（2026-11-17，服务端控制闭环完成本轮研究范围；整个 M3 尚未收口）。
-客户端启动器、灰度/CDN、Control.Web 区服页面、进程内热切换、玩家状态迁移、真实主循环指标和许可证/授权工作仍需后续完成。
+**状态**：进行中（2026-11-18，服务端控制闭环、真实运行时指标和 Control.Web 区服闭环完成本轮研究范围；整个 M3 尚未收口）。
+客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging 验证和许可证/授权工作仍需后续完成。
 
 **目标**：客户端和服务端内容可安全、可回滚地更新。
 
@@ -115,16 +115,22 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - 签名发布 ZIP 下载，路径穿越拒绝，manifest/实体/内容哈希和 ECDSA 验签，原子本地 staging。
 - 进程级 `stage`、`activate`、`rollback`、`reload`、`stop`；SIGTERM、ready 文件、候选失败恢复上一版本。
 - ZoneServer `--ready-file`/`CRYSTAL_ZONE_READY_FILE`，legacy 启动模式和客户端协议保持兼容。
+- ZoneServer `--metrics-file`/`CRYSTAL_ZONE_METRICS_FILE` 与 GameCore 60 秒指标采样器；Agent 校验 schema/zoneId/PID/时效后
+  通过现有心跳上报真实玩家数、Tick P95、错误率和指标来源，stop 后归零并标记 `process-stopped`。
+- Control.Web 区服总览/详情接入真实 API，展示指标、active/staged 版本、内容哈希、Agent/进程状态、最后心跳和命令历史；
+  `zone:write` 用户可执行 stage、activate、rollback、reload、stop，离线或生命周期命令在途时禁用并显示 409 冲突。
 - `scripts/zone-control.sh`、`crystal-zone-agent.service` 和 Linux 运行手册。
-- PostgreSQL 16 集成测试与 Zone Agent 端到端测试，覆盖篡改包、启动失败恢复、重复结果和 Agent 重启恢复。
+- PostgreSQL 16 集成测试与 Zone Agent 端到端测试，覆盖篡改包、启动失败恢复、重复结果、Agent 重启恢复、
+  真实指标文件、旧 PID 指标拒绝和 stop 归零；Control.Web Playwright 覆盖真实区服页、五类命令、只读和 409。
 
 **仍待完成**
 
 - 客户端启动器：签名 manifest、本地哈希扫描、增量/全量下载、断点续传、原子替换、回滚。
 - 发布服务：渠道、灰度、CDN、版本分布统计。
 - 进程内热切换、玩家状态迁移、零停机双实例和多 Agent HA。
-- Control.Web 区服页面、真实玩家数/Tick P95/错误率指标接入。
 - 协议/内容/客户端版本握手和旧客户端版本门禁。
+- Ubuntu staging 上的实际 systemd 安装、开机自启、日志轮转和故障演练。
+- Prometheus/OpenTelemetry 远端指标汇聚、长期存储和告警。
 - 授权、许可证和素材合规（按研究项目口径本轮跳过）。
 
 **验收标准**
@@ -134,7 +140,7 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - 模拟下载失败、签名失败、加载失败，均能回滚。
 - 旧客户端被版本门禁正确拦截。
 
-**依赖/风险**：现有补丁格式兼容；进程级换版的停机窗口；客户端启动器改造；真实指标和状态迁移。
+**依赖/风险**：现有补丁格式兼容；进程级换版的停机窗口；客户端启动器改造；状态迁移和外部部署验证。
 
 **估算**：6～10 周。
 

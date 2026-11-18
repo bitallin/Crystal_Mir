@@ -1,6 +1,6 @@
 # 0012 Zone Agent 控制闭环与进程级内容换版
 
-- 状态：已接受
+- 状态：已接受（运行时指标部分由 0013 扩展）
 - 日期：2026-11-17
 
 ## 背景
@@ -75,7 +75,8 @@ ZoneServer 增加 `--ready-file` 和 `CRYSTAL_ZONE_READY_FILE`，在 Envir 和�
 控制面与 Agent 位于可信私有网络，复用现有 `X-Api-Key`/JWT。管理侧命令创建要求 `zone:write`；Agent 面向的注册、
 心跳、领取和结果端点目前不新增授权模型，便于研究环境闭环。该边界必须在生产化前重新评估。
 
-不实现：Control.Web 区服页面、客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、许可证和素材授权。
+本轮不实现：Control.Web 区服页面、客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、许可证和素材授权。
+其中 Control.Web 区服页面随后已使用现有 API 落地；指标桥接由 `0013-zone-runtime-metrics-file.md` 扩展。
 
 ## 备选方案
 
@@ -90,7 +91,8 @@ ZoneServer 增加 `--ready-file` 和 `CRYSTAL_ZONE_READY_FILE`，在 Envir 和�
 - 发布到区服运行形成端到端最小闭环：发布、下载、验签、staging、进程重启、ready、心跳和失败恢复。
 - 换版会短暂停机；运维必须使用维护窗口和玩家公告。
 - Control API 与 Agent 的故障边界清晰：控制面故障不直接杀死运行中的 ZoneServer，Agent 故障由 systemd 重启。
-- 区服 metrics 本轮由 Agent 上报为 0，并标记 `metricsSource=process-supervisor`；主循环指标接入留待后续。
+- 本 ADR 落地时区服 metrics 由 Agent 上报为 0；后续 `0013-zone-runtime-metrics-file.md` 已接入 ZoneServer 真实指标文件和
+  `metricsSource=zone-runtime|unavailable|process-stopped`。
 - 命令和结果持久化到 PostgreSQL，Agent 侧结果也可在控制面短暂不可用时待重报。
 
 ## 重新评估条件
@@ -99,4 +101,4 @@ ZoneServer 增加 `--ready-file` 和 `CRYSTAL_ZONE_READY_FILE`，在 Envir 和�
 - 需要把玩家会话和世界状态迁移纳入切换协议时。
 - 需要灰度、CDN、对象存储直连或多 Agent HA 时。
 - 需要生产级 Agent 双向认证、细粒度授权或密钥轮换时。
-- 需要把真实玩家数、Tick P95 和错误率接入控制面时。
+- 需要从本地指标文件升级到 Prometheus/OpenTelemetry 或跨主机汇聚时。

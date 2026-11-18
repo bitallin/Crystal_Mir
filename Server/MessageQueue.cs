@@ -15,6 +15,9 @@ namespace Server
         public readonly ConcurrentQueue<string> DebugLog = new ConcurrentQueue<string>();
         public readonly ConcurrentQueue<string> ChatLog = new ConcurrentQueue<string>();
 
+        private long _errorCount;
+        public long ErrorCount => Interlocked.Read(ref _errorCount);
+
         public MessageQueue() { }
 
         public void Enqueue(string msg)
@@ -27,6 +30,7 @@ namespace Server
 
         public void Enqueue(Exception ex)
         {
+            Interlocked.Increment(ref _errorCount);
             if (MessageLog.Count < 100)
                 MessageLog.Enqueue(String.Format("[{0}]: {1} - {2}" + Environment.NewLine, DateTime.Now, ex.TargetSite, ex));
 

@@ -53,6 +53,8 @@ Command line:
 - `--content-release <path>` or `CRYSTAL_ZONE_CONTENT_RELEASE`
 - `--content-public-key <path>` or `CRYSTAL_ZONE_CONTENT_PUBLIC_KEY`
 - `--content-key-id <id>` or `CRYSTAL_ZONE_CONTENT_KEY_ID`
+- `--ready-file <path>` or `CRYSTAL_ZONE_READY_FILE`
+- `--metrics-file <path>` or `CRYSTAL_ZONE_METRICS_FILE`
 - `--startup-timeout <seconds>`
 - `--log-config <path>`
 - `--check`
@@ -67,6 +69,14 @@ Runtime environment:
 - `CRYSTAL_ZONE_MAX_IP`
 - `CRYSTAL_ZONE_THREADS`
 - `CRYSTAL_ZONE_SAVE_DELAY_MINUTES`
+- `CRYSTAL_ZONE_READY_FILE`
+- `CRYSTAL_ZONE_METRICS_FILE`
+
+After the zone is ready, `--metrics-file` writes a versioned JSON document once per second
+with player count, Tick P95, error rate and counters for the last 60 seconds. The file is
+written atomically and removed on shutdown. A write failure is logged and does not stop the
+zone. `Crystal.ZoneAgent` validates the schema, zone ID, PID and freshness before forwarding
+the values through its heartbeat.
 
 Logs are written to the console and `Logs/zone.log` relative to the content
 directory. SIGTERM and SIGINT trigger the legacy shutdown/save path.

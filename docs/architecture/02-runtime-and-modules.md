@@ -1,6 +1,6 @@
 # 运行时与模块边界
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 当前运行时事实
@@ -50,6 +50,9 @@ db/migrations                 PostgreSQL schema
 生命周期（停用/启用、重置/自助改密、角色调整）。内容接口暴露 15 类实体（含掉落、配方、Buff、脚本和资源元数据）；
 `Crystal.Control.Web` 已通过受控 CORS 接入登录、内容总览、导入批次、15 个内容域（其中 13 类读取真实批次）、
 全量地图目录、地图/NPC 脚本/怪物掉落/配方/资源关系、账号管理、角色和审计，并按 JWT 权限点过滤导航与直达路由。
+区服总览和详情页也已接入真实区服 API，展示 Agent/进程状态、在线玩家、Tick P95、错误率、重启失败、active/staged 版本、
+内容哈希、最后心跳和命令历史；管理员可通过 `zone:write` 发起 stage、activate、rollback、reload 和 stop，
+离线或已有生命周期命令时禁用操作，409 冲突直接显示服务端原因。
 M1 已补齐可编辑内容草稿、逐实体乐观并发、修订记录、草稿校验和发布回滚；发布中心使用真实
 `GET /releases`、manifest、校验报告和回滚元数据，不再展示虚构的区服灰度或 Ed25519 信息。
 地图关系页已可检索当前批次全部地图，配方、Buff 和脚本已读取真实批次，脚本抽屉已读取 AST/编译校验，
@@ -58,12 +61,16 @@ M1 已补齐可编辑内容草稿、逐实体乐观并发、修订记录、草�
 
 `Crystal.GameCore` 在 M1 只提供运行时边界契约（`IContentSnapshotProvider<TSnapshot>`、
 `IPlayerRepository<TSnapshot>`、`IWorldClock`、`IZoneEventSink`、`IChatTransport` 和运行时事件类型），
-`Crystal.ZoneServer` 只增加项目引用，现有 `Envir`/`Map` 逻辑没有迁移。`Crystal.Agent.Contracts`
+并新增 MIT 的 `RuntimeMetricsSampler` 和版本化指标 JSON 编解码；`Crystal.ZoneServer` 只增加项目引用和计数，
+现有 `Envir`/`Map` 逻辑没有迁移。`Crystal.Agent.Contracts`
 定义稳定的 JSON 字段、路由和命令字符串（`content.stage`、`content.activate`、`content.rollback`、
 `content.reload`、`zone.stop`）。M3 已注册 Control API 的区服/命令路由并落地独立 `Crystal.ZoneAgent`：
 Agent 领取持久命令、下载并验签发布 ZIP、写入本地 staging、以 SIGTERM/ready 文件执行进程级激活或回滚。
-Agent 不引用 ZoneServer 或 `LegacyRuntime`，只通过 `ZoneExecutable` 启动子进程；详细边界见
-`docs/adr/0012-zone-agent-process-level-content-switching.md`。
+Agent 不直接读取游戏内存，而是通过 ZoneServer 原子写出的本地指标文件获取玩家数、Tick P95 和错误率，
+并校验 zoneId、PID、schema 和 15 秒时效；无效或过期时上报 0 并标记指标不可用。Agent 不引用 ZoneServer 或
+`LegacyRuntime`，只通过 `ZoneExecutable` 启动子进程；详细边界见
+`docs/adr/0012-zone-agent-process-level-content-switching.md` 和
+`docs/adr/0013-zone-runtime-metrics-file.md`。
 
 ## 3. 依赖规则
 
@@ -71,7 +78,7 @@ Agent 不引用 ZoneServer 或 `LegacyRuntime`，只通过 `ZoneExecutable` 启�
 Control.Web -> Control.Api -> Content / Shared
 ZoneServer  -> GameCore -> Shared
 ZoneServer  -> Content / Agent.Contracts
-ZoneAgent   -> Agent.Contracts / Content（通过可执行文件边界启动 ZoneServer）
+ZoneAgent   -> Agent.Contracts / Content / GameCore（通过可执行文件边界启动 ZoneServer）
 Control.Api -> Agent.Contracts（仅允许 MIT 契约）
 Patcher     -> Shared / Content.Contracts
 
@@ -126,12 +133,13 @@ Shared      -> 任何服务端实现
 
 ### 步骤 5：Agent 与控制面
 
-- 已实现：Agent 启动后向 Control API 注册并上报心跳；玩家数、Tick P95 和错误率本轮固定为 0，并标记
-  `metricsSource=process-supervisor`。
+- 已实现：Agent 启动后向 Control API 注册并上报心跳；ZoneServer ready 后每秒原子写入 60 秒窗口指标，
+  Agent 校验 schema、zoneId、PID 和 15 秒时效后上报真实玩家数、Tick P95 和错误率，并标记
+  `metricsSource=zone-runtime|unavailable|process-stopped`；重启失败次数继续由 Agent 独立统计。
 - 已实现：从 Control API 流式下载签名发布 ZIP，拒绝路径穿越，校验实体哈希、内容哈希和 ECDSA 签名后原子 staging。
 - 已实现：`stage`、`activate`、`rollback`、`reload`、`stop` 持久命令；命令有租约、过期和单生命周期互斥。
 - 已实现：进程级换版、候选 ready 检查和失败后恢复上一版本；意外退出按退避策略重启 active 版本。
-- 待后续：真实主循环指标、玩家状态迁移、进程内原子快照切换、灰度和多 Agent HA。
+- 待后续：玩家状态迁移、进程内原子快照切换、灰度、多 Agent HA 和 Prometheus/OpenTelemetry 远端汇聚。
 
 ### 步骤 6：逻辑数据化
 

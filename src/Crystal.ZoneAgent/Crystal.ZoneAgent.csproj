@@ -11,5 +11,6 @@
   <ItemGroup>
     <ProjectReference Include="../Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj" />
     <ProjectReference Include="../Crystal.Content/Crystal.Content.csproj" />
+    <ProjectReference Include="../Crystal.GameCore/Crystal.GameCore.csproj" />
   </ItemGroup>
 </Project>

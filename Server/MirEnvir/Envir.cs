@@ -89,6 +89,9 @@ namespace Server.MirEnvir
 
         public bool Ready { get; private set; }
 
+        private long _completedTicks;
+        public long CompletedTicks => Interlocked.Read(ref _completedTicks);
+
 
         private static uint _objectID;
         public uint ObjectID => ++_objectID;
@@ -2094,6 +2097,7 @@ namespace Server.MirEnvir
 
                         if (current == Objects.First)
                         {
+                            Interlocked.Increment(ref _completedTicks);
                             LastRunTime = Time - startTime;
                             startTime = Time;
                         }
