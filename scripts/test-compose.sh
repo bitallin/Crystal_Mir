@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ulimit -c 0 2>/dev/null || true
+trap 'status=$?; echo "::error::Compose smoke failed at line $LINENO: $BASH_COMMAND (exit $status)"; exit $status' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOTNET="${DOTNET:-$HOME/.dotnet/dotnet}"
@@ -19,6 +20,10 @@ MINIO_PASSWORD="${MINIO_ROOT_PASSWORD:-ComposeMinio!Passw0rd2026}"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "Docker is required for the Compose smoke test." >&2
+  exit 2
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose v2 is required for the Compose smoke test." >&2
   exit 2
 fi
 if ! command -v openssl >/dev/null 2>&1; then
