@@ -140,6 +140,21 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - Prometheus/OpenTelemetry 远端指标汇聚、告警通知、长期归档和样本保留策略。
 - 授权、许可证和素材合规（按研究项目口径本轮跳过）。
 
+**剩余执行计划（研究项目口径，授权、许可证和素材合规不纳入）**
+
+| 顺序 | 工作包 | 范围 | 验收/验证 | 依赖 |
+| --- | --- | --- | --- | --- |
+| WP0 | CI 全绿 | 修复 `DOTNET` 命令名解析和 Control API 镜像缺少 `Crystal.Agent.Contracts`；推送后复跑三个 job | `build-test`、`control-api-integration`、`compose-stack` 全部 success | 提交并推送 |
+| WP1 | Agent 生产安全边界 | mTLS/客户端证书、`agent_id` 与 `zone_id` 节点绑定、结果签名、重放保护和审计 | 伪造注册、跨区领取、重复结果和篡改结果均被拒绝，并保留成功路径 E2E | WP0 |
+| WP2 | 客户端更新加固 | 二进制 delta、并发限速、磁盘空间预检、launcher 两阶段自更新 | Linux CLI 覆盖失败回滚；Windows 验证文件占用、权限和 launcher 自升级 | WP0；Windows 主机用于运行验证 |
+| WP3 | 登录版本握手 | 协议、内容 schema、客户端版本和渠道握手；服务端旧客户端门禁 | 旧客户端被拒绝，新客户端正常登录、选角和进服 | 先新增协议版本协商 ADR |
+| WP4 | 外部 staging 与 systemd | 真实安装 `crystal-zone-agent.service`，验证开机自启、日志轮转、防火墙、SIGTERM、异常重启和换版恢复 | staging 主机演练记录和日志证据 | Ubuntu staging 主机 |
+| WP5 | Windows 端到端 | Launcher 签名更新后启动 Client，完成登录、选角、进服、移动和打怪 | Windows runner/测试机冒烟记录 | 客户端 `Data/Map/Sound` 等运行资源 |
+| WP6 | 可观测性与告警 | Prometheus/OpenTelemetry 汇聚、告警通知、长期归档和样本保留策略 | 指标可远端查询，告警可触发并可恢复 | WP4 |
+| WP7 | 零停机与高可用 | 玩家状态迁移、双实例切换、会话粘滞、停写协议和多 Agent HA | 维护窗口外完成换版且会话可恢复 | WP1、WP4 |
+
+WP4、WP5 受外部主机和资源阻塞，不阻止 WP1、WP2、WP3、WP6 在本地继续研究和验证。
+
 **验收标准**
 
 - 修改图库或地图资源后，客户端可通过启动器更新。

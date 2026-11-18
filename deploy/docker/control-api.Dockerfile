@@ -2,10 +2,12 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 COPY src/Crystal.Control.Api/Crystal.Control.Api.csproj src/Crystal.Control.Api/
+COPY src/Crystal.Agent.Contracts/Crystal.Agent.Contracts.csproj src/Crystal.Agent.Contracts/
 COPY src/Crystal.Content/Crystal.Content.csproj src/Crystal.Content/
 RUN dotnet restore src/Crystal.Control.Api/Crystal.Control.Api.csproj
 
 COPY src/Crystal.Control.Api/ src/Crystal.Control.Api/
+COPY src/Crystal.Agent.Contracts/ src/Crystal.Agent.Contracts/
 COPY src/Crystal.Content/ src/Crystal.Content/
 RUN dotnet publish src/Crystal.Control.Api/Crystal.Control.Api.csproj \
     -c Release \

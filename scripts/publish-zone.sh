@@ -21,7 +21,7 @@ EOF
   exit 0
 fi
 
-if [ ! -x "$DOTNET" ]; then
+if ! command -v "$DOTNET" >/dev/null 2>&1; then
   echo "dotnet not found at $DOTNET. Set DOTNET=/path/to/dotnet." >&2
   exit 1
 fi

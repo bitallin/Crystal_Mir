@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOTNET="${DOTNET:-$HOME/.dotnet/dotnet}"
 CONFIGURATION="${CONFIGURATION:-Release}"
 
-if [ ! -x "$DOTNET" ]; then
+if ! command -v "$DOTNET" >/dev/null 2>&1; then
   echo "dotnet not found at $DOTNET. Set DOTNET=/path/to/dotnet." >&2
   exit 1
 fi

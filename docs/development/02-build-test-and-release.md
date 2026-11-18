@@ -199,6 +199,8 @@ restore -> build -> unit tests -> integration tests
 它执行构建、回归测试、黄金数据库检查、黄金内容导入、快照重建、旧二进制导出 round-trip，并在 Node
 可用时检查 Control.Web JavaScript 语法；配置数据库时继续运行 Control API 和 Zone Agent 集成。GitHub Actions 配置见
 `.github/workflows/ci.yml`；独立 `control-api-integration` job 使用 PostgreSQL 16 验证迁移、导入和 API。
+`scripts/` 中的 `DOTNET` 同时接受 PATH 命令名（如 `dotnet`）和绝对路径；GitHub Actions 使用 `DOTNET=dotnet`，
+本地默认使用 `~/.dotnet/dotnet`。
 
 要求：
 

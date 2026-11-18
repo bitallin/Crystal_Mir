@@ -25,7 +25,7 @@ if ! command -v openssl >/dev/null 2>&1; then
   echo "openssl is required to generate release signing test keys." >&2
   exit 2
 fi
-if [ ! -x "$DOTNET" ]; then
+if ! command -v "$DOTNET" >/dev/null 2>&1; then
   echo "dotnet not found at $DOTNET. Set DOTNET=/path/to/dotnet." >&2
   exit 2
 fi
