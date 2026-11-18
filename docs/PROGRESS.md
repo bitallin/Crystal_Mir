@@ -1,7 +1,7 @@
 # 项目进度台账
 
 > 最后更新：2026-11-18
-> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标、指标历史/健康评估、Control.Web 区服闭环和客户端签名补丁核心已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情、趋势告警与五类命令、签名 manifest、文件级增量、事务应用与回滚）。远端 CI 已依次修复 `DOTNET` 命令名解析、Control API 镜像依赖、runner 缺少 `rg` 和 MinIO 镜像下架问题；run 13 的 `build-test`/`control-api-integration` 已通过，S3Mock 替换后的 `compose-stack` 待 run 15 确认。二进制 delta、灰度/CDN、launcher 自更新、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、Windows 冒烟和 M0 外部阻塞仍未完成；授权、许可证和素材合规按要求本轮跳过
+> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标、指标历史/健康评估、Control.Web 区服闭环和客户端签名补丁核心已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情、趋势告警与五类命令、签名 manifest、文件级增量、事务应用与回滚）。远端 CI run 15 已全绿；已依次修复 `DOTNET` 命令名解析、Control API 镜像依赖、runner 缺少 `rg` 和 MinIO 镜像下架问题。二进制 delta、灰度/CDN、launcher 自更新、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、Windows 冒烟和 M0 外部阻塞仍未完成；授权、许可证和素材合规按要求本轮跳过
 
 ## 1. 当前状态
 
@@ -16,7 +16,7 @@
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
-| CI 基线 | 接近全绿 | 已修复 `DOTNET=dotnet` 解析、Control API 镜像漏拷 `Crystal.Agent.Contracts`、`rg` 缺失和 MinIO 镜像下架；run 13 的 `build-test`/`control-api-integration` 已通过，Compose 改用 `adobe/s3mock:5.2.3` 后本地通过，待 run 15 确认 |
+| CI 基线 | 已完成 | run 15（`59cd60e`）的 `build-test`、`control-api-integration` 和 `compose-stack` 全部 success；已修复 `DOTNET=dotnet` 解析、Control API 镜像漏拷 `Crystal.Agent.Contracts`、`rg` 缺失和 MinIO 镜像下架 |
 | 控制面 | M2 完成，M3 区服闭环完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；新增 `zone_metric_sample`、指标窗口查询、汇总和实时健康告警；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号、审计以及真实区服总览/详情、趋势告警、命令历史和五类生命周期操作 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | 服务端 Agent 闭环已完成，客户端核心闭环已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.ZoneAgent` 已实现注册、心跳、命令领取、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件读取和失败恢复。客户端新增 MIT `Crystal.Patcher`/`Crystal.PatcherTool` 和旧 WinForms Launcher 可选分支：ECDSA 签名 manifest、SHA256 文件级增量、Range 续传、事务应用、崩溃恢复和回滚；二进制 delta、灰度/CDN、launcher 自更新、进程内热切换和玩家状态迁移未实现 |
@@ -46,8 +46,9 @@
 - 替换：Compose 的对象存储测试替身从 MinIO 改为 Apache-2.0 的 `adobe/s3mock:5.2.3`，启动时自动创建 `crystal-content` 桶；移除 `minio-init`、MinIO 凭据和相关环境变量，保留 S3 兼容接口和生产 MinIO/S3 选型。
 - 诊断增强：`test-compose.sh` 将 Compose 启动日志写入文件，失败时通过 `::error::` 注解输出最后 12 行，并检查 Docker Compose v2 可用性。
 - 验证：`grep` 版边界检查通过；`docker compose config -q` 通过；本地 `scripts/test-compose.sh` 完成 PostgreSQL 16、Redis、S3Mock、迁移、API/Web 代理、登录和内容查询全链路。
-- 未验证：run 15 尚未产生；Windows 客户端、launcher 和外部 staging/systemd 仍不可在当前 Linux 容器验证。
-- 下一步：推送后确认 run 15 三个 job 全绿，再按 WP1 补 Agent mTLS、节点绑定、结果签名和重放保护。
+- 验证（远端）：run 15（`59cd60e`，run id `44292294225`）的 `build-test`、`control-api-integration` 和 `compose-stack` 全部 success。
+- 未验证：Windows 客户端、launcher 和外部 staging/systemd 仍不可在当前 Linux 容器验证。
+- 下一步：进入 WP1，补 Agent mTLS、节点绑定、结果签名和重放保护。
 - 决策：S3Mock 仅作为 Compose 本地/CI 测试替身，生产仍使用 MinIO/S3；不改变控制面协议、数据模型或发布模型，因此不新增 ADR。
 
 ### 2026-11-18（远端 CI 失败定位与修复）
@@ -531,7 +532,7 @@
 | 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
 | 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
 | 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
-| CI | run 13 的 `build-test`/`control-api-integration` 已通过；`compose-stack` 因 MinIO 镜像下架失败，已改用 S3Mock | S3Mock 修复仅本地验证，远端 run 15 尚未确认 | 推送后检查三个 job，保留 run 15 日志 |
+| CI | 已解决 | run 15 三个 job 全部通过 | 保留 run 15 日志；后续 CI 变更继续以三个 job 为门禁 |
 | 运行 | 当前环境是 Linux，未执行 Windows 客户端登录/进服和 WinForms 宿主冒烟 | M0 客户端验收仍不能闭环 | 准备 Windows runner 或测试机 |
 | 许可 | `Crystal.MapEditor` 未发现明确许可证 | 不能随发布包分发 | 联系维护者、确认许可证或替换工具 |
 | 许可 | 服务端 GPL-3.0-only、素材版权 | 分发和商业化受限 | M0 完成合规审查并保留源码归档流程 |
@@ -546,16 +547,15 @@
 
 ## 6. 下一步
 
-1. 推送 S3Mock 修复，确认 GitHub Actions run 15 的 `build-test`、`control-api-integration` 和 `compose-stack` 全部通过，并保存日志。
-2. 按 WP1 为 Agent 补充生产化安全边界：mTLS/客户端证书、`agent_id` 与 `zone_id` 节点绑定、结果签名/重放保护和审计。
-3. 在 Ubuntu staging 主机实际安装 `crystal-zone-agent.service`，验证开机自启、日志轮转、端口防火墙、SIGTERM、异常退出重启和失败换版恢复。
-4. 在 Windows 环境用签名 manifest 跑 `Launcher -> Client` 冒烟，验证文件占用、权限、回滚和 WebView2 行为。
-5. 补 launcher 两阶段自更新、二进制 delta、并发限速、磁盘空间预检和渠道/灰度分发。
-6. 先新增协议版本协商 ADR，再实现登录握手协议/内容/客户端版本门禁，把启动器 manifest 门禁扩展到服务端。
-7. 评估零停机/双实例换版所需玩家状态迁移、会话粘滞和停写协议；当前继续使用维护窗口。
-8. 接入 Prometheus/OpenTelemetry 指标汇聚、长期存储和告警；补充 Windows 客户端连接后的非零玩家数与真实错误率验证。
-9. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
-10. 授权、许可证和素材合规不纳入当前研究项目计划；Windows 客户端运行资源仍按外部依赖准备。
+1. 按 WP1 为 Agent 补充生产化安全边界：mTLS/客户端证书、`agent_id` 与 `zone_id` 节点绑定、结果签名/重放保护和审计。
+2. 在 Ubuntu staging 主机实际安装 `crystal-zone-agent.service`，验证开机自启、日志轮转、端口防火墙、SIGTERM、异常退出重启和失败换版恢复。
+3. 在 Windows 环境用签名 manifest 跑 `Launcher -> Client` 冒烟，验证文件占用、权限、回滚和 WebView2 行为。
+4. 补 launcher 两阶段自更新、二进制 delta、并发限速、磁盘空间预检和渠道/灰度分发。
+5. 先新增协议版本协商 ADR，再实现登录握手协议/内容/客户端版本门禁，把启动器 manifest 门禁扩展到服务端。
+6. 评估零停机/双实例换版所需玩家状态迁移、会话粘滞和停写协议；当前继续使用维护窗口。
+7. 接入 Prometheus/OpenTelemetry 指标汇聚、长期存储和告警；补充 Windows 客户端连接后的非零玩家数与真实错误率验证。
+8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
+9. 授权、许可证和素材合规不纳入当前研究项目计划；Windows 客户端运行资源仍按外部依赖准备。
 
 ## 7. 更新规则
 
