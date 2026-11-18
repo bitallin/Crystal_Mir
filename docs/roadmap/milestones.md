@@ -103,8 +103,8 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 
 ## M3 热更新与区服 Agent
 
-**状态**：进行中（2026-11-18，服务端控制闭环、真实运行时指标、指标历史/健康评估和 Control.Web 区服闭环完成本轮研究范围；整个 M3 尚未收口）。
-客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging 验证和许可证/授权工作仍需后续完成。
+**状态**：进行中（2026-11-18，服务端控制闭环、真实运行时指标、指标历史/健康评估、Control.Web 区服闭环和客户端签名补丁核心完成本轮研究范围；整个 M3 尚未收口）。
+二进制 delta、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging 验证、launcher 自更新和 Windows 运行冒烟仍需后续完成。
 
 **目标**：客户端和服务端内容可安全、可回滚地更新。
 
@@ -124,13 +124,18 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - `scripts/zone-control.sh`、`crystal-zone-agent.service` 和 Linux 运行手册。
 - PostgreSQL 16 集成测试与 Zone Agent 端到端测试，覆盖篡改包、启动失败恢复、重复结果、Agent 重启恢复、
   真实指标文件、旧 PID 指标拒绝和 stop 归零；Control.Web Playwright 覆盖真实区服页、五类命令、只读和 409。
+- MIT `Crystal.Patcher`：ECDSA P-256 签名 manifest、canonical JSON、keyId、渠道/版本/有效期/降级门禁、路径穿越拒绝。
+- SHA256 文件级增量：只下载新增或变化文件，HTTP Range 续传；`.crystal-update` staging、备份、pending 事务、
+  失败恢复和最近一次更新回滚；未知本地文件不删除。
+- `Crystal.PatcherTool` 与 `scripts/test-client-updates.sh`：覆盖 `pack -> sign -> verify -> apply -> state -> rollback`。
+- 旧 WinForms Launcher 在配置 `Launcher:ManifestUrl` 后接入签名更新；未配置时 `PList.gz` 路径保持兼容。
 
 **仍待完成**
 
-- 客户端启动器：签名 manifest、本地哈希扫描、增量/全量下载、断点续传、原子替换、回滚。
+- 二进制 delta、并发限速、磁盘空间预检和 launcher 两阶段自更新。
 - 发布服务：渠道、灰度、CDN、版本分布统计。
 - 进程内热切换、玩家状态迁移、零停机双实例和多 Agent HA。
-- 协议/内容/客户端版本握手和旧客户端版本门禁。
+- 登录协议/内容/客户端版本握手和服务端旧客户端门禁（当前仅启动器 manifest 门禁）。
 - Ubuntu staging 上的实际 systemd 安装、开机自启、日志轮转和故障演练。
 - Prometheus/OpenTelemetry 远端指标汇聚、告警通知、长期归档和样本保留策略。
 - 授权、许可证和素材合规（按研究项目口径本轮跳过）。

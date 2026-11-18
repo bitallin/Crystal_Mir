@@ -1,9 +1,9 @@
 # 参考手册索引
 
-> 最后更新：2026-11-10
+> 最后更新：2026-11-18
 > 状态：生效
 
-本目录存放由代码、schema 或工具生成的参考文档。原则是“可再生成”，不手工维护易过期的字段清单。
+本目录存放由代码、schema 或工具生成的参考文档，以及少量必须人工维护的跨边界契约。原则是“可再生成”，不手工维护易过期的字段清单。
 
 | 文档 | 内容 | 生成方式 | 状态 |
 | --- | --- | --- | --- |
@@ -14,6 +14,7 @@
 | `legacy-db-mapping.md` | `Server.MirDB` 字段到新 schema 的逐字段映射 | 从迁移工具生成 | 待生成（初版见 `content-import.md`） |
 | `api-conventions.md` | REST/gRPC 命名、错误码、分页、幂等 | 手工维护 | 生效（M1 初版） |
 | `control-api.md` | Control API 配置、接口、认证边界和限制 | 手工维护 | 生效（M1 认证、账号生命周期与只读初版） |
+| `client-patch-manifest.md` | 客户端签名 manifest、CLI、启动器配置、更新状态和回滚语义 | 手工维护，与 `Crystal.Patcher` 同步 | 生效（M3 垂直切片） |
 | `glossary.md` | 领域术语中英文对照 | 手工维护 | 待编写 |
 | `external-resources.md` | 外部仓库、commit、资源和缺口 | 手工维护 | 生效 |
 | `db-inventory.md` | 标准数据库版本、实体数量和黄金样本 | 检查器生成 | 生效 |

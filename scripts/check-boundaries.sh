@@ -19,6 +19,7 @@ require_file src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj
 require_file src/Crystal.Control.Api/Crystal.Control.Api.csproj
 require_file src/Crystal.Content/Crystal.Content.csproj
 require_file src/Crystal.LegacyRuntime/Crystal.LegacyRuntime.csproj
+require_file src/Crystal.Patcher/Crystal.Patcher.csproj
 
 if rg -n 'ProjectReference[^>]*(Server\.Library|Server\.MirForms|Crystal\.ZoneServer|Crystal\.LegacyRuntime)' \
   src/Crystal.Control.Api/Crystal.Control.Api.csproj src/Crystal.Content/Crystal.Content.csproj \
@@ -51,6 +52,15 @@ fi
 
 if rg -n 'ProjectReference' src/Crystal.GameCore/Crystal.GameCore.csproj | rg -v 'Shared/Shared.csproj' >/dev/null; then
   fail "GameCore may only reference Crystal.Shared in M1"
+fi
+
+if rg -n 'ProjectReference' src/Crystal.Patcher/Crystal.Patcher.csproj >/dev/null; then
+  fail "Crystal.Patcher must remain dependency-free"
+fi
+
+if rg -n 'Microsoft\.EntityFrameworkCore|Microsoft\.AspNetCore|System\.Windows\.Forms|Server\.Mir' \
+  src/Crystal.Patcher -g '*.cs' -g '*.csproj' >/dev/null; then
+  fail "Crystal.Patcher depends on a forbidden framework"
 fi
 
 echo "Dependency boundary checks passed."

@@ -38,6 +38,12 @@ echo "== Agent Contracts =="
 echo "== Zone Agent =="
 "$DOTNET" build src/Crystal.ZoneAgent/Crystal.ZoneAgent.csproj -c "$CONFIGURATION" --nologo
 
+echo "== Patcher =="
+"$DOTNET" build src/Crystal.Patcher/Crystal.Patcher.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Patcher Tool =="
+"$DOTNET" build tools/Crystal.PatcherTool/Crystal.PatcherTool.csproj -c "$CONFIGURATION" --nologo
+
 echo "== Contract boundary test =="
 "$DOTNET" build Tests/ContractBoundary/ContractBoundary.csproj -c "$CONFIGURATION" --nologo
 
@@ -46,6 +52,9 @@ echo "== Content editor test =="
 
 echo "== Zone metrics test =="
 "$DOTNET" build Tests/ZoneMetrics/ZoneMetrics.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Client updates test =="
+"$DOTNET" build Tests/ClientUpdates/ClientUpdates.csproj -c "$CONFIGURATION" --nologo
 
 echo "== Control API =="
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo

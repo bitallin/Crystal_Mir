@@ -31,7 +31,7 @@
 | UI 样式 | 布局和索引大量硬编码在 C# | 主题、布局、字体、颜色、控件参数数据驱动 | UI schema、主题包、客户端加载器 | M3/M6 |
 | 音效 | 客户端 Sound 库 | 音效绑定、试听、音量/场景配置 | 音效资产、事件映射、预览 | M2 |
 | 玩法/规则 | `Settings` + 代码分支 | 规则 DSL/Lua、按区服覆盖、热更新 | 规则引擎、沙箱、配置版本 | M6 |
-| 客户端热更新 | `PList.gz` + 手工补丁工具 | 签名清单、增量、CDN、灰度、回滚 | Launcher、manifest、差分、签名 | M3 |
+| 客户端热更新 | 新增 MIT `Crystal.Patcher` 和 `Crystal.PatcherTool`：ECDSA P-256 签名 manifest、SHA256 文件级增量、HTTP Range 续传、`.crystal-update` 事务应用、失败恢复和回滚；旧 WinForms Launcher 在配置 `ManifestUrl` 后接入，旧 `PList.gz` 路径保留 | 签名清单、增量、CDN、灰度、回滚 | 二进制 delta、CDN/渠道分发、launcher 自更新、Windows 运行冒烟 | M3（文件级更新闭环完成） |
 | 服务端热重载 | 已支持 ZoneServer 启动期验证签名发布、隔离重建旧库并物化内容；独立 `Crystal.ZoneAgent` 已实现注册、心跳、命令租约、下载验签、staging、进程级 activate/rollback/reload/stop、ready 和失败恢复；Control.Web 已接入真实区服指标、命令历史和五类操作；legacy 二进制库模式保留 | 零停机内容快照切换、失败回滚、玩家状态迁移 | 进程内原子切换、双实例/HA、状态迁移、灰度/CDN 和生产级指标汇聚 | M3（本轮服务端控制与 Web 闭环完成） |
 | 开区 | 手工配置和启动 | 模板化开区、定时、健康门禁 | 区服编排、Agent、监控 | M4 |
 | 合区 | 无 | 预检、ID 映射、冻结、校验、回滚 | 合区引擎、冲突策略、报告 | M4 |

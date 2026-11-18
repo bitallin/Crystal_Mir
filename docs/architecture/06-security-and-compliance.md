@@ -1,6 +1,6 @@
 # 安全与合规
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 威胁模型
@@ -96,8 +96,9 @@ Agent 双向认证或节点绑定，不能直接暴露到公网。
 ## 6. 补丁与供应链
 
 - 所有发布包使用 Ed25519 或等效算法签名；当前内容快照使用 ECDSA P-256 + SHA-256，见 `adr/0005-content-signature-format.md`。
-- 客户端只信任内置公钥对应的签名。
-- manifest 有过期时间和最低版本，防降级。
+- 客户端只信任内置或本地配置公钥对应的签名；当前实现使用 ECDSA P-256 + SHA-256，见 `adr/0015-client-signed-patch-manifest-and-transactional-update.md`。
+- 客户端 manifest 有渠道、过期时间、最低 launcher/client 版本、协议/content schema 版本和上次 `generatedAt` 降级检查。
+- 客户端更新只接受安全相对路径，逐文件校验大小和 SHA256，使用 staging/备份/pending 事务应用，失败或崩溃可恢复。
 - 服务端 Agent 下载发布 ZIP 后再次校验 manifest、实体/内容哈希和 ECDSA P-256 签名，拒绝路径穿越和非白名单文件。
 - 构建产物可追溯：提交哈希、构建号、依赖清单、SBOM。
 - CI 使用最小权限令牌，发布密钥不进入构建日志。

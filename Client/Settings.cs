@@ -199,6 +199,14 @@ namespace Client
         public static string P_Client = Application.StartupPath + "\\";
         public static bool P_AutoStart = false;
         public static int P_Concurrency = 1;
+        public static string P_ManifestUrl = string.Empty;
+        public static string P_ManifestPublicKey = string.Empty;
+        public static string P_ManifestKeyId = string.Empty;
+        public static string P_Channel = "stable";
+        public static int P_ProtocolVersion = 1;
+        public static int P_ContentSchemaVersion = 1;
+        public static string P_ClientVersionOverride = string.Empty;
+        public static string P_LauncherVersionOverride = string.Empty;
 
         public static void Load()
         {
@@ -300,6 +308,14 @@ namespace Client
             P_ServerName = Reader.ReadString("Launcher", "ServerName", P_ServerName);
             P_BrowserAddress = Reader.ReadString("Launcher", "Browser", P_BrowserAddress);
             P_Concurrency = Reader.ReadInt32("Launcher", "ConcurrentDownloads", P_Concurrency);
+            P_ManifestUrl = Reader.ReadString("Launcher", "ManifestUrl", P_ManifestUrl);
+            P_ManifestPublicKey = Reader.ReadString("Launcher", "ManifestPublicKey", P_ManifestPublicKey);
+            P_ManifestKeyId = Reader.ReadString("Launcher", "ManifestKeyId", P_ManifestKeyId);
+            P_Channel = Reader.ReadString("Launcher", "Channel", P_Channel);
+            P_ProtocolVersion = Reader.ReadInt32("Launcher", "ProtocolVersion", P_ProtocolVersion);
+            P_ContentSchemaVersion = Reader.ReadInt32("Launcher", "ContentSchemaVersion", P_ContentSchemaVersion);
+            P_ClientVersionOverride = Reader.ReadString("Launcher", "ClientVersion", P_ClientVersionOverride);
+            P_LauncherVersionOverride = Reader.ReadString("Launcher", "LauncherVersion", P_LauncherVersionOverride);
 
 
             if (!P_Host.EndsWith("/")) P_Host += "/";
@@ -313,6 +329,9 @@ namespace Client
             }
 
             if (P_Concurrency < 1) P_Concurrency = 1;
+            if (string.IsNullOrWhiteSpace(P_Channel)) P_Channel = "stable";
+            if (P_ProtocolVersion < 1) P_ProtocolVersion = 1;
+            if (P_ContentSchemaVersion < 1) P_ContentSchemaVersion = 1;
             if (P_Concurrency > 100) P_Concurrency = 100;
 
             try
@@ -411,6 +430,14 @@ namespace Client
             Reader.Write("Launcher", "Browser", P_BrowserAddress);
             Reader.Write("Launcher", "AutoStart", P_AutoStart);
             Reader.Write("Launcher", "ConcurrentDownloads", P_Concurrency);
+            Reader.Write("Launcher", "ManifestUrl", P_ManifestUrl);
+            Reader.Write("Launcher", "ManifestPublicKey", P_ManifestPublicKey);
+            Reader.Write("Launcher", "ManifestKeyId", P_ManifestKeyId);
+            Reader.Write("Launcher", "Channel", P_Channel);
+            Reader.Write("Launcher", "ProtocolVersion", P_ProtocolVersion);
+            Reader.Write("Launcher", "ContentSchemaVersion", P_ContentSchemaVersion);
+            Reader.Write("Launcher", "ClientVersion", P_ClientVersionOverride);
+            Reader.Write("Launcher", "LauncherVersion", P_LauncherVersionOverride);
         }
 
         public static void LoadTrackedQuests(string charName)

@@ -15,14 +15,17 @@ Client/                      Windows 客户端（MIT）
 src/Crystal.Content/         内容快照契约、哈希和校验（MIT）
 src/Crystal.Agent.Contracts/ Agent 注册、心跳、命令和结果契约（MIT）
 src/Crystal.ZoneAgent/       单区进程监督、内容 staging 和命令执行（MIT）
+src/Crystal.Patcher/         客户端签名 manifest、差异、事务应用和回滚（MIT）
 src/Crystal.Control.Api/     内容、账号、RBAC、审计和区服命令 API（ASP.NET Core + Npgsql）
 src/Crystal.ZoneServer/      Linux 区服控制台宿主（GPL 边界，链接 Server.Library）
 tools/Crystal.LegacyImporter 旧二进制导入/导出器（链接 GPL Server.Library）
+tools/Crystal.PatcherTool    客户端补丁打包、签名、验证、应用和回滚 CLI
 db/migrations/               PostgreSQL schema
 Tests/ItemSecurity/          旧物品安全回归
 Tests/ContentSnapshot/       内容快照回归
 Tests/ZoneMetrics/           运行时指标采样与校验
 Tests/ZoneHealth/            区服健康评估告警规则
+Tests/ClientUpdates/         客户端签名补丁、差异、事务和回滚回归
 LibraryEditor/               图库编辑工具
 LibraryViewer/               图库查看工具
 AutoPatcherAdmin*            补丁管理工具
@@ -31,9 +34,6 @@ AutoPatcherAdmin*            补丁管理工具
 目标新增：
 
 ```text
-src/Crystal.GameCore
-src/Crystal.Control.Web
-src/Crystal.Patcher
 src/Crystal.Cli
 ```
 
@@ -47,6 +47,7 @@ src/Crystal.Cli
 | 客户端 | Windows | Linux 可交叉构建，现有 Direct3D9/SlimDX 限制运行平台 |
 | Control API | Linux | ASP.NET Core |
 | Control Web | 任意 | 静态资源，无构建链；`node --check` 校验 |
+| Crystal.Patcher / CLI | 任意 | `net8.0`，不依赖 Windows 或 GPL 代码 |
 
 2026-11-10 已验证：
 
@@ -56,12 +57,22 @@ src/Crystal.Cli
 ./scripts/inspect-db.sh
 ./scripts/verify-content.sh
 ./scripts/zone-smoke.sh
+./scripts/test-client-updates.sh
 ```
 
 结果：旧服务端、客户端、内容库、Control API 和工具构建成功；`ItemSecurity` 通过 358 项检查；
 `ContentSnapshot` 通过 39 项检查；`ZoneMetrics`、`ZoneHealth` 和合约边界检查通过；黄金数据库可加载；
 黄金内容导入、快照重建和二进制导出 round-trip 通过；
 Control.Web 全部 JavaScript 通过 `node --check`；Linux 区服加载 463 张地图并以 SIGTERM 正常退出。
+
+客户端签名补丁链路可用以下命令验证（需要 `openssl` 生成测试密钥）：
+
+```bash
+./scripts/test-client-updates.sh
+```
+
+该脚本覆盖 `pack -> sign -> verify -> apply -> state -> rollback`，校验未知本地文件保留和
+`.crystal-update` 状态清理。Windows 客户端实际启动、登录和进服仍需 Windows 环境。
 
 发布自包含 Linux 区服：
 

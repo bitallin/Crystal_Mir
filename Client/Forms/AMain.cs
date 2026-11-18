@@ -5,6 +5,7 @@ using Microsoft.Web.WebView2.Core;
 using System.Net.Http.Headers;
 using System.Net.Http.Handlers;
 using Client.Utils;
+using Crystal.Patcher;
 
 namespace Launcher
 {
@@ -30,6 +31,7 @@ namespace Launcher
         private Config ConfigForm = new Config();
 
         private bool Restart = false;
+        private bool SignedUpdateFailed = false;
 
         public AMain()
         {
@@ -58,6 +60,13 @@ namespace Launcher
         {
             try
             {
+                if (!string.IsNullOrWhiteSpace(Settings.P_ManifestUrl))
+                {
+                    RunSignedUpdate();
+                    Completed = true;
+                    return;
+                }
+
                 GetOldFileList();
 
                 if (OldList.Count == 0)
@@ -93,12 +102,55 @@ namespace Launcher
             }
             catch (Exception ex)
             {
+                if (!string.IsNullOrWhiteSpace(Settings.P_ManifestUrl)) SignedUpdateFailed = true;
                 MessageBox.Show(ex.ToString(), "Error");
                 Completed = true;
                 SaveError(ex.ToString());
             }
 
             _stopwatch.Stop();
+        }
+
+        private void RunSignedUpdate()
+        {
+            if (string.IsNullOrWhiteSpace(Settings.P_ManifestPublicKey))
+            {
+                throw new InvalidOperationException(
+                    "Launcher:ManifestPublicKey must be configured when Launcher:ManifestUrl is set.");
+            }
+
+            var publicKeyPath = Path.IsPathRooted(Settings.P_ManifestPublicKey)
+                ? Settings.P_ManifestPublicKey
+                : Path.Combine(Settings.P_Client, Settings.P_ManifestPublicKey);
+            var publicKey = File.ReadAllText(publicKeyPath);
+            var document = PatchManifestLoader.LoadAsync(Settings.P_ManifestUrl)
+                .GetAwaiter()
+                .GetResult();
+            var clientVersion = string.IsNullOrWhiteSpace(Settings.P_ClientVersionOverride)
+                ? Application.ProductVersion
+                : Settings.P_ClientVersionOverride;
+            var launcherVersion = string.IsNullOrWhiteSpace(Settings.P_LauncherVersionOverride)
+                ? Application.ProductVersion
+                : Settings.P_LauncherVersionOverride;
+
+            PatchUpdateService.UpdateAsync(new PatchUpdateRequest
+            {
+                Manifest = document.Manifest,
+                RootDirectory = Settings.P_Client,
+                PublicKeyPem = publicKey,
+                ManifestBaseUri = document.BaseUri,
+                Validation = new PatchValidationOptions
+                {
+                    ExpectedChannel = Settings.P_Channel,
+                    ExpectedKeyId = string.IsNullOrWhiteSpace(Settings.P_ManifestKeyId)
+                        ? null
+                        : Settings.P_ManifestKeyId,
+                    ClientVersion = clientVersion,
+                    LauncherVersion = launcherVersion,
+                    ProtocolVersion = Settings.P_ProtocolVersion,
+                    ContentSchemaVersion = Settings.P_ContentSchemaVersion
+                }
+            }).GetAwaiter().GetResult();
         }
 
         private void BeginDownload()
@@ -423,6 +475,8 @@ namespace Launcher
 
         private void Launch()
         {
+            if (SignedUpdateFailed) return;
+
             if (ConfigForm.Visible) ConfigForm.Visible = false;
 
             Program.Launch = true;
@@ -555,7 +609,8 @@ namespace Launcher
                     CurrentPercent_label.Text = "100%";
                     TotalPercent_label.Text = "100%";
                     InterfaceTimer.Enabled = false;
-                    Launch_pb.Enabled = true;
+                    Launch_pb.Enabled = !SignedUpdateFailed;
+                    if (SignedUpdateFailed) CurrentFile_label.Text = "Update failed";
                     if (ErrorFound) MessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.FilesDownloadFailed), GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DownloadFailed));
                     ErrorFound = false;
 
@@ -572,7 +627,7 @@ namespace Launcher
                         Close();
                     }
 
-                    if (Settings.P_AutoStart)
+                    if (!SignedUpdateFailed && Settings.P_AutoStart)
                     {
                         Launch();
                     }

@@ -39,8 +39,10 @@ tools/Crystal.ContentTool     内容快照签名与验证 CLI，仅依赖 Crysta
 src/Crystal.GameCore          运行时抽象骨架，只依赖 BCL + Shared（M1 不迁移游戏逻辑）
 src/Crystal.Agent.Contracts   Agent 注册、心跳、命令和内容版本契约（MIT，无项目依赖）
 src/Crystal.ZoneAgent         单区 Agent，下载/验签/持久化命令结果并管理 ZoneServer 子进程（MIT）
+src/Crystal.Patcher           客户端签名 manifest、哈希扫描、差异、事务应用和回滚（MIT，无项目依赖）
 src/Crystal.Control.Api       内容、账号、RBAC 和审计 API，ASP.NET Core + Npgsql
 src/Crystal.ZoneServer        Linux 区服控制台宿主，加载旧数据库和内容并监听游戏端口（GPL 边界）
+tools/Crystal.PatcherTool     客户端补丁打包、签名、验证、应用和回滚 CLI（MIT）
 tools/Crystal.LegacyImporter  二进制导入、快照/PostgreSQL 重建和 PostgreSQL 写入（GPL 边界工具）
 db/migrations                 PostgreSQL schema
 ```

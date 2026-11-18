@@ -10,7 +10,7 @@
 | 客户端通道 | 客户端程序、图库、地图、音效、UI 资源 | 启动器 | 玩家无法进入或资源不一致 |
 | 服务端通道 | 内容包、脚本、配置、地图元数据 | Zone Agent | 区服内容不一致或重载失败 |
 
-两条通道共享 `release_id`、`schema_version`、`protocol_version`，登录时必须校验兼容性。
+两条通道共享发布版本、schema 版本和协议版本语义，登录时必须校验兼容性。
 
 ## 2. 客户端更新
 
@@ -19,60 +19,74 @@
 ```text
 Launcher 启动
 -> 请求 https://patch.example.com/channels/{channel}/manifest.json
--> 校验 Ed25519 签名和有效期
--> 扫描本地文件，计算 sha256
--> 生成差异列表（新增/修改/删除）
--> 优先下载 delta，失败回退全量
--> 下载到 staging 目录
--> 校验哈希和签名
--> 原子替换 / 两阶段提交
+-> 校验 ECDSA P-256 签名、keyId、格式、渠道和有效期
+-> 校验最低 launcher/client 版本、协议版本和内容 schema 版本
+-> 拒绝早于上次已应用 manifest 的降级重放
+-> 扫描本地文件，计算 SHA256
+-> 生成文件级差异列表（新增/修改/删除）
+-> 下载变化文件到 .crystal-update/staging，支持 HTTP Range 续传
+-> 逐文件校验大小和 SHA256
+-> 写 pending 事务、备份旧文件、移入新文件、写 state
 -> 启动 Client
 ```
+
+失败时恢复本事务备份；进程在事务中崩溃时，下次启动读取 `.crystal-update/pending.json` 回滚未完成提交。
 
 ### 2.2 Manifest
 
 ```json
 {
+  "formatVersion": 1,
   "channel": "stable",
-  "release": "2026.11.09.1",
-  "min_launcher": "0.1.0",
-  "protocol_version": 1,
-  "content_schema_version": 1,
-  "generated_at": "2026-11-09T10:00:00Z",
-  "expires_at": "2026-12-09T10:00:00Z",
+  "release": "2026.11.18.1",
+  "minimumLauncherVersion": "1.0.0",
+  "minimumClientVersion": "1.0.0",
+  "protocolVersion": 1,
+  "contentSchemaVersion": 1,
+  "generatedAt": "2026-11-18T00:00:00+00:00",
+  "expiresAt": "2026-12-18T00:00:00+00:00",
   "files": [
     {
       "path": "Data/Items.lib",
       "size": 12345678,
-      "sha256": "...",
-      "url": "https://cdn.example.com/assets/sha256/...",
-      "delta_from": [
-        { "base_sha256": "...", "url": "https://cdn.example.com/delta/..." }
-      ]
+      "sha256": "…64 位小写十六进制…",
+      "url": "https://cdn.example.com/releases/2026.11.18.1/Data/Items.lib"
     }
   ],
   "deleted": ["Data/Old.lib"],
-  "signature": "ed25519:..."
+  "signature": {
+    "algorithm": "ecdsa-p256-sha256",
+    "keyId": "release-2026",
+    "signedAt": "2026-11-18T00:00:00+00:00",
+    "value": "…Base64 IEEE P1363 签名…"
+  }
 }
 ```
+
+完整字段和 CLI 见 `reference/client-patch-manifest.md`。
 
 ### 2.3 安全与可靠性
 
 - 只信任签名 manifest；文件哈希必须在 manifest 内。
-- 使用内容寻址 URL，CDN 不可信也不会导致错误内容。
-- 下载支持断点续传、并发限速、磁盘空间检查。
-- 替换前保留上一版本；失败自动回滚。
-- 防降级：manifest 包含最低允许版本和发布时间。
+- 签名使用 ADR 0005 同源的 ECDSA P-256/SHA-256 和 `keyId`，载荷前缀为 `crystal-client-patch-v1`。
+- 路径拒绝绝对路径、`..`、空段、冒号/控制字符、Windows 非法字符/设备名/尾部点或空格、大小写不敏感重复路径和 `.crystal-update/` 保留目录。
+- 下载支持 HTTP Range 断点续传；每个文件落盘后校验大小和 SHA256。
+- 替换前保留上一版本；失败自动回滚。事务只处理 manifest 声明的路径，未知本地文件不删除。
+- 防降级：校验最低版本、协议/schema 版本、有效期，并拒绝早于上次已应用 `generatedAt` 的 manifest。
 - 灰度：按账号/区服/百分比分配 channel。
-- 代码更新：启动器自身两阶段自更新；客户端主程序更新后必须重新校验资源。
+- 代码更新：本轮 launcher 自身两阶段自更新未实现，manifest 应排除运行中的 launcher；客户端主程序更新后必须重新校验资源。
 
 ### 2.4 与现有补丁工具的关系
 
-现有 `PList.gz` 和 `AutoPatcherAdminV2` 继续作为过渡方案：
+`Crystal.Patcher`（MIT、`net8.0`）和 `Crystal.PatcherTool` 已实现签名 manifest 的文件级增量、事务应用和回滚。
+现有 `PList.gz` 和 `AutoPatcherAdminV2` 继续作为兼容路径：
 
 - 保留文件格式读取能力，降低迁移风险。
-- 新发布系统输出兼容的 `PList.gz` 清单，逐步替换上传流程。
+- `Launcher:ManifestUrl` 为空时旧启动器流程完全不变；配置后改用签名 manifest，失败时禁用启动，不静默回退。
+- 新发布系统可继续输出兼容的 `PList.gz` 清单，逐步替换上传流程。
 - 新启动器稳定后，再移除旧的 FTP/SFTP 手工发布路径。
+
+本轮未实现：二进制 delta、灰度/CDN 渠道分发、并发限速、磁盘空间预检、launcher 自更新和 Windows 运行冒烟。
 
 ## 3. 服务端内容更新
 

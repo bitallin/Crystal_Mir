@@ -1,6 +1,6 @@
 # 架构文档索引
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 架构目标
@@ -45,6 +45,7 @@
 | 区服换版 | Control API 管命令，独立 Agent 管进程；下载验签后 staging，SIGTERM + ready 文件完成进程级激活/回滚 | `adr/0012-zone-agent-process-level-content-switching.md` |
 | 区服指标 | ZoneServer 本地采样并原子写文件，Agent 校验后通过心跳上报，不跨 GPL 边界读进程内存 | `adr/0013-zone-runtime-metrics-file.md` |
 | 指标历史与健康 | 心跳幂等写样本，metrics API 返回窗口趋势，健康等级由平台阈值实时计算 | `adr/0014-zone-metric-history-and-health-evaluation.md` |
+| 客户端补丁 | 签名 manifest 门禁、文件级增量、SHA256 校验、事务应用和崩溃恢复，旧 PList 路径保留 | `adr/0015-client-signed-patch-manifest-and-transactional-update.md` |
 
 ## 5. 文档索引
 

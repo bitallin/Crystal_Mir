@@ -24,7 +24,7 @@
 11. `development/`：本地环境、构建测试、迁移实施。
 12. `roadmap/milestones.md`：阶段目标、交付物和验收标准。
 13. `PROGRESS.md`：当前进度、变更记录和阻塞项。
-14. `reference/`：由代码或 schema 生成的参考手册。
+14. `reference/`：由代码或 schema 生成的参考手册，以及客户端补丁 manifest 契约。
 15. `runbooks/`：生产故障和高压操作手册。
 
 ## 3. 文档地图
@@ -57,7 +57,8 @@ docs/
 │   ├── 0011-zone-server-read-only-signed-content-release.md
 │   ├── 0012-zone-agent-process-level-content-switching.md
 │   ├── 0013-zone-runtime-metrics-file.md
-│   └── 0014-zone-metric-history-and-health-evaluation.md
+│   ├── 0014-zone-metric-history-and-health-evaluation.md
+│   └── 0015-client-signed-patch-manifest-and-transactional-update.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源
@@ -71,7 +72,8 @@ docs/
 │   ├── README.md                     路线图索引
 │   └── milestones.md                 里程碑、交付物和验收标准
 ├── reference/
-│   └── README.md                     参考手册索引（schema/包/配置/映射）
+│   ├── README.md                     参考手册索引（schema/包/配置/映射）
+│   └── client-patch-manifest.md      客户端签名 manifest、CLI 与回滚语义
 └── runbooks/
     ├── README.md                     运行手册索引（故障与高压操作）
     ├── zone-server-linux.md          Ubuntu 区服部署与运行（legacy/发布模式）

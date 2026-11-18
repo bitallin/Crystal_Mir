@@ -7,6 +7,7 @@ export DOTNET="${DOTNET:-$HOME/.dotnet/dotnet}"
 cd "$ROOT"
 ./scripts/build.sh
 ./scripts/test.sh
+./scripts/test-client-updates.sh
 ./scripts/check-boundaries.sh
 ./scripts/inspect-db.sh
 ./scripts/verify-content.sh
