@@ -46,7 +46,7 @@ Windows 客户端登录进服、真实 Ubuntu/systemd 安装、MapEditor 与素�
 - PostgreSQL schema 和迁移工具。
 - `LegacyBinaryImporter` / `LegacyBinaryExporter`。
 - 内容包格式、manifest、哈希和基本签名。
-- Docker Compose：PostgreSQL、Redis、MinIO、API、Web。
+- Docker Compose：PostgreSQL、Redis、S3 兼容存储（本地/CI 使用 S3Mock）、API、Web。
 - 登录、RBAC、审计日志骨架。
 
 **验收标准**
@@ -57,7 +57,7 @@ Windows 客户端登录进服、真实 Ubuntu/systemd 安装、MapEditor 与素�
 - 后台可登录并看到内容列表。
 - 可从导入批次创建草稿，逐实体修改并处理 revision 冲突。
 - 可从草稿创建不可变版本，完成校验、编译、签名、发布和回滚。
-- `docker compose` 可启动 PostgreSQL 16、Redis 7、MinIO、API 和 Nginx Web，并通过同源 `/api` 登录和查询内容。
+- `docker compose` 可启动 PostgreSQL 16、Redis 7、S3Mock、API 和 Nginx Web，并通过同源 `/api` 登录和查询内容。
 
 **已知边界**：M1 不包含类型化编辑器、Zone Agent 服务、真实区服热切换、Windows 客户端冒烟和素材授权。
 

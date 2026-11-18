@@ -15,8 +15,6 @@ PG_PORT="${CRYSTAL_COMPOSE_POSTGRES_PORT:-}"
 ADMIN_PASSWORD="${CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD:-ComposeTest!Passw0rd2026}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ComposeDb!Passw0rd2026}"
 JWT_SIGNING_KEY="${CRYSTAL_CONTROL_JWT_SIGNING_KEY:-compose-test-jwt-signing-key-0123456789abcdef}"
-MINIO_USER="${MINIO_ROOT_USER:-crystal}"
-MINIO_PASSWORD="${MINIO_ROOT_PASSWORD:-ComposeMinio!Passw0rd2026}"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "Docker is required for the Compose smoke test." >&2
@@ -66,8 +64,6 @@ cat >"$ENV_FILE" <<EOF
 CRYSTAL_COMPOSE_WEB_PORT=$WEB_PORT
 CRYSTAL_COMPOSE_POSTGRES_PORT=$PG_PORT
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-MINIO_ROOT_USER=$MINIO_USER
-MINIO_ROOT_PASSWORD=$MINIO_PASSWORD
 CRYSTAL_CONTROL_JWT_SIGNING_KEY=$JWT_SIGNING_KEY
 CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD=$ADMIN_PASSWORD
 CRYSTAL_CONTROL_SIGNING_DIR=$SIGNING_DIR
@@ -201,4 +197,4 @@ assert items["total"] == 1628, items["total"]
 assert items["items"][0]["contentKey"] == "item.1", items["items"][0]
 PY
 
-echo "Compose stack verified: PostgreSQL, Redis, MinIO, migrations, API proxy, Web, login and content queries."
+echo "Compose stack verified: PostgreSQL, Redis, S3Mock, migrations, API proxy, Web, login and content queries."

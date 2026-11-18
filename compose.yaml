@@ -30,36 +30,22 @@ services:
       retries: 20
     restart: unless-stopped
 
-  minio:
-    image: ${CRYSTAL_MINIO_IMAGE:-minio/minio:RELEASE.2024-12-18T13-15-44Z}
-    command: ["server", "/data", "--console-address", ":9001"]
+  s3mock:
+    image: ${CRYSTAL_S3MOCK_IMAGE:-adobe/s3mock:5.2.3}
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: crystal-content
+    ports:
+      - "127.0.0.1:${CRYSTAL_COMPOSE_S3MOCK_PORT:-19090}:9090"
     volumes:
-      - minio-data:/data
+      - s3mock-data:/s3mockroot
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/favicon.ico"]
+      interval: 5s
+      timeout: 3s
       retries: 20
     restart: unless-stopped
-
-  minio-init:
-    image: ${CRYSTAL_MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-12-18T13-15-44Z}
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
-        mc mb --ignore-existing local/crystal-content &&
-        mc anonymous set none local/crystal-content
-    restart: "no"
 
   db-migrate:
     image: ${CRYSTAL_POSTGRES_IMAGE:-postgres:16}
@@ -139,7 +125,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  minio-data:
+  s3mock-data:
   release-artifacts:
 
 networks:

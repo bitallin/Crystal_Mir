@@ -711,7 +711,7 @@ Compose 栈验证使用：
 ./scripts/test-compose.sh
 ```
 
-脚本会启动 PostgreSQL 16、Redis 7、MinIO、API 和 Nginx Web，等待健康检查，由宿主机运行
+脚本会启动 PostgreSQL 16、Redis 7、S3Mock、API 和 Nginx Web，等待健康检查，由宿主机运行
 `Crystal.LegacyImporter` 导入黄金样本，再通过 Web 同源代理登录、查询内容和打开后台。
 
 ## 5. 当前限制

@@ -128,7 +128,7 @@ dotnet run --project src/Crystal.ZoneServer -c Release -- \
 控制面本地联调：
 
 ```text
-docker compose up -d postgres redis minio
+docker compose up -d postgres redis s3mock
 CRYSTAL_CONTROL_CORS_ORIGINS='http://127.0.0.1:4173' dotnet run --project src/Crystal.Control.Api
 dotnet run --project src/Crystal.ZoneServer -- --content-root .external/Crystal.Database/Jev
 ./scripts/preview-control-web.sh

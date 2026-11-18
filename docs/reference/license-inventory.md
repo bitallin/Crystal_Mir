@@ -42,7 +42,7 @@
 | `Microsoft.AspNetCore.Authentication.JwtBearer` 8.0.6 | MIT | JWT 认证 |
 | `Konscious.Security.Cryptography.Argon2` 1.3.1 | MIT | Argon2id 密码哈希 |
 
-Compose 引用的镜像（PostgreSQL、Redis、MinIO、MinIO Client、Nginx、.NET 运行时）按其各自许可证分发；
+Compose 引用的镜像（PostgreSQL、Redis、S3Mock、Nginx、.NET 运行时）按其各自许可证分发；
 仓库只引用镜像标签，不包含这些镜像的二进制。
 
 ## 3. 素材分类

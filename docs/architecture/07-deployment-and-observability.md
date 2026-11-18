@@ -73,14 +73,15 @@ control-web (Nginx, 同源 /api 与 /health 代理)
        -> release-artifacts 卷
        -> signing key 只读挂载
 redis 7
-minio + minio-init
+s3mock（S3 API，本地/CI 测试替身）
 ```
 
 - `deploy/docker/control-api.Dockerfile` 使用 .NET 8 多阶段构建，运行用户为非 root 的 `app`。
 - `deploy/docker/control-web.Dockerfile` 用 Nginx 托管静态后台；`/api/` 和 `/health/` 反向代理到
   `control-api:8080`，浏览器默认使用同源 API，不再需要 CORS。
-- PostgreSQL 数据、Redis 数据、MinIO 数据和发布产物分别使用独立命名卷；资源目录以只读 bind mount 提供。
-- JWT、数据库、MinIO 和 bootstrap 密码通过 `.env` 注入；`.env` 不提交仓库。示例见 `.env.example`。
+- PostgreSQL 数据、Redis 数据、S3Mock 数据和发布产物分别使用独立命名卷；资源目录以只读 bind mount 提供。
+- JWT、数据库和 bootstrap 密码通过 `.env` 注入；`.env` 不提交仓库。示例见 `.env.example`。
+- Compose 使用 Apache-2.0 的 `adobe/s3mock` 验证 S3 兼容接口；生产环境仍使用 MinIO/S3 等持久化对象存储。
 - ECDSA 发布私钥只通过运行时只读目录挂载（`CRYSTAL_CONTROL_SIGNING_DIR`），不进入镜像或数据库。
   可用 `scripts/generate-release-keys.sh` 生成 `private.pem` 和 `public.pem`。
 - Compose 不启动 GPL 的 `Crystal.LegacyImporter`。示例内容由宿主机导入，测试脚本 `scripts/test-compose.sh`
@@ -122,7 +123,7 @@ Compose 是开发/集成环境基线，不等同于生产编排；生产仍需�
 docker compose
 ├── postgres
 ├── redis
-├── minio
+├── s3mock
 ├── control-api
 ├── control-web
 └── zone-server（可选，本机运行）
