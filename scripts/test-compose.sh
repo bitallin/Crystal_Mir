@@ -76,7 +76,15 @@ CRYSTAL_CONTROL_ASSET_ROOT=$ROOT/tests/fixtures/content
 EOF
 
 COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT" --env-file "$ENV_FILE" -f "$ROOT/compose.yaml")
+COMPOSE_UP_LOG="$ARTIFACT_DIR/compose-up.log"
 LOGS_DUMPED=0
+compose_fail() {
+  tail -n 80 "$COMPOSE_UP_LOG" >&2 || true
+  while IFS= read -r line; do
+    [ -z "$line" ] || echo "::error::compose up: $line"
+  done < <(tail -n 12 "$COMPOSE_UP_LOG")
+  exit 1
+}
 dump_logs() {
   if [ "$LOGS_DUMPED" -eq 1 ]; then return; fi
   LOGS_DUMPED=1
@@ -98,9 +106,9 @@ trap cleanup EXIT
 cd "$ROOT"
 echo "Starting Compose stack on web port $WEB_PORT and PostgreSQL port $PG_PORT..."
 if [ "${CRYSTAL_COMPOSE_NO_BUILD:-0}" = "1" ]; then
-  "${COMPOSE[@]}" up -d --remove-orphans
+  "${COMPOSE[@]}" up -d --remove-orphans >"$COMPOSE_UP_LOG" 2>&1 || compose_fail
 else
-  "${COMPOSE[@]}" up -d --build --remove-orphans
+  "${COMPOSE[@]}" up -d --build --remove-orphans >"$COMPOSE_UP_LOG" 2>&1 || compose_fail
 fi
 
 READY=0
