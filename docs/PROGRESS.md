@@ -1,14 +1,14 @@
 # 项目进度台账
 
 > 最后更新：2026-11-18
-> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标和 Control.Web 区服闭环已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情与五类命令）。客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证和 M0 外部阻塞仍未完成；授权、许可证和 Windows 冒烟按要求本轮跳过
+> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标、指标历史/健康评估和 Control.Web 区服闭环已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情、趋势告警与五类命令）。客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证和 M0 外部阻塞仍未完成；授权、许可证和 Windows 冒烟按要求本轮跳过
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0013 |
+| 架构决策 | 已完成初版 | ADR 0001～0014 |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照、区服指标和契约边界检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
@@ -17,11 +17,11 @@
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
 | CI 基线 | 已完成初版 | 本地 `ci.sh` 通过；新增 Control API Zone API 断言和 Zone Agent 自包含 E2E；GitHub Actions 仍使用 PostgreSQL 16 Control API 集成 job 和 Compose 栈冒烟 job，远端结果待确认 |
-| 控制面 | M2 完成，M3 区服闭环完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号、审计以及真实区服总览/详情、指标、命令历史和五类生命周期操作 |
+| 控制面 | M2 完成，M3 区服闭环完成 | `Crystal.Control.Api` 内容查询暴露 15 类实体；10 类 Schema 编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD 和地图预览已完成；发布 API 支持不可变版本、校验、编译、ECDSA 签名、发布和双版本回滚；新增 `zone`/`zone_command`、注册/心跳/命令/租约/结果和发布包 ZIP 下载；新增 `zone_metric_sample`、指标窗口查询、汇总和实时健康告警；`Crystal.Control.Web` 已接内容编辑、关系、预览、发布中心、账号、审计以及真实区服总览/详情、趋势告警、命令历史和五类生命周期操作 |
 | 认证与审计 | 已完成初版 | Argon2id、短时 JWT + 刷新令牌、RBAC、账号创建与生命周期、会话撤销、最后管理员保护、只追加审计和管理端接入完成 |
 | 热更新 | Agent 进程级闭环已完成 | ZoneServer 可验签并消费已发布快照、隔离重建旧库和物化内容；legacy 启动模式保留。`Crystal.ZoneAgent` 已实现注册、心跳、命令领取、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件读取和失败恢复。客户端启动器、进程内热切换、灰度和玩家状态迁移未实现 |
-| 区服 Agent | 已完成本轮闭环 | 单区单 Agent 单 ZoneServer 子进程；命令结果本地持久化并可重报；意外退出按 2/5/10/30 秒退避重启；ZoneServer 每 100 ms 采样、60 秒窗口、每秒原子写指标文件，Agent 校验 schema/zoneId/PID/15 秒时效后上报真实玩家数、Tick P95、错误率和重启失败次数，失效时归零并标记来源 |
-| 运营能力 | 未开始 | 开区/合区/支付/监控尚未实现 |
+| 区服 Agent | 已完成本轮闭环 | 单区单 Agent 单 ZoneServer 子进程；命令结果本地持久化并可重报；意外退出按 2/5/10/30 秒退避重启；ZoneServer 每 100 ms 采样、60 秒窗口、每秒原子写指标文件，Agent 校验 schema/zoneId/PID/15 秒时效后上报真实玩家数、Tick P95、错误率和重启失败次数，失效时归零并标记来源；Control API 同事务幂等持久化心跳样本 |
+| 运营能力 | 部分完成 | 开区/合区/支付尚未实现；指标历史、趋势查询和基础健康告警已完成 |
 | 许可证清单 | 进行中 | 代码/外部资源清单已建立；授权、许可证和素材合规按要求本轮跳过，MapEditor 和素材授权待确认 |
 
 ## 2. 里程碑状态
@@ -31,12 +31,26 @@
 | M0 基线与合规 | 进行中 | 80% | 构建、资源、黄金样本完成；Windows 运行冒烟和素材授权待做 |
 | M1 架构骨架与数据底座 | 已完成 | 100% | 内容快照/导入/重建、查询 API、账号/JWT/RBAC/审计、草稿/修订、发布/回滚、GameCore/Agent 契约、Compose 栈和 PG16 集成均已落地；真实区服热切换按计划留给 M3 |
 | M2 内容后台 MVP | 已完成 | 100% | 10 类内容编辑器、引用选择、两级校验、JSONL 导入导出、脚本校验、地图关系 CRUD、地图预览、签名发布启动消费已完成；Agent 与进程级换版已由 M3 接手，授权/许可证和灰度仍按范围外处理 |
-| M3 热更新与区服 Agent | 进行中 | 本轮服务端/Web 范围完成 | 已完成 Agent 注册/心跳/命令、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件、失败恢复、CLI/systemd、PG16 E2E、真实指标和 Control.Web 区服闭环；客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、授权/许可证仍未完成 |
+| M3 热更新与区服 Agent | 进行中 | 本轮服务端/Web 范围完成 | 已完成 Agent 注册/心跳/命令、下载验签、staging、进程级 activate/rollback/reload/stop、ready/指标文件、失败恢复、CLI/systemd、PG16 E2E、真实指标、指标历史/健康评估和 Control.Web 区服闭环；客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、告警通知、远端指标汇聚、授权/许可证仍未完成 |
 | M4 运营 MVP | 未开始 | 0% | 依赖 M2/M3 |
 | M5 生产加固 | 未开始 | 0% | 依赖 M4 |
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-18（区服指标历史、趋势与健康告警）
+
+- 范围：在已完成的真实指标心跳基础上，增加区服指标持久化、窗口查询、汇总、健康等级和 Control.Web 趋势/告警展示；不改变 Agent 心跳 DTO、ZoneServer 指标文件、客户端协议或游戏主循环，授权、许可证和素材合规继续跳过。
+- 数据：新增 `db/migrations/0005_zone_metric_history.sql` 和 `zone_metric_sample`，保存区服、observedAt、状态、active release、玩家数、Tick P95、错误率、metricsSource、重启失败、PID 和原始 metadata；`(zone_id, observed_at)` 唯一，按区服/时间和 recordedAt 建索引。
+- Control API：心跳事务内更新 `zone` 投影并幂等插入样本；`observedAt` 缺失返回 400；新增 `GET /api/v1/zones/{zoneId}/metrics`，支持 from/to/limit、默认 1 小时、最大 7 天、最多 2000 条，返回样本、汇总和 health。新增 ADR 0014。
+- 健康评估：按最新投影和阈值实时给出 `healthy|warning|critical`；覆盖离线、降级、指标不可用、Tick P95、错误率和重启失败告警；阈值通过 `ControlApi:ZoneTickP95WarningMs`、`ZoneTickP95CriticalMs`、`ZoneErrorRateWarning`、`ZoneErrorRateCritical` 配置，默认 50/100ms 和 5%/20%。
+- Control.Web：区服详情新增健康评估卡片，以及玩家数、Tick P95、错误率三条 SVG 趋势；使用新增 metrics API，指标读取失败不阻断区服详情和命令操作。
+- 测试：新增 `Tests/ZoneHealth`，覆盖健康、warning、critical、degraded 和 metadata 告警；Control API PG16 集成覆盖同 observedAt 去重、窗口/limit/未知区服边界、汇总和 critical 告警；Control.Web Playwright 覆盖趋势 SVG、健康告警文本；Zone Agent E2E 继续通过。
+- 文档：新增并登记 ADR 0014；同步文档地图、架构 02/03/04/07、Control API 参考、配置键、能力矩阵、里程碑和本台账。
+- 验证：`Tests/ZoneHealth` 通过；在独立 PostgreSQL 16 数据库上运行 `test-control-api.sh`、`test-control-web.sh`、`test-zone-agent.sh` 全部通过；Node `--check`、Shell `bash -n` 和 `git diff --check` 通过。
+- 未验证/范围外：告警通知渠道、告警状态机/去重、Prometheus/OpenTelemetry 远端汇聚、样本自动保留/分区/降采样、Windows 客户端冒烟、授权、许可证、KMS 和素材合规不在本轮。
+- 阻塞/风险：样本按心跳持续增长，研究环境暂不自动清理；健康阈值是平台配置而非内容签名事实；指标仍来自同机非权威缓存。
+- 下一步：补告警通知与保留/降采样策略；继续推进版本门禁、客户端启动器和零停机换版研究。
 
 ### 2026-11-18（真实区服指标与 Control.Web 区服闭环）
 

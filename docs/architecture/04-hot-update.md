@@ -157,6 +157,11 @@ ZoneServer 通过 `--metrics-file <path>` / `CRYSTAL_ZONE_METRICS_FILE` 在 read
 无效时上报 0 并标记 `metricsSource=unavailable`，进程停止时标记 `process-stopped`，连续三次失效且子进程仍运行则降级。
 指标写入失败不会终止 ZoneServer。详见 `adr/0013-zone-runtime-metrics-file.md`。
 
+Control API 在每次心跳同一事务中写入 `zone_metric_sample`，以 `(zone_id, observed_at)` 去重。区服详情通过
+`GET /api/v1/zones/{zoneId}/metrics` 读取最近窗口样本、汇总和健康评估；健康等级按最新投影与可配置阈值实时计算，
+不改变 Agent 心跳协议、`ZoneDto` 或 ZoneServer 指标文件。告警状态机、通知渠道和 Prometheus/OpenTelemetry 汇聚仍
+属于后续范围，详见 `adr/0014-zone-metric-history-and-health-evaluation.md`。
+
 ### 3.3 快照模型
 
 ```text
@@ -229,6 +234,7 @@ ContentSnapshot
 - 下载耗时、失败原因、重试次数。
 - 命令 ID、状态、租约、attempts、执行耗时和结果错误。
 - 进程 PID、ready 文件、激活/回滚耗时、恢复次数、当前/上一版本和指标窗口/样本数。
+- 指标历史窗口的首末时间、样本数、健康等级和触发的告警代码。
 - 客户端更新成功率、按版本分布。
 
 Agent 上报 `metricsSource=zone-runtime|unavailable|process-stopped`；`restartFailures` 继续独立展示，

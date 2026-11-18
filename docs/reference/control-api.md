@@ -1,7 +1,7 @@
 # Control API 参考
 
 > 最后更新：2026-11-18
-> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、地图关系与地图预览 + M3 Zone Agent、真实运行时指标与 Control.Web 区服闭环）
+> 状态：生效（M1 草稿/发布闭环 + M2 十类内容编辑器、地图关系与地图预览 + M3 Zone Agent、指标历史/健康评估与 Control.Web 区服闭环）
 
 ## 1. 位置与边界
 
@@ -29,6 +29,7 @@
 - 已签名发布 ZIP 下载，以及 `content.stage`/`activate`/`rollback`/`reload`/`zone.stop` 管理入口。
 - Agent 从 ZoneServer 指标文件读取并校验玩家数、Tick P95、错误率；Control.Web 使用现有区服/命令/发布接口展示
   真实指标、active/staged 版本、命令历史，并提供五类生命周期命令。
+- 心跳样本持久化到 `zone_metric_sample`，提供窗口化指标查询、汇总和 `healthy|warning|critical` 健康评估。
 
 尚未实现：MFA/OIDC、账号删除、解锁接口、CSV 导入、NPC 语句块结构化编辑、`.lib` 图库解析、资源上传、
 进程内热切换、灰度/CDN、玩家状态迁移、Prometheus/OpenTelemetry 汇聚和生产级 Agent 授权模型。
@@ -44,6 +45,10 @@
 | `ControlApi:RefreshTokenDays` | 同左 | 刷新令牌有效期，默认 30 天 |
 | `ControlApi:ApiRateLimitPermitLimit` | 同左 | 普通 API 每 IP 每分钟请求上限，默认 240 |
 | `ControlApi:AuthRateLimitPermitLimit` | 同左 | 登录/刷新每 IP 每分钟请求上限，默认 10 |
+| `ControlApi:ZoneTickP95WarningMs` | 同左 | Tick P95 warning 阈值，默认 50 ms |
+| `ControlApi:ZoneTickP95CriticalMs` | 同左 | Tick P95 critical 阈值，默认 100 ms |
+| `ControlApi:ZoneErrorRateWarning` | 同左 | 错误率 warning 阈值，默认 0.05 |
+| `ControlApi:ZoneErrorRateCritical` | 同左 | 错误率 critical 阈值，默认 0.20 |
 | `ControlApi:BootstrapAdminPassword` | `CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD` | 空库首次创建管理员的密码 |
 | `ControlApi:AssetRoot` | `CRYSTAL_CONTROL_ASSET_ROOT` | 资源文件根目录；配置后 `asset` 下载端点才可用，路径相对于快照中的 `relativePath` |
 | `ControlApi:ReleaseRoot` | `CRYSTAL_CONTROL_RELEASE_ROOT` | 编译产物根目录，默认 `artifacts/releases` |
@@ -590,6 +595,7 @@ POST /api/v1/zones/register
 POST /api/v1/zones/{zoneId}/heartbeat
 GET  /api/v1/zones?limit=100
 GET  /api/v1/zones/{zoneId}
+GET  /api/v1/zones/{zoneId}/metrics?from=...&to=...&limit=300
 GET  /api/v1/zones/{zoneId}/commands?limit=50
 GET  /api/v1/zones/{zoneId}/commands?claim=true&limit=1&leaseSeconds=60
 POST /api/v1/zones/{zoneId}/commands
@@ -631,7 +637,22 @@ POST /api/v1/zones/{zoneId}/commands/{commandId}/result
 - `restartFailures` 是 Agent 独立重启失败计数，不属于游戏错误率。
 - Tick P95 基于 60 秒窗口、100 ms 采样和最近秩法；错误率为窗口异常增量/Tick 增量，上限 1。
 
-Control API 不新增路由、DTO 或数据库列；`AgentHeartbeatRequest`、`ZoneDto`、`zone`/`zone_command` schema 保持兼容。
+心跳会更新 `zone` 投影，并在同一事务写入 `zone_metric_sample`；`observedAt` 缺失返回 400，
+`(zone_id, observed_at)` 重复时只更新投影、不重复插入样本。`AgentHeartbeatRequest`、`ZoneDto`、`zone` 和
+`zone_command` 结构保持兼容。
+
+指标查询：
+
+```text
+GET /api/v1/zones/{zoneId}/metrics?from=2026-11-18T00:00:00Z&to=2026-11-18T01:00:00Z&limit=300
+```
+
+- `to` 默认当前时间，`from` 默认 `to - 1 小时`；窗口最大 7 天，`limit` 范围 1～2000。
+- 返回 `items`（按 `observedAt` 升序）、`summary`（样本数、首末时间、最新/平均/最大指标）和 `health`。
+- `health.level` 为 `healthy`、`warning` 或 `critical`；告警代码为 `zone.offline`、`zone.degraded`、
+  `metrics.unavailable`、`runtime.tick_p95`、`runtime.error_rate`、`agent.restart_failures`。
+- 健康评估只基于最新投影、返回样本和配置阈值实时计算，不持久化告警状态，也不改变 `zone.status` 语义。
+- 未知区服返回 404；非法 limit、反向时间窗口或超过 7 天的窗口返回 400。
 
 命令创建请求：
 
@@ -668,7 +689,8 @@ RBAC 403、登出撤销、账号生命周期、最后管理员保护、审计、
 配方关系、NPC 脚本关系与 AST、资源元数据和文件字节/SHA256。M2 覆盖 10 类 Schema 的 200/401、类型化 CRUD、
 结构 400、陈旧 revision 409、引用缺失、JSONL dry-run/apply/export、脚本校验、地图关系 CRUD/清理、发布链路、
 默认和显式双版本回滚。M3 覆盖区服注册/未知区服、非法心跳、命令 payload、单生命周期冲突、租约重投、
-结果幂等/冲突、stop 投影，以及非零玩家数、Tick P95、错误率与 metadata 的查询投影；越界错误率返回 400。
+结果幂等/冲突、stop 投影，非零玩家数、Tick P95、错误率与 metadata 的查询投影，以及指标样本去重、窗口边界、
+汇总和 warning/critical 健康告警；越界错误率、缺失 observedAt 和非法指标查询参数返回 400。
 测试在 PostgreSQL 16 service container 中运行。
 测试库应为独立数据库；已有账号时不会再执行 bootstrap。
 
@@ -706,8 +728,9 @@ Compose 栈验证使用：
 - 资源预览只支持地图网格；客户端 `.lib` 图库、物品/怪物图标缩略图和资源上传未实现。
 - 脚本编辑器不提供语句块拖拽、增删排序或脚本执行；完整行为仍由文本源码和服务端解析结果决定。
 - 区服激活是进程级重启，允许短暂停机；不提供进程内热切换、灰度、CDN、玩家状态迁移或多 Agent HA。
-- 指标来自同机 ZoneServer 本地文件，不属于签名内容包；生产级远端汇聚、告警和长期存储尚未实现。
+- 指标来自同机 ZoneServer 本地文件，不属于签名内容包；样本已持久化并支持基础健康评估，但告警通知、
+  Prometheus/OpenTelemetry 远端汇聚、分区/降采样和自动保留策略尚未实现。
 - 100 ms 采样不保证覆盖每个内部循环；无客户端连接时只能验证玩家数为 0，非零玩家数和真实客户端错误仍需 Windows 冒烟。
 - Agent 注册、心跳、命令领取和结果端点在研究环境匿名开放；生产化前需要双向认证、节点绑定和授权模型。
-- Control.Web 区服页面只使用现有 API，不新增路由；离线或已有生命周期命令时禁用写操作，409 显示服务端冲突原因。
+- Control.Web 区服页面使用区服、命令、发布和 metrics API；离线或已有生命周期命令时禁用写操作，409 显示服务端冲突原因。
 - 授权、许可证和素材合规不在本轮范围。

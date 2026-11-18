@@ -624,6 +624,45 @@ assert_status() {
   fi
 }
 
+ZONE_HEARTBEAT_WARNING_BODY="$(printf '{"zoneId":"%s","agentId":"agent-%s","observedAt":"2026-11-17T00:00:02Z","status":"online","playerCount":41,"tickP95Ms":75,"errorRate":0.08,"metadata":{"metricsSource":"zone-runtime","metricsObservedAt":"2026-11-17T00:00:02Z","metricsWindowSeconds":"60","metricsSampleCount":"600","restartFailures":"2","zonePid":"4321"}}' "$ZONE_ID" "$SUFFIX")"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_HEARTBEAT_WARNING_BODY" "$BASE/api/v1/zones/$ZONE_ID/heartbeat" >/dev/null
+ZONE_HEARTBEAT_CRITICAL_BODY="$(printf '{"zoneId":"%s","agentId":"agent-%s","observedAt":"2026-11-17T00:00:03Z","status":"online","playerCount":44,"tickP95Ms":130,"errorRate":0.25,"metadata":{"metricsSource":"unavailable","metricsObservedAt":"2026-11-17T00:00:03Z","metricsWindowSeconds":"60","metricsSampleCount":"600","restartFailures":"3","zonePid":"4321","metricsError":"metrics file is stale"}}' "$ZONE_ID" "$SUFFIX")"
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_HEARTBEAT_CRITICAL_BODY" "$BASE/api/v1/zones/$ZONE_ID/heartbeat" >/dev/null
+curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' \
+  --data "$ZONE_HEARTBEAT_CRITICAL_BODY" "$BASE/api/v1/zones/$ZONE_ID/heartbeat" >/dev/null
+curl -fsS --max-time 20 \
+  "$BASE/api/v1/zones/$ZONE_ID/metrics?from=2026-11-17T00:00:00Z&to=2026-11-17T00:00:10Z&limit=10" \
+  >"$TMP/zone-metrics.json"
+
+python3 - "$TMP" <<'PY'
+import json, os, sys
+from datetime import datetime, timezone
+root = sys.argv[1]
+metrics = json.load(open(os.path.join(root, "zone-metrics.json"), encoding="utf-8"))
+assert metrics["summary"]["sampleCount"] == 3, metrics
+observed = [datetime.fromisoformat(item["observedAt"].replace("Z", "+00:00")).astimezone(timezone.utc) for item in metrics["items"]]
+assert observed == [datetime(2026, 11, 17, 0, 0, second, tzinfo=timezone.utc) for second in (1, 2, 3)], metrics["items"]
+assert [item["playerCount"] for item in metrics["items"]] == [37, 41, 44], metrics["items"]
+assert metrics["items"][0]["metricsSource"] == "zone-runtime", metrics["items"][0]
+assert metrics["items"][2]["restartFailures"] == 3, metrics["items"][2]
+assert metrics["summary"]["latestTickP95Ms"] == 130, metrics["summary"]
+assert metrics["summary"]["maxErrorRate"] == 0.25, metrics["summary"]
+assert metrics["health"]["level"] == "critical", metrics["health"]
+codes = {alert["code"] for alert in metrics["health"]["alerts"]}
+assert {"runtime.tick_p95", "runtime.error_rate", "metrics.unavailable", "agent.restart_failures"} <= codes, codes
+PY
+
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  "$BASE/api/v1/zones/$ZONE_ID/metrics?limit=0")" "Metrics limit lower bound"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  "$BASE/api/v1/zones/$ZONE_ID/metrics?from=2026-11-17T01:00:00Z&to=2026-11-17T00:00:00Z")" "Metrics reversed window"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  "$BASE/api/v1/zones/$ZONE_ID/metrics?from=2026-11-01T00:00:00Z&to=2026-11-17T00:00:00Z")" "Metrics window over seven days"
+assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+  "$BASE/api/v1/zones/unknown-$SUFFIX/metrics")" "Unknown zone metrics"
+
 assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
   "$BASE/api/v1/zones/unknown-$SUFFIX")" "Unknown zone lookup"
 assert_status 404 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
@@ -634,6 +673,10 @@ assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PO
   -H 'Content-Type: application/json' \
   --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"banana","playerCount":0,"tickP95Ms":0,"errorRate":0}' \
   "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Invalid heartbeat status"
+assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","status":"online","playerCount":0,"tickP95Ms":0,"errorRate":0}' \
+  "$BASE/api/v1/zones/$ZONE_ID/heartbeat")" "Missing heartbeat observedAt"
 assert_status 400 "$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST \
   -H 'Content-Type: application/json' \
   --data '{"zoneId":"'"$ZONE_ID"'","agentId":"agent-'"$SUFFIX"'","observedAt":"2026-11-17T00:00:00Z","status":"online","playerCount":0,"tickP95Ms":0,"errorRate":1.5}' \

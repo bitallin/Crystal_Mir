@@ -52,6 +52,7 @@
       zones: null,
       zoneDetail: null,
       zoneCommands: null,
+      zoneMetrics: null,
       zoneReleases: null,
       drafts: null,
       draftsLoaded: false,
@@ -1814,13 +1815,19 @@
           if (error?.status === 401) throw error;
           return { items: [], error };
         });
-      const [zone, commands, releases] = await Promise.all([
+      const metricsPromise = API.getZoneMetrics(zoneId, 300).catch(error => {
+        if (error?.status === 401) throw error;
+        return { zoneId, items: [], summary: null, health: null, error };
+      });
+      const [zone, commands, releases, metrics] = await Promise.all([
         API.getZone(zoneId),
         API.listZoneCommands(zoneId, 200),
-        releasesPromise
+        releasesPromise,
+        metricsPromise
       ]);
       state.live.zoneDetail = { ...zone, loadedAt: new Date().toISOString() };
       state.live.zoneCommands = { zoneId, ...commands, loadedAt: new Date().toISOString() };
+      state.live.zoneMetrics = { ...metrics, zoneId, loadedAt: new Date().toISOString() };
       state.live.zoneReleases = releases;
       state.failed.delete(key);
     } catch (error) {
@@ -2835,6 +2842,73 @@
       </div>`;
   }
 
+  function zoneHealthLabel(level) {
+    return { healthy: "健康", warning: "注意", critical: "严重" }[level] || "未评估";
+  }
+
+  function zoneHealthTone(level) {
+    if (level === "critical") return "danger";
+    if (level === "warning") return "warning";
+    return "success";
+  }
+
+  function renderZoneHealth(metrics) {
+    if (!metrics) {
+      return `<div class="risk-box mt-16">${I("clock", 15)}<span>正在读取区服指标历史与健康评估。</span></div>`;
+    }
+    if (metrics.error) {
+      return `<div class="risk-box mt-16">${I("alert", 15)}<span>指标历史读取失败：${esc(metrics.error.message || "Control API 请求失败")}。区服详情和命令操作不受影响。</span></div>`;
+    }
+    const health = metrics.health;
+    if (!health) {
+      return `<div class="risk-box mt-16">${I("info", 15)}<span>暂无健康评估结果，等待区服心跳。</span></div>`;
+    }
+    const alerts = Array.isArray(health.alerts) ? health.alerts : [];
+    const alertMarkup = alerts.length
+      ? `<div class="alert-list">${alerts.map(alert => `<div class="alert-item ${alert.severity === "critical" ? "danger" : "warning"}"><span class="alert-mark">${I("alert", 13)}</span><div class="alert-copy"><strong>${esc(alert.message)}</strong><span class="mono">${esc(alert.code)}${alert.value ? ` · ${esc(alert.value)}` : ""}</span>${alert.observedAt ? `<span class="alert-time">${esc(formatDateTime(alert.observedAt))}</span>` : ""}</div></div>`).join("")}</div>`
+      : `<div class="validation-list"><div class="validation-item ok">${I("checkCircle", 12)}<span>当前心跳、运行时指标和重启计数均未触发告警规则。</span></div></div>`;
+    return `<section class="card mt-16 zone-health-card ${esc(health.level)}"><div class="card-head"><div><h2 class="card-title">健康评估</h2><p class="card-subtitle">按最新心跳、运行时指标和可配置阈值实时计算</p></div><span class="status ${zoneHealthTone(health.level)}">${esc(zoneHealthLabel(health.level))}</span></div><div class="card-body">${alertMarkup}</div></section>`;
+  }
+
+  function metricSparkline(samples, key, color, label, format) {
+    const values = samples
+      .map(sample => Number(sample[key]))
+      .filter(value => Number.isFinite(value));
+    if (values.length < 2) {
+      return `<div class="metric-trend-card"><div class="metric-trend-head"><span>${esc(label)}</span><strong>${esc(values.length ? format(values[0]) : "—")}</strong></div><div class="empty-inline">至少需要两个心跳样本才能绘制趋势。</div></div>`;
+    }
+    const width = 320;
+    const height = 72;
+    const padding = 6;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const points = values.map((value, index) => {
+      const x = padding + (index * (width - padding * 2)) / (values.length - 1);
+      const y = height - padding - ((value - min) / range) * (height - padding * 2);
+      return [x, y];
+    });
+    const pointText = points.map(point => `${point[0].toFixed(1)},${point[1].toFixed(1)}`).join(" ");
+    const latest = values[values.length - 1];
+    const lastPoint = points[points.length - 1];
+    return `<div class="metric-trend-card"><div class="metric-trend-head"><span>${esc(label)}</span><strong>${esc(format(latest))}</strong></div><svg class="metric-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}趋势"><line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" class="metric-sparkline-axis"></line><polyline points="${pointText}" fill="none" stroke="${esc(color)}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></polyline><circle cx="${lastPoint[0].toFixed(1)}" cy="${lastPoint[1].toFixed(1)}" r="3" fill="${esc(color)}"></circle></svg><div class="metric-trend-foot"><span>低 ${esc(format(min))}</span><span>高 ${esc(format(max))}</span></div></div>`;
+  }
+
+  function renderZoneMetricTrends(metrics) {
+    if (!metrics) return "";
+    if (metrics.error) return "";
+    const samples = Array.isArray(metrics.items) ? metrics.items : [];
+    const summary = metrics.summary || {};
+    const body = samples.length < 2
+      ? emptyState("指标历史还不够", "等待至少两个心跳样本后，这里会显示在线人数、Tick P95 和错误率趋势。", "gauge")
+      : `<div class="metric-trend-grid">
+          ${metricSparkline(samples, "playerCount", "#3977d5", "在线玩家", value => Number(value).toLocaleString())}
+          ${metricSparkline(samples, "tickP95Ms", "#c58b32", "Tick P95", value => `${Number(value).toFixed(1)} ms`)}
+          ${metricSparkline(samples, "errorRate", "#d74d4d", "错误率", value => `${(Number(value) * 100).toFixed(2)}%`)}
+        </div>`;
+    return `<section class="card mt-16"><div class="card-head"><div><h2 class="card-title">指标趋势</h2><p class="card-subtitle">窗口 ${esc(formatDateTime(metrics.from))} 至 ${esc(formatDateTime(metrics.to))}，按 observedAt 去重</p></div><span class="tag blue">${esc(summary.sampleCount ?? samples.length)} 个样本</span></div><div class="card-body">${body}</div></section>`;
+  }
+
   function renderZoneDetail(zoneId) {
     if (!isLive()) return renderDemoZoneDetail(ZONE_BY_ID[zoneId] || D.ZONES[0]);
 
@@ -2849,6 +2923,7 @@
     const restartFailures = zoneMetadata(zone, "restartFailures") ?? "0";
     const metricsObservedAt = zoneMetadata(zone, "metricsObservedAt");
     const previousReleaseId = zoneMetadata(zone, "previousReleaseId");
+    const metricsPayload = state.live.zoneMetrics?.zoneId === zoneId ? state.live.zoneMetrics : null;
 
     if (!zone) {
       return `<div class="page">${pageHeader({ title: "区服详情", description: "等待区服数据。", eyebrow: "ZONE DETAIL" })}${state.live.zoneDetail?.error ? `<div class="risk-box">${I("alert", 15)}<span>${esc(state.live.zoneDetail.error.message || "区服读取失败")}</span></div>` : emptyState("区服未找到", "请确认 Agent 已注册，或返回区服总览刷新。", "server")}</div>`;
@@ -2871,12 +2946,14 @@
         ${!canWrite ? `<div class="risk-box mt-16">${I("shield", 15)}<span>当前账号只有 zone:read 权限，可以查看状态和命令历史，不能发起区服命令。</span></div>` : ""}
         ${zone.status === "offline" ? `<div class="risk-box mt-16">${I("alert", 15)}<span>区服已离线，写操作已禁用。请先检查 Agent 进程、网络和最后心跳时间。</span></div>` : ""}
         ${busy ? `<div class="risk-box mt-16">${I("clock", 15)}<span>已有生命周期命令处于排队或执行状态，完成前会禁用新的换版操作。</span></div>` : ""}
+        ${renderZoneHealth(metricsPayload)}
         <section class="grid grid-4 mt-16">
           ${kpi({ label: "在线玩家", value: zoneMetricsAvailable(zone) ? Number(zone.playerCount).toLocaleString() : "—", icon: "users", tone: "blue", meta: `指标来源 ${metricsSource}` })}
           ${kpi({ label: "Tick P95", value: zoneMetricsAvailable(zone) ? Number(zone.tickP95Ms).toFixed(1) : "—", unit: zoneMetricsAvailable(zone) ? "ms" : "", icon: "gauge", tone: "green", meta: "最近 60 秒采样窗口" })}
           ${kpi({ label: "错误率", value: zoneMetricsAvailable(zone) ? (Number(zone.errorRate) * 100).toFixed(2) : "—", unit: zoneMetricsAvailable(zone) ? "%" : "", icon: "alert", tone: Number(zone.errorRate) > 0 ? "red" : "green", meta: "异常日志 / 世界 Tick" })}
           ${kpi({ label: "重启失败", value: String(restartFailures), icon: "refresh", tone: Number(restartFailures) ? "gold" : "violet", meta: metricsObservedAt ? `指标时间 ${formatDateTime(metricsObservedAt)}` : "等待指标文件" })}
         </section>
+        ${renderZoneMetricTrends(metricsPayload)}
         <section class="grid grid-2 mt-16">
           <article class="card"><div class="card-head"><div><h2 class="card-title">运行与内容</h2><p class="card-subtitle">Agent 心跳和当前发布投影</p></div>${status(zone.status)}</div><div class="card-body data-list">
             <div class="data-row"><span>Agent</span><strong class="mono">${esc(zone.agentId)} · ${esc(zone.agentVersion)}</strong></div>

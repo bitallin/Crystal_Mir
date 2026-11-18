@@ -512,6 +512,10 @@
     return request(`/api/v1/zones/${encodeURIComponent(zoneId)}`);
   }
 
+  function getZoneMetrics(zoneId, limit = 300) {
+    return request(`/api/v1/zones/${encodeURIComponent(zoneId)}/metrics?limit=${encodeURIComponent(limit)}`);
+  }
+
   function listZoneCommands(zoneId, limit = 200) {
     return request(`/api/v1/zones/${encodeURIComponent(zoneId)}/commands?limit=${encodeURIComponent(limit)}`);
   }
@@ -556,6 +560,7 @@
     getScriptValidation,
     getUser,
     getZone,
+    getZoneMetrics,
     isAuthenticated,
     listAccounts,
     listAuditEvents,

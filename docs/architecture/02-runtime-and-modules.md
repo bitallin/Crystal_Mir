@@ -135,7 +135,8 @@ Shared      -> 任何服务端实现
 
 - 已实现：Agent 启动后向 Control API 注册并上报心跳；ZoneServer ready 后每秒原子写入 60 秒窗口指标，
   Agent 校验 schema、zoneId、PID 和 15 秒时效后上报真实玩家数、Tick P95 和错误率，并标记
-  `metricsSource=zone-runtime|unavailable|process-stopped`；重启失败次数继续由 Agent 独立统计。
+  `metricsSource=zone-runtime|unavailable|process-stopped`；重启失败次数继续由 Agent 独立统计。Control API
+  在同一心跳事务写入 `zone_metric_sample`，并通过 metrics 查询返回趋势和实时健康告警。
 - 已实现：从 Control API 流式下载签名发布 ZIP，拒绝路径穿越，校验实体哈希、内容哈希和 ECDSA 签名后原子 staging。
 - 已实现：`stage`、`activate`、`rollback`、`reload`、`stop` 持久命令；命令有租约、过期和单生命周期互斥。
 - 已实现：进程级换版、候选 ready 检查和失败后恢复上一版本；意外退出按退避策略重启 active 版本。

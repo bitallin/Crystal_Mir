@@ -104,6 +104,10 @@ public sealed class ZoneStore
         CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var metadataJson = request.Metadata is null
+            ? null
+            : JsonSerializer.Serialize(request.Metadata, AgentContractJson.Options);
         await using var command = new NpgsqlCommand(
             """
             UPDATE zone
@@ -118,7 +122,8 @@ public sealed class ZoneStore
                 updated_at = now()
             WHERE zone_id = @zoneId AND agent_id = @agentId;
             """,
-            connection);
+            connection,
+            transaction);
         command.Parameters.AddWithValue("zoneId", zoneId);
         command.Parameters.AddWithValue("agentId", request.AgentId);
         command.Parameters.AddWithValue("status", request.Status);
@@ -135,17 +140,65 @@ public sealed class ZoneStore
         command.Parameters.AddWithValue("errorRate", request.ErrorRate);
         command.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
         {
-            Value = request.Metadata is null
-                ? DBNull.Value
-                : JsonSerializer.Serialize(request.Metadata, AgentContractJson.Options)
+            Value = metadataJson is null ? DBNull.Value : metadataJson
         });
 
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
         {
+            await transaction.RollbackAsync(cancellationToken);
             return null;
         }
 
+        await InsertMetricSampleAsync(connection, transaction, zoneId, request, metadataJson, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return await GetAsync(connection, zoneId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ZoneMetricSampleDto>> ListMetricSamplesAsync(
+        string zoneId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        if (!await ZoneExistsAsync(connection, zoneId, cancellationToken))
+        {
+            throw new ZoneNotFoundException($"Zone {zoneId} does not exist.");
+        }
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT zone_id, observed_at, recorded_at, status, active_release_id,
+                   active_content_hash, player_count, tick_p95_ms, error_rate,
+                   metrics_source, restart_failures, zone_pid
+            FROM (
+                SELECT zone_id, observed_at, recorded_at, status, active_release_id,
+                       active_content_hash, player_count, tick_p95_ms, error_rate,
+                       metrics_source, restart_failures, zone_pid
+                FROM zone_metric_sample
+                WHERE zone_id = @zoneId
+                  AND observed_at >= @from
+                  AND observed_at <= @to
+                ORDER BY observed_at DESC
+                LIMIT @limit
+            ) samples
+            ORDER BY observed_at;
+            """,
+            connection);
+        command.Parameters.AddWithValue("zoneId", zoneId);
+        command.Parameters.AddWithValue("from", from.ToUniversalTime());
+        command.Parameters.AddWithValue("to", to.ToUniversalTime());
+        command.Parameters.AddWithValue("limit", limit);
+
+        var samples = new List<ZoneMetricSampleDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            samples.Add(ReadMetricSample(reader));
+        }
+
+        return samples;
     }
 
     public async Task<IReadOnlyList<ZoneDto>> ListAsync(
@@ -542,6 +595,61 @@ public sealed class ZoneStore
         return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
     }
 
+    private static async Task InsertMetricSampleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string zoneId,
+        AgentHeartbeatRequest request,
+        string? metadataJson,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO zone_metric_sample (
+                zone_id, observed_at, status, active_release_id, active_content_hash,
+                player_count, tick_p95_ms, error_rate, metrics_source,
+                restart_failures, zone_pid, metadata)
+            VALUES (
+                @zoneId, @observedAt, @status, @activeReleaseId, @activeContentHash,
+                @playerCount, @tickP95Ms, @errorRate, @metricsSource,
+                @restartFailures, @zonePid, @metadata)
+            ON CONFLICT (zone_id, observed_at) DO NOTHING;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("zoneId", zoneId);
+        command.Parameters.AddWithValue("observedAt", request.ObservedAt.ToUniversalTime());
+        command.Parameters.AddWithValue("status", request.Status);
+        command.Parameters.Add(new NpgsqlParameter("activeReleaseId", NpgsqlDbType.Bigint)
+        {
+            Value = request.ActiveReleaseId ?? (object)DBNull.Value
+        });
+        command.Parameters.Add(new NpgsqlParameter("activeContentHash", NpgsqlDbType.Text)
+        {
+            Value = (object?)request.ActiveContentHash ?? DBNull.Value
+        });
+        command.Parameters.AddWithValue("playerCount", request.PlayerCount);
+        command.Parameters.AddWithValue("tickP95Ms", request.TickP95Ms);
+        command.Parameters.AddWithValue("errorRate", request.ErrorRate);
+        command.Parameters.Add(new NpgsqlParameter("metricsSource", NpgsqlDbType.Text)
+        {
+            Value = (object?)ReadMetadataString(request.Metadata, "metricsSource") ?? DBNull.Value
+        });
+        command.Parameters.Add(new NpgsqlParameter("restartFailures", NpgsqlDbType.Integer)
+        {
+            Value = ReadMetadataInt(request.Metadata, "restartFailures") ?? (object)DBNull.Value
+        });
+        command.Parameters.Add(new NpgsqlParameter("zonePid", NpgsqlDbType.Integer)
+        {
+            Value = ReadMetadataInt(request.Metadata, "zonePid") ?? (object)DBNull.Value
+        });
+        command.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
+        {
+            Value = metadataJson is null ? DBNull.Value : metadataJson
+        });
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<ZoneDto?> GetAsync(
         NpgsqlConnection connection,
         string zoneId,
@@ -629,6 +737,23 @@ public sealed class ZoneStore
             ReadJson(reader, 12));
     }
 
+    private static ZoneMetricSampleDto ReadMetricSample(NpgsqlDataReader reader)
+    {
+        return new ZoneMetricSampleDto(
+            reader.GetString(0),
+            ReadTimestamp(reader, 1),
+            ReadTimestamp(reader, 2),
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetInt64(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetInt32(6),
+            reader.GetDouble(7),
+            reader.GetDouble(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetInt32(10),
+            reader.IsDBNull(11) ? null : reader.GetInt32(11));
+    }
+
     private static DateTimeOffset ReadTimestamp(NpgsqlDataReader reader, int ordinal)
     {
         return new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc));
@@ -647,6 +772,20 @@ public sealed class ZoneStore
         return value.TryGetProperty(propertyName, out var property) &&
                property.ValueKind == JsonValueKind.String
             ? property.GetString()
+            : null;
+    }
+
+    private static string? ReadMetadataString(IReadOnlyDictionary<string, string>? metadata, string name)
+    {
+        return metadata is not null && metadata.TryGetValue(name, out var value) ? value : null;
+    }
+
+    private static int? ReadMetadataInt(IReadOnlyDictionary<string, string>? metadata, string name)
+    {
+        return metadata is not null &&
+               metadata.TryGetValue(name, out var value) &&
+               int.TryParse(value, out var parsed)
+            ? parsed
             : null;
     }
 }

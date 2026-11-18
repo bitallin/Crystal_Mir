@@ -291,6 +291,10 @@ Control API 使用 ASP.NET Core 配置或环境变量。连接串优先读取 `C
 | `ControlApi:RefreshTokenDays` | - | 30，范围 1～90 | 刷新令牌有效期 |
 | `ControlApi:ApiRateLimitPermitLimit` | - | 240，范围 1～100000 | 普通 API 每 IP 每分钟上限 |
 | `ControlApi:AuthRateLimitPermitLimit` | - | 10，范围 1～100000 | 登录/刷新每 IP 每分钟上限 |
+| `ControlApi:ZoneTickP95WarningMs` | - | 50，范围 0～60000 | 区服 Tick P95 warning 阈值 |
+| `ControlApi:ZoneTickP95CriticalMs` | - | 100，范围 0～60000，必须大于 warning | 区服 Tick P95 critical 阈值 |
+| `ControlApi:ZoneErrorRateWarning` | - | 0.05，范围 0～1 | 区服错误率 warning 阈值 |
+| `ControlApi:ZoneErrorRateCritical` | - | 0.20，范围 0～1，必须大于 warning | 区服错误率 critical 阈值 |
 | `ControlApi:BootstrapAdminUsername` | `CRYSTAL_CONTROL_BOOTSTRAP_USERNAME` | `admin` | 空库首次创建的管理员用户名 |
 | `ControlApi:BootstrapAdminDisplayName` | `CRYSTAL_CONTROL_BOOTSTRAP_DISPLAY_NAME` | `Platform Administrator` | 管理员显示名 |
 | `ControlApi:BootstrapAdminPassword` | `CRYSTAL_CONTROL_BOOTSTRAP_PASSWORD` | 可选 | 空库首次创建管理员的密码 |

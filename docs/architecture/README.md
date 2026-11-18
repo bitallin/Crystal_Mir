@@ -43,6 +43,8 @@
 | M2 多内容与引用 | 10 类内容共享身份、引用、校验和 JSONL 导入导出；地图关系分区写入并维护投影 | `adr/0010-m2-multi-content-editing-references-import-export-and-map-relations.md` |
 | 区服发布消费 | ZoneServer 启动期验证签名快照并在隔离目录重建，不原地修改运行内容 | `adr/0011-zone-server-read-only-signed-content-release.md` |
 | 区服换版 | Control API 管命令，独立 Agent 管进程；下载验签后 staging，SIGTERM + ready 文件完成进程级激活/回滚 | `adr/0012-zone-agent-process-level-content-switching.md` |
+| 区服指标 | ZoneServer 本地采样并原子写文件，Agent 校验后通过心跳上报，不跨 GPL 边界读进程内存 | `adr/0013-zone-runtime-metrics-file.md` |
+| 指标历史与健康 | 心跳幂等写样本，metrics API 返回窗口趋势，健康等级由平台阈值实时计算 | `adr/0014-zone-metric-history-and-health-evaluation.md` |
 
 ## 5. 文档索引
 

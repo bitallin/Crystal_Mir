@@ -103,7 +103,7 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 
 ## M3 热更新与区服 Agent
 
-**状态**：进行中（2026-11-18，服务端控制闭环、真实运行时指标和 Control.Web 区服闭环完成本轮研究范围；整个 M3 尚未收口）。
+**状态**：进行中（2026-11-18，服务端控制闭环、真实运行时指标、指标历史/健康评估和 Control.Web 区服闭环完成本轮研究范围；整个 M3 尚未收口）。
 客户端启动器、灰度/CDN、进程内热切换、玩家状态迁移、外部 staging 验证和许可证/授权工作仍需后续完成。
 
 **目标**：客户端和服务端内容可安全、可回滚地更新。
@@ -117,6 +117,8 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - ZoneServer `--ready-file`/`CRYSTAL_ZONE_READY_FILE`，legacy 启动模式和客户端协议保持兼容。
 - ZoneServer `--metrics-file`/`CRYSTAL_ZONE_METRICS_FILE` 与 GameCore 60 秒指标采样器；Agent 校验 schema/zoneId/PID/时效后
   通过现有心跳上报真实玩家数、Tick P95、错误率和指标来源，stop 后归零并标记 `process-stopped`。
+- Control API 在同一心跳事务幂等写入 `zone_metric_sample`，新增窗口化 metrics 查询、汇总和
+  `healthy|warning|critical` 实时健康评估；Control.Web 展示三类趋势和告警代码。
 - Control.Web 区服总览/详情接入真实 API，展示指标、active/staged 版本、内容哈希、Agent/进程状态、最后心跳和命令历史；
   `zone:write` 用户可执行 stage、activate、rollback、reload、stop，离线或生命周期命令在途时禁用并显示 409 冲突。
 - `scripts/zone-control.sh`、`crystal-zone-agent.service` 和 Linux 运行手册。
@@ -130,7 +132,7 @@ Zone Agent、热切换和灰度发布不在本轮范围。
 - 进程内热切换、玩家状态迁移、零停机双实例和多 Agent HA。
 - 协议/内容/客户端版本握手和旧客户端版本门禁。
 - Ubuntu staging 上的实际 systemd 安装、开机自启、日志轮转和故障演练。
-- Prometheus/OpenTelemetry 远端指标汇聚、长期存储和告警。
+- Prometheus/OpenTelemetry 远端指标汇聚、告警通知、长期归档和样本保留策略。
 - 授权、许可证和素材合规（按研究项目口径本轮跳过）。
 
 **验收标准**

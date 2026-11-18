@@ -1,6 +1,6 @@
 # 构建、测试与发布
 
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 > 状态：生效
 
 ## 1. 解决方案结构
@@ -21,6 +21,8 @@ tools/Crystal.LegacyImporter 旧二进制导入/导出器（链接 GPL Server.Li
 db/migrations/               PostgreSQL schema
 Tests/ItemSecurity/          旧物品安全回归
 Tests/ContentSnapshot/       内容快照回归
+Tests/ZoneMetrics/           运行时指标采样与校验
+Tests/ZoneHealth/            区服健康评估告警规则
 LibraryEditor/               图库编辑工具
 LibraryViewer/               图库查看工具
 AutoPatcherAdmin*            补丁管理工具
@@ -57,7 +59,8 @@ src/Crystal.Cli
 ```
 
 结果：旧服务端、客户端、内容库、Control API 和工具构建成功；`ItemSecurity` 通过 358 项检查；
-`ContentSnapshot` 通过 39 项检查；黄金数据库可加载；黄金内容导入、快照重建和二进制导出 round-trip 通过；
+`ContentSnapshot` 通过 39 项检查；`ZoneMetrics`、`ZoneHealth` 和合约边界检查通过；黄金数据库可加载；
+黄金内容导入、快照重建和二进制导出 round-trip 通过；
 Control.Web 全部 JavaScript 通过 `node --check`；Linux 区服加载 463 张地图并以 SIGTERM 正常退出。
 
 发布自包含 Linux 区服：
@@ -108,7 +111,7 @@ CRYSTAL_DATABASE_URL='Host=127.0.0.1;Port=5432;Database=crystal;Username=crystal
 API 使用 `CRYSTAL_CONTROL_CORS_ORIGINS` 允许静态站点来源。
 
 该脚本执行 schema 迁移、黄金导入、快照/PostgreSQL 二进制重建、API 启动、认证/账号生命周期、只读接口、
-发布生命周期和 Zone API 验证。CI 使用 PostgreSQL 16 service container 运行同一脚本；本地已验证 PostgreSQL 12 兼容，
+发布生命周期、Zone API 和指标历史/健康告警验证。CI 使用 PostgreSQL 16 service container 运行同一脚本；本地已验证 PostgreSQL 12 兼容，
 并在 PostgreSQL 18.3 上验证发布签名/发布链路。本地设置 `CRYSTAL_DATABASE_URL` 或
 `CRYSTAL_DB_CONNECTION` 后，`./scripts/ci.sh` 也会自动运行该集成测试，否则明确跳过。
 

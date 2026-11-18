@@ -591,6 +591,17 @@ tbody tr:last-child td { border-bottom: 0; }
 .metric-mini span { display: block; color: var(--muted); font-size: 7.5px; }
 .metric-mini strong { display: block; margin-top: 2px; font-size: 14px; letter-spacing: -.03em; }
 
+.metric-trend-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.metric-trend-card { min-width: 0; padding: 11px; background: #f8f9fa; border: 1px solid #edf0f2; border-radius: 9px; }
+.metric-trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.metric-trend-head span { color: var(--muted); font-size: 8px; }
+.metric-trend-head strong { font-size: 14px; letter-spacing: -.03em; }
+.metric-sparkline { width: 100%; height: 72px; margin-top: 7px; overflow: visible; }
+.metric-sparkline-axis { stroke: #e4e9ed; stroke-width: 1; }
+.metric-trend-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; color: #9aa4ad; font-size: 7.5px; }
+.zone-health-card.critical { border-color: #edcaca; }
+.zone-health-card.warning { border-color: #ecd8b5; }
+
 .drawer-backdrop, .modal-backdrop { position: fixed; inset: 0; z-index: 1600; background: rgba(9, 15, 20, .38); backdrop-filter: blur(2px); animation: fade-in .16s ease both; }
 .drawer { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; width: min(520px, 94vw); height: 100%; background: #fff; box-shadow: var(--shadow-lg); animation: drawer-in .22s ease both; }
 @keyframes drawer-in { from { transform: translateX(22px); opacity: .5; } to { transform: none; opacity: 1; } }

@@ -197,11 +197,16 @@ PR -> 构建 -> 单元/集成测试 -> 安全扫描 -> 制品
 - 当前链路：ZoneServer 每 100 ms 采样、60 秒窗口、每秒原子写 `state/metrics.json`；Agent 心跳上报
   `playerCount`、`tickP95Ms`、`errorRate`，metadata 带 `metricsSource`、`metricsObservedAt`、
   `metricsWindowSeconds`、`metricsSampleCount` 和 `restartFailures`。
+- Control API 将心跳样本幂等写入 `zone_metric_sample`，按区服和时间建立索引；`GET /api/v1/zones/{zoneId}/metrics`
+  返回窗口内最近样本、汇总和 `healthy|warning|critical` 健康等级。阈值由 Control API 配置，告警状态不写回
+  Agent 上报状态。
 - Tick P95 使用最近秩法；错误率为窗口异常增量/Tick 增量并封顶 1。`restartFailures` 单独展示，不混入错误率。
 - Control.Web 区服总览每 5 秒刷新，详情和命令历史每 2 秒刷新，离开路由后清理定时器。
+- 区服详情同时展示玩家数、Tick P95、错误率的趋势和告警代码；指标历史查询失败不影响命令操作。
 - 后续接入 Prometheus/OpenTelemetry 时沿用 `zone_tick_duration_ms`、`zone_players`、`zone_connections`、
   `content_reload_duration_ms`、`release_failures_total`、`payment_delivery_latency_ms` 等命名。
 - 每个区服带 `zone_id` 标签，避免高基数标签滥用。
+- 研究环境暂不自动清理历史样本；生产化前需要保留策略、分区/降采样和告警通知渠道。
 
 ### 6.3 追踪
 

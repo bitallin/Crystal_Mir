@@ -36,7 +36,7 @@
 | 开区 | 手工配置和启动 | 模板化开区、定时、健康门禁 | 区服编排、Agent、监控 | M4 |
 | 合区 | 无 | 预检、ID 映射、冻结、校验、回滚 | 合区引擎、冲突策略、报告 | M4 |
 | 充值 | 无订单/支付系统 | 订单、支付、账本、幂等发货、对账 | 支付适配器、Outbox、对账 | M4 |
-| 数据监控 | WinForms 在线列表和日志；ZoneServer 已输出 60 秒运行时指标，Agent 心跳上报真实玩家数、Tick P95、错误率和重启失败，Control.Web 展示区服趋势与命令历史 | 指标、日志、追踪、告警、仪表盘 | OpenTelemetry、Prometheus、Grafana、长期存储和告警规则 | M3/M4/M5 |
+| 数据监控 | WinForms 在线列表和日志；ZoneServer 输出 60 秒运行时指标，Agent 心跳上报真实玩家数、Tick P95、错误率和重启失败；Control API 持久化 `zone_metric_sample` 并返回趋势、汇总与实时健康告警，Control.Web 展示区服趋势、告警和命令历史 | 指标、日志、追踪、告警、仪表盘 | OpenTelemetry、Prometheus、Grafana、告警通知、长期归档和保留策略 | M3/M4/M5 |
 | 数据库/网关配置 | `Configs/Setup.ini` + 内嵌网络 | 配置中心、独立网关、区服路由 | 配置 schema、网关、版本协商 | M1/M4 |
 | 部署 | 根目录 Compose 栈、多阶段 API/Web 镜像、Nginx 同源代理、CI Compose 冒烟已建立；区服仍用 systemd | 容器化、CI/CD、一键部署 | 生产编排、制品签名、灰度 | M1/M5 |
 | 通用引擎 | 当前是 Crystal 单区引擎 | 模板、插件、SDK、第三方版本制作 | 插件机制、脚本 API、CLI、文档 | M6 |

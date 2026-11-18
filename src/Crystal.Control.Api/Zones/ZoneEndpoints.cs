@@ -38,6 +38,8 @@ public static class ZoneEndpoints
             .AllowAnonymous();
         api.MapGet("/zones/{zoneId}", GetZoneAsync)
             .AllowAnonymous();
+        api.MapGet("/zones/{zoneId}/metrics", GetZoneMetricsAsync)
+            .AllowAnonymous();
         api.MapPost("/zones/{zoneId}/heartbeat", HeartbeatAsync)
             .AllowAnonymous();
         api.MapGet("/zones/{zoneId}/commands", ListCommandsAsync)
@@ -160,6 +162,11 @@ public static class ZoneEndpoints
             errors["status"] = ["status must be online or degraded."];
         }
 
+        if (request.ObservedAt == default)
+        {
+            errors["observedAt"] = ["observedAt is required."];
+        }
+
         if (request.PlayerCount < 0 || request.TickP95Ms < 0 ||
             request.ErrorRate is < 0 or > 1)
         {
@@ -180,6 +187,114 @@ public static class ZoneEndpoints
                 title: "Zone Agent is not registered",
                 detail: $"Zone {zoneId} is not registered for agent {request.AgentId}.")
             : Results.NoContent();
+    }
+
+    private static async Task<IResult> GetZoneMetricsAsync(
+        string zoneId,
+        ZoneStore store,
+        ControlApiOptions options,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int? limit,
+        CancellationToken cancellationToken)
+    {
+        if (!IsValidZoneId(zoneId)) return InvalidZoneId();
+
+        var take = limit ?? 300;
+        if (take is < 1 or > 2000)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["limit"] = ["limit must be between 1 and 2000."]
+            });
+        }
+
+        var windowEnd = (to ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        var windowStart = (from ?? windowEnd.AddHours(-1)).ToUniversalTime();
+        if (windowStart >= windowEnd)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["from"] = ["from must be earlier than to."]
+            });
+        }
+
+        if (windowEnd - windowStart > TimeSpan.FromDays(7))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["from"] = ["The metrics query window must not exceed 7 days."]
+            });
+        }
+
+        var zone = await store.GetAsync(zoneId, cancellationToken);
+        if (zone is null) return ZoneNotFound(zoneId);
+
+        IReadOnlyList<ZoneMetricSampleDto> samples;
+        try
+        {
+            samples = await store.ListMetricSamplesAsync(
+                zoneId,
+                windowStart,
+                windowEnd,
+                take,
+                cancellationToken);
+        }
+        catch (ZoneNotFoundException exception)
+        {
+            return ZoneNotFound(exception.Message);
+        }
+
+        var summary = BuildMetricsSummary(samples);
+        var health = ZoneHealthEvaluator.Evaluate(
+            zone,
+            samples,
+            DateTimeOffset.UtcNow,
+            new ZoneHealthThresholds(
+                options.ZoneTickP95WarningMs,
+                options.ZoneTickP95CriticalMs,
+                options.ZoneErrorRateWarning,
+                options.ZoneErrorRateCritical));
+        return Results.Ok(new ZoneMetricsResponse(
+            zoneId,
+            windowStart,
+            windowEnd,
+            summary,
+            health,
+            samples));
+    }
+
+    private static ZoneMetricsSummaryDto BuildMetricsSummary(IReadOnlyList<ZoneMetricSampleDto> samples)
+    {
+        if (samples.Count == 0)
+        {
+            return new ZoneMetricsSummaryDto(
+                0,
+                null,
+                null,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0);
+        }
+
+        var latest = samples[^1];
+        return new ZoneMetricsSummaryDto(
+            samples.Count,
+            samples[0].ObservedAt,
+            latest.ObservedAt,
+            latest.PlayerCount,
+            latest.TickP95Ms,
+            latest.ErrorRate,
+            samples.Average(sample => sample.PlayerCount),
+            samples.Average(sample => sample.TickP95Ms),
+            samples.Max(sample => sample.TickP95Ms),
+            samples.Average(sample => sample.ErrorRate),
+            samples.Max(sample => sample.ErrorRate));
     }
 
     private static async Task<IResult> ListCommandsAsync(

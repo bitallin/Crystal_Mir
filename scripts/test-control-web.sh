@@ -1053,7 +1053,7 @@ with sync_playwright() as playwright:
     admin_token = page.evaluate("JSON.parse(sessionStorage.getItem('mir.control.session')).accessToken")
     zone_release = release1
 
-    def heartbeat_zone(zone_id):
+    def heartbeat_zone(zone_id, tick=42.5, error_rate=0.03, restart_failures=2, metrics_source="zone-runtime"):
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         return api_request("POST", f"/api/v1/zones/{zone_id}/heartbeat", {
             "zoneId": zone_id,
@@ -1063,14 +1063,14 @@ with sync_playwright() as playwright:
             "activeReleaseId": zone_release["id"],
             "activeContentHash": zone_release["contentHash"],
             "playerCount": 37,
-            "tickP95Ms": 42.5,
-            "errorRate": 0.03,
+            "tickP95Ms": tick,
+            "errorRate": error_rate,
             "metadata": {
-                "metricsSource": "zone-runtime",
+                "metricsSource": metrics_source,
                 "metricsObservedAt": now,
                 "metricsWindowSeconds": "60",
                 "metricsSampleCount": "600",
-                "restartFailures": "2",
+                "restartFailures": str(restart_failures),
                 "zonePid": "4321",
                 "previousReleaseId": str(release2["id"])
             }
@@ -1088,7 +1088,12 @@ with sync_playwright() as playwright:
             "payload": payload
         }, admin_token)
 
+    heartbeat_zone(zone_live_id, tick=28.0, error_rate=0.01, restart_failures=0)
     heartbeat_zone(zone_live_id)
+    zone_metrics = api_request("GET", f"/api/v1/zones/{zone_live_id}/metrics?limit=20", token=admin_token)
+    assert zone_metrics["summary"]["sampleCount"] >= 2, zone_metrics
+    assert zone_metrics["health"]["level"] == "warning", zone_metrics["health"]
+    assert any(alert["code"] == "agent.restart_failures" for alert in zone_metrics["health"]["alerts"]), zone_metrics["health"]
     zone_detail_url = f"{web}/?api={api}#/zone/{zone_live_id}"
     page.goto(f"{web}/?api={api}#/zones", wait_until="networkidle")
     live_zone_row = page.locator("#zone-table tbody tr", has_text=zone_live_id)
@@ -1106,6 +1111,11 @@ with sync_playwright() as playwright:
     assert "42.5" in zone_detail_text and "3.00" in zone_detail_text, zone_detail_text[:1500]
     assert "37" in zone_detail_text and zone_release["version"] in zone_detail_text, zone_detail_text[:1500]
     assert "4321" in zone_detail_text and str(release2["id"]) in zone_detail_text, zone_detail_text[:1500]
+    page.wait_for_selector(".metric-sparkline", timeout=15000)
+    zone_detail_text = page.locator(".main-content").inner_text()
+    assert "健康评估" in zone_detail_text and "指标趋势" in zone_detail_text, zone_detail_text[:2000]
+    assert "Agent 记录到 2 次重启失败" in zone_detail_text, zone_detail_text[:2000]
+    assert page.locator(".metric-sparkline").count() == 3, page.locator(".metric-sparkline").count()
     command_buttons = page.locator('[data-action="open-modal"][data-modal="zone-command"]')
     assert command_buttons.count() == 5, command_buttons.count()
 

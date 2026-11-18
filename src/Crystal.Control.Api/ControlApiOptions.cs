@@ -43,6 +43,14 @@ public sealed class ControlApiOptions
 
     public string? ReleaseSigningKeyId { get; init; }
 
+    public required double ZoneTickP95WarningMs { get; init; }
+
+    public required double ZoneTickP95CriticalMs { get; init; }
+
+    public required double ZoneErrorRateWarning { get; init; }
+
+    public required double ZoneErrorRateCritical { get; init; }
+
     public static ControlApiOptions Load(IConfiguration configuration, IWebHostEnvironment environment)
     {
         var connectionString = FirstNonEmpty(
@@ -97,6 +105,42 @@ public sealed class ControlApiOptions
             10,
             1,
             100_000);
+        var zoneTickP95WarningMs = ReadDouble(
+            configuration,
+            "ControlApi:ZoneTickP95WarningMs",
+            50,
+            0,
+            60_000);
+        var zoneTickP95CriticalMs = ReadDouble(
+            configuration,
+            "ControlApi:ZoneTickP95CriticalMs",
+            100,
+            0,
+            60_000);
+        var zoneErrorRateWarning = ReadDouble(
+            configuration,
+            "ControlApi:ZoneErrorRateWarning",
+            0.05,
+            0,
+            1);
+        var zoneErrorRateCritical = ReadDouble(
+            configuration,
+            "ControlApi:ZoneErrorRateCritical",
+            0.20,
+            0,
+            1);
+        if (zoneTickP95WarningMs >= zoneTickP95CriticalMs)
+        {
+            throw new InvalidOperationException(
+                "ControlApi:ZoneTickP95WarningMs must be less than ControlApi:ZoneTickP95CriticalMs.");
+        }
+
+        if (zoneErrorRateWarning >= zoneErrorRateCritical)
+        {
+            throw new InvalidOperationException(
+                "ControlApi:ZoneErrorRateWarning must be less than ControlApi:ZoneErrorRateCritical.");
+        }
+
         var corsOrigins = (FirstNonEmpty(
                 configuration["ControlApi:CorsOrigins"],
                 Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_CORS_ORIGINS")) ?? "")
@@ -146,7 +190,11 @@ public sealed class ControlApiOptions
                 Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_PUBLIC_KEY_PATH")),
             ReleaseSigningKeyId = FirstNonEmpty(
                 configuration["ControlApi:ReleaseSigningKeyId"],
-                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID"))
+                Environment.GetEnvironmentVariable("CRYSTAL_CONTROL_RELEASE_SIGNING_KEY_ID")),
+            ZoneTickP95WarningMs = zoneTickP95WarningMs,
+            ZoneTickP95CriticalMs = zoneTickP95CriticalMs,
+            ZoneErrorRateWarning = zoneErrorRateWarning,
+            ZoneErrorRateCritical = zoneErrorRateCritical
         };
     }
 
@@ -157,6 +205,30 @@ public sealed class ControlApiOptions
         if (!int.TryParse(configured, out var value) || value < minimum || value > maximum)
         {
             throw new InvalidOperationException($"{key} must be an integer between {minimum} and {maximum}.");
+        }
+
+        return value;
+    }
+
+    private static double ReadDouble(
+        IConfiguration configuration,
+        string key,
+        double fallback,
+        double minimum,
+        double maximum)
+    {
+        var configured = configuration[key];
+        if (string.IsNullOrWhiteSpace(configured)) return fallback;
+        if (!double.TryParse(
+                configured,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var value) ||
+            value < minimum ||
+            value > maximum)
+        {
+            throw new InvalidOperationException(
+                $"{key} must be a number between {minimum} and {maximum} using invariant culture.");
         }
 
         return value;

@@ -273,9 +273,11 @@ ECDSA P-256 签名并发布。状态流转使用条件更新，失败校验会�
 M3 新增独立 `Crystal.ZoneAgent` 消费 `GET /releases/{id}/artifact`：下载 ZIP，拒绝路径穿越，校验实体/内容哈希和
 签名，写入本地不可变 staging，再通过 SIGTERM、`--ready-file` 和子进程 PID 完成进程级激活或回滚。区服激活只更新
 `zone.active_release_id` 投影，不修改 `content_release.status`。Agent 同时读取 ZoneServer 原子写出的版本化指标文件，
-把在线玩家、Tick P95、错误率和指标来源写入现有心跳字段/metadata，不新增数据库列；详见
+把在线玩家、Tick P95、错误率和指标来源写入现有心跳字段/metadata；心跳同时写入 `zone_metric_sample` 历史表，
+用于趋势查询和健康评估；详见
 `adr/0011-zone-server-read-only-signed-content-release.md` 和
-`adr/0012-zone-agent-process-level-content-switching.md`、`adr/0013-zone-runtime-metrics-file.md`。
+`adr/0012-zone-agent-process-level-content-switching.md`、`adr/0013-zone-runtime-metrics-file.md`、
+`adr/0014-zone-metric-history-and-health-evaluation.md`。
 
 ### 4.4 区服与运营
 
@@ -307,6 +309,17 @@ zone_command(
   claimed_at, lease_expires_at, completed_at,
   error, result_payload jsonb
 )
+
+zone_metric_sample(
+  id bigint identity primary key,
+  zone_id text references zone(zone_id),
+  observed_at, recorded_at,
+  status, active_release_id, active_content_hash,
+  player_count, tick_p95_ms, error_rate,
+  metrics_source, restart_failures, zone_pid,
+  metadata jsonb,
+  unique(zone_id, observed_at)
+)
 ```
 
 `zone` 是区服运行投影，不是开区模板或编排事实源。`zone_command` 通过部分唯一索引限制每个区服同时只有一个未完成的
@@ -314,6 +327,8 @@ activate/rollback/reload/stop 命令；租约到期可重投，终态结果幂�
 现在由 Agent 根据 ZoneServer `state/metrics.json` 写入；心跳 metadata 记录 `metricsSource`、`metricsObservedAt`、
 `metricsWindowSeconds`、`metricsSampleCount`、`restartFailures` 和 `zonePid`。指标文件不是数据库事实源，schema、
 zoneId、PID 或时效校验失败时归零并标记 `unavailable`，子进程停止时标记 `process-stopped`。
+`zone_metric_sample` 与心跳投影在同一事务写入，`(zone_id, observed_at)` 唯一；`GET /api/v1/zones/{zoneId}/metrics`
+返回窗口内最近样本、汇总和实时健康告警。阈值属于 Control API 配置，不写入 Agent 协议。
 
 以下开区/合区表仍属于后续里程碑，尚未建表：
 
