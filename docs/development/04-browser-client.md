@@ -82,7 +82,7 @@ dotnet run --project tools/Crystal.WebAssetCompiler -- \
 ```
 
 - `--build-hash` 必填，缺失直接失败。
-- `--all-maps` 编译 `Map/` 下全部地图；也可重复 `--map <path>` 选择单图。
+- `--all-maps` 递归编译 `Map/` 下全部 `.map`，扩展名大小写不敏感；同名地图 ID 仅保留第一个。也可重复 `--map <path>` 选择单图。
 - `--map-libraries` 会把地图引用的图库一起编译；引用但缺失时失败。
 - `--lib <path>` 可编译额外图库。
 - 产物通过静态服务器暴露为 `/assets/<version>/`，素材和生成物不提交仓库。
@@ -130,8 +130,14 @@ dotnet run --project Tests/WebGateway
 dotnet run --project Tests/WebAssets
 dotnet run --project Tests/ZoneVersionGate
 ./scripts/test-browser-client.sh
+./scripts/test-web-real-maps.sh
+./scripts/test-web-version-gate.sh
 ```
 
 `test-browser-client.sh` 会构建 Web 客户端、生成临时地图资源、启动假区服并用 Playwright Chromium 验证桌面、移动横屏和竖屏门禁。需要 Python `aiohttp`、`playwright` 和 Chromium；依赖见 `scripts/requirements-browser-test.txt`。
+
+`test-web-real-maps.sh` 默认读取 `.external/Crystal.Database/Jev/Maps`，编译顶层活跃地图，并用真实 V1、V100 地图各跑一次浏览器冒烟。可用 `CRYSTAL_CLIENT_MAP_ROOT` 指定其他真实地图根目录，用 `CRYSTAL_WEB_REAL_MAP_OUT` 指定产物目录，或 `CRYSTAL_SKIP_WEB_BUILD=1` 跳过重复 Web 构建。缺少 `.lib` 时只产生 `Map library ... placeholder terrain` 告警，这是当前预期；准备 `Client/Data` 后应改用 `--map-libraries` 并消除该告警。
+
+`test-web-version-gate.sh` 使用临时内容根开启 `CheckVersion=True`，启动真实 ZoneServer 和 Gateway，经 `crystal-v1` WebSocket 验证当前 `clientBuildHash` 被接受、错误哈希被拒绝。脚本会在两次探测间等待 6 秒，因为 legacy 区服对同一 IP 有 5 秒建连冷却。
 
 真实浏览器矩阵、iPhone/Android 真机、Safari、音效和真实 `.lib` 图集仍需在具备外部素材和设备的环境执行，结果写入 `docs/PROGRESS.md`。

@@ -12,6 +12,7 @@ try
 {
     TestLibraryV2AndV3(tempRoot);
     TestMapVersions(tempRoot);
+    TestMapSourceDiscovery(tempRoot);
     TestPngWriter(tempRoot);
     TestHashStability();
     TestMapLibraryCatalog();
@@ -107,6 +108,29 @@ void TestLibraryV2AndV3(string root)
 
 void TestMapVersions(string root)
 {
+    string v1Path = Path.Combine(root, "synthetic-v1.map");
+    File.WriteAllBytes(v1Path, BuildMapV1());
+    MapDocument v1 = MapReader.Read(v1Path);
+    Check(v1.Format == 1 && v1.Width == 2 && v1.Height == 1, "Synthetic v1 map header mismatch.");
+    Check((v1.Cells[0].BackImage & 0x20000000) != 0 && !v1.Cells[0].Walkable, "Synthetic v1 blocking flag mismatch.");
+    Check(v1.Cells[0].FrontIndex == 90 && v1.Cells[0].FishingCell, "Synthetic v1 first cell mismatch.");
+    Check(v1.Cells[1].MiddleImage == 5 && v1.Cells[1].FrontImage == 6 && v1.Cells[1].Light == 12,
+        "Synthetic v1 second cell was not read at the 15-byte stride.");
+    Check(v1.Cells[1].FrontIndex == 2 && v1.Cells[1].Walkable, "Synthetic v1 second cell state mismatch.");
+
+    bool truncatedRejected = false;
+    try
+    {
+        string truncatedPath = Path.Combine(root, "truncated-v1.map");
+        File.WriteAllBytes(truncatedPath, BuildMapV1()[..^1]);
+        MapReader.Read(truncatedPath);
+    }
+    catch (InvalidDataException)
+    {
+        truncatedRejected = true;
+    }
+    Check(truncatedRejected, "Truncated v1 map payload was accepted.");
+
     string v2Path = Path.Combine(root, "synthetic-v2.map");
     File.WriteAllBytes(v2Path, BuildMapV2());
     MapDocument v2 = MapReader.Read(v2Path);
@@ -136,6 +160,22 @@ void TestPngWriter(string root)
     DecodedPng png = ReadPng(File.ReadAllBytes(path));
     Check(png.Width == 2 && png.Height == 2, "PNG dimensions mismatch.");
     Check(png.Rgba.SequenceEqual(rgba), "PNG RGBA pixels mismatch.");
+}
+
+void TestMapSourceDiscovery(string root)
+{
+    string mapRoot = Path.Combine(root, "discovery-map");
+    Directory.CreateDirectory(Path.Combine(mapRoot, "nested"));
+    File.WriteAllBytes(Path.Combine(mapRoot, "Alpha.MAP"), []);
+    File.WriteAllBytes(Path.Combine(mapRoot, "beta.map"), []);
+    File.WriteAllBytes(Path.Combine(mapRoot, "nested", "alpha.map"), []);
+    File.WriteAllBytes(Path.Combine(mapRoot, "notes.txt"), []);
+
+    IReadOnlyList<AssetMapSource> maps = MapSourceDiscovery.Discover(mapRoot);
+    Check(maps.Count == 2, "Mixed-case map discovery returned the wrong count.");
+    Check(maps.Any(map => map.Id == "Alpha" && map.FilePath.EndsWith("Alpha.MAP", StringComparison.Ordinal)),
+        "Mixed-case uppercase map extension was not discovered.");
+    Check(maps.Any(map => map.Id == "beta"), "Lowercase map extension was not discovered.");
 }
 
 void TestHashStability()
@@ -499,6 +539,68 @@ static byte[] BuildMapV2()
     bytes[offset + 12] = 0;
     bytes[offset + 13] = 1;
     return bytes;
+}
+
+static byte[] BuildMapV1()
+{
+    const int width = 2;
+    const int height = 1;
+    const int headerSize = 54;
+    const int cellStride = 15;
+    byte[] bytes = new byte[headerSize + width * height * cellStride];
+    bytes[0] = 0x10;
+    Encoding.ASCII.GetBytes("Map 2010 Ver 1.0").CopyTo(bytes, 1);
+    short xor = 0x1234;
+    BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(21), (short)(width ^ xor));
+    BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(23), xor);
+    BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(25), (short)(height ^ xor));
+
+    WriteV1Cell(bytes, headerSize,
+        backImage: 0x8000,
+        middleImage: 3,
+        frontImage: 4,
+        doorIndex: 7,
+        doorOffset: 9,
+        frontAnimationFrame: 1,
+        frontAnimationTick: 2,
+        frontIndex: 100,
+        light: 105);
+    WriteV1Cell(bytes, headerSize + cellStride,
+        backImage: 0,
+        middleImage: 5,
+        frontImage: 6,
+        doorIndex: 0,
+        doorOffset: 0,
+        frontAnimationFrame: 0,
+        frontAnimationTick: 0,
+        frontIndex: 0,
+        light: 12);
+    return bytes;
+}
+
+static void WriteV1Cell(
+    byte[] bytes,
+    int offset,
+    int backImage,
+    short middleImage,
+    short frontImage,
+    byte doorIndex,
+    byte doorOffset,
+    byte frontAnimationFrame,
+    byte frontAnimationTick,
+    byte frontIndex,
+    byte light)
+{
+    short xor = 0x1234;
+    BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), backImage ^ unchecked((int)0xAA38AA38));
+    BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(offset + 4), (short)(middleImage ^ xor));
+    BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(offset + 6), (short)(frontImage ^ xor));
+    bytes[offset + 8] = doorIndex;
+    bytes[offset + 9] = doorOffset;
+    bytes[offset + 10] = frontAnimationFrame;
+    bytes[offset + 11] = frontAnimationTick;
+    bytes[offset + 12] = frontIndex;
+    bytes[offset + 13] = light;
 }
 
 static byte[] BuildMapV3()

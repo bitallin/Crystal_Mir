@@ -13,8 +13,8 @@
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
-| 浏览器直玩 | W0 已闭环，W1/W2 部分完成 | 独立 `web-client/`（TypeScript/Vite/PixiJS v8/Preact）、`Crystal.Web.Gateway`、`Crystal.WebAssets`、WebAssetCompiler、协议样本和 Playwright 冒烟已建立；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、背包内物品移动、NPC/商店、角色创建/删除和重连已有实现；真实素材动画、音效、Safari/真机和性能验收未完成 |
-| Web 资源管线 | 已完成初版 | `.lib` v2/v3 与 `.map` v2/v3 严格解析、PNG 图集/遮罩、32 字节 `cells.bin`、`meta.json`/`manifest.json`、地图库映射、确定性哈希；编译器强制 `--build-hash`，缺失图库或重复 ID 直接失败；客户端校验地图和图库文件哈希后使用 Blob URL；真实素材与音频转码未验证/未实现 |
+| 浏览器直玩 | W0 已闭环，W1/W2 部分完成 | 独立 `web-client/`（TypeScript/Vite/PixiJS v8/Preact）、`Crystal.Web.Gateway`、`Crystal.WebAssets`、WebAssetCompiler、协议样本和 Playwright 冒烟已建立；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、背包内物品移动、NPC/商店、角色创建/删除和重连已有实现；Jev 真实 496 张活跃 `.map` 已编译并通过 V1/V100 浏览器冒烟，真实区服 `ClientVersion` 白名单已联调；真实 `.lib`/音效动画、完整真实账号登录选角进图、Safari/真机和性能验收未完成 |
+| Web 资源管线 | 已完成初版，真实地图已回归 | `.lib` v2/v3 与 `.map` v0～v7/v100 解析、PNG 图集/遮罩、32 字节 `cells.bin`、`meta.json`/`manifest.json`、地图库映射、确定性哈希；编译器强制 `--build-hash`，缺失图库或重复 ID 直接失败；Jev 1,698 张真实地图全部解析、496 张活跃地图两次编译字节一致；真实 `.lib` 与音频转码仍未验证/未实现 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
@@ -39,6 +39,18 @@
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-19（真实地图资源回归与区服 Web 版本门禁）
+
+- 范围：执行浏览器路线图下一步的真实地图资源回归和区服 `clientBuildHash` 门禁联调；不触碰 `Envir`/`Map` 游戏逻辑，不引入客户端权威，不提交真实素材或生成物。
+- 真实地图：用 `.external/Crystal.Database/Jev/Maps` 扫描 1,698 张地图，全部解析成功，格式分布 `0:237`、`1:1441`、`3:1`、`5:6`、`100:13`，共 61,255,923 格；发现并修复 Web V1 地图按 17 字节/格读取的错误，真实格式为 15 字节/格，并补 `NormalizeBackBits` 与带文件名的错误上下文。
+- 资源编译：编译 Jev 顶层 496 张活跃地图（排除 `Unused` 同名地图），两次构建均为 730 MB、993 个文件、manifest 与逐文件哈希完全一致；`manifest.json` SHA256 为 `141d88aa…abae031`，格式分布 `1:478`、`3:1`、`5:5`、`100:12`，共 23,790,791 格。256 条告警均为真实 `.lib` 图库缺失，浏览器按设计使用地形占位。
+- 大小写修复：Linux 下 `*.map` 枚举区分大小写，漏掉 `LABYBUY01.MAP`、`LABYBUY02.MAP`、`SNAKE.MAP`；新增大小写不敏感的 `MapSourceDiscovery`，编译器改用该入口，并补混合大小写与重复 ID 测试。
+- 浏览器回归：新增 `scripts/test-web-real-maps.sh`，自动编译真实地图并分别用真实 V1 地图 `0100` 和真实 V100 地图 `0` 跑桌面/移动横屏/竖屏 Playwright 冒烟，全部通过；`scripts/test-browser-client.py` 支持 `CRYSTAL_BROWSER_MAP` 和 `CRYSTAL_BROWSER_ASSET_MANIFEST_URL`，默认真实 fixture 路径不变。
+- 版本门禁：新增 `scripts/test-web-version-gate.sh`，用真实 ZoneServer（`CheckVersion=True`、白名单写入 Web 构建哈希）+ 真实 Gateway + WebSocket 验证：正确哈希返回 `ClientVersion.Result=1`，错误哈希返回 `0` 并由区服记录 `Wrong Client Version`；测试需等待区服同 IP 5 秒建连冷却。
+- 验证：`Tests/WebAssets`、`Tests/WebGateway`、`npm run typecheck`、`npm test`（5 个文件、109 项）、`npm run build`、`scripts/test-browser-client.sh`、`scripts/test-web-real-maps.sh`、`scripts/test-web-version-gate.sh` 全部通过；`clientBuildHash` 仍为 `sha256:83d8e0e11e9d1adb34fbd332aeaeecc611c111cba0231342ea876e5ebf8c10e2`。
+- 未验证：真实 `Client/Data/*.lib`、`Client/Sound`、`--map-libraries` 全量编译、真实角色/怪物/NPC 图集动画、门/混合图块/光照/音效、完整真实账号登录/选角/创建角色/进图/移动、Safari、iPhone/Android 真机、帧率和 30 分钟内存。
+- 下一步：准备真实 `Client/Data` 与 `Client/Sound`，用当前构建哈希执行 `--all-maps --map-libraries`，再补完整登录选角进图与动画/门/光照/音效；之后进入 W3 真机与性能验收。
 
 ### 2026-11-19（AGENTS 浏览器客户端开发规范，精简版）
 
@@ -610,7 +622,7 @@
 8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
 9. 授权、许可证和素材合规不纳入当前研究项目计划；Windows 客户端运行资源仍按外部依赖准备。
 10. 若 ADR 0016 通过评审，按 `docs/architecture/08-vera20k-benchmark-and-refactor.md` 的 P0 先补预会话握手、玩家只读接口、节点目录和版本兼容矩阵。
-11. 浏览器轨道优先用真实 `Client/Data`、`Client/Map` 跑全量资源编译，在测试区服配置 `clientBuildHash` 完成真实登录/选角/进图/移动回归。
+11. 浏览器轨道：Jev 真实 `.map` 全量解析、496 张活跃地图确定性编译和 `ClientVersion` 门禁已联调；下一步准备真实 `Client/Data`、`Client/Sound`，执行 `--all-maps --map-libraries`，完成真实账号登录/选角/建角/进图/移动回归。
 12. 补真实角色/怪物/NPC 图集动画、地图门/混合图块/光照和音效，再执行 W3 的 Safari、iPhone、Android、帧率、30 分钟内存和视觉回归。
 
 ## 7. 更新规则

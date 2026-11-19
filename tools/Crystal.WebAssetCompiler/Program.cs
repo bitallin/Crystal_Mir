@@ -45,15 +45,10 @@ internal static class Program
         if (options.AllMaps)
         {
             string mapRoot = Path.Combine(options.ClientRoot, "Map");
-            if (Directory.Exists(mapRoot))
+            foreach (AssetMapSource source in MapSourceDiscovery.Discover(mapRoot))
             {
-                foreach (string path in Directory.EnumerateFiles(mapRoot, "*.map", SearchOption.AllDirectories)
-                             .OrderBy(static value => value, StringComparer.Ordinal))
-                {
-                    string id = Path.GetFileNameWithoutExtension(path);
-                    if (maps.All(value => !string.Equals(value.Id, id, StringComparison.OrdinalIgnoreCase)))
-                        maps.Add(new AssetMapSource(id, path));
-                }
+                if (maps.All(value => !string.Equals(value.Id, source.Id, StringComparison.OrdinalIgnoreCase)))
+                    maps.Add(source);
             }
         }
 

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import mimetypes
+import os
 import socket
 import struct
 import sys
@@ -16,6 +17,16 @@ ASSETS = Path(sys.argv[2]).resolve()
 DIST = ROOT / "web-client" / "dist"
 BUILD = json.loads((DIST / "client-build.json").read_text(encoding="utf-8"))
 BUILD_HASH = BUILD["clientBuildHash"]
+MAP_ID = os.environ.get("CRYSTAL_BROWSER_MAP", "0")
+ASSET_MANIFEST_URL = os.environ.get("CRYSTAL_BROWSER_ASSET_MANIFEST_URL", "/assets/dev/manifest.json")
+if not ASSET_MANIFEST_URL.startswith("/assets/"):
+    raise SystemExit(f"Asset manifest URL must start with /assets/: {ASSET_MANIFEST_URL}")
+MANIFEST_FILE = ASSETS / ASSET_MANIFEST_URL[len("/assets/"):]
+if ".." in MANIFEST_FILE.parts:
+    raise SystemExit(f"Asset manifest URL escapes the asset root: {ASSET_MANIFEST_URL}")
+MANIFEST = json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+if MAP_ID not in MANIFEST.get("maps", {}):
+    raise SystemExit(f"Map '{MAP_ID}' is not present in {ASSETS / 'manifest.json'}")
 FIXTURES = {
     case["name"]: bytes.fromhex(case["hex"])
     for case in json.loads((ROOT / "tests" / "fixtures" / "protocol" / "cases.json").read_text(encoding="utf-8"))["cases"]
@@ -44,7 +55,7 @@ def login_success() -> bytes:
 
 def map_information() -> bytes:
     body = struct.pack("<i", 0)
-    body += pack_string("0")
+    body += pack_string(MAP_ID)
     body += pack_string("测试地图")
     body += struct.pack("<HHBBBHH", 0, 0, 4, 0, 0, 0, 0)
     return frame(17, body)
@@ -92,8 +103,8 @@ async def bootstrap_handler(_request: web.Request) -> web.Response:
         "protocol": "crystal-v1",
         "zoneId": "default",
         "wsUrl": "/ws/game?zone=default",
-        "assetVersion": "dev",
-        "assetManifestUrl": "/assets/dev/manifest.json",
+        "assetVersion": MANIFEST.get("assetVersion", "dev"),
+        "assetManifestUrl": ASSET_MANIFEST_URL,
         "clientBuildHash": BUILD_HASH,
     })
 

@@ -45,19 +45,27 @@ public static class MapReader
         if (bytes.Length < 4) throw new InvalidDataException($"Map {fileName} is too small.");
 
         int format = DetectFormat(bytes);
-        ParsedMap map = format switch
+        ParsedMap map;
+        try
         {
-            0 => ReadV0(bytes),
-            1 => ReadV1(bytes),
-            2 => ReadV2OrV3(bytes, 2),
-            3 => ReadV2OrV3(bytes, 3),
-            4 => ReadV4(bytes),
-            5 => ReadV5(bytes),
-            6 => ReadV6(bytes),
-            7 => ReadV7(bytes),
-            100 => ReadV100(bytes),
-            _ => throw new InvalidDataException($"Unsupported map format {format} in {fileName}."),
-        };
+            map = format switch
+            {
+                0 => ReadV0(bytes),
+                1 => ReadV1(bytes),
+                2 => ReadV2OrV3(bytes, 2),
+                3 => ReadV2OrV3(bytes, 3),
+                4 => ReadV4(bytes),
+                5 => ReadV5(bytes),
+                6 => ReadV6(bytes),
+                7 => ReadV7(bytes),
+                100 => ReadV100(bytes),
+                _ => throw new InvalidDataException($"Unsupported map format {format} in {fileName}."),
+            };
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException or IndexOutOfRangeException or EndOfStreamException)
+        {
+            throw new InvalidDataException($"Map {fileName} is malformed (format {format}): {exception.Message}", exception);
+        }
 
         int[] libraryIds = map.Cells
             .SelectMany(static cell => new[] { (int)cell.BackIndex, (int)cell.MiddleIndex, (int)cell.FrontIndex })
@@ -156,6 +164,9 @@ public static class MapReader
         int width = view.Int16(21) ^ view.Int16(23);
         int height = view.Int16(25) ^ view.Int16(23);
         MapCell[] cells = NewCells(width, height);
+        long expectedLength = 54L + (long)width * height * 15;
+        if (expectedLength > bytes.Length)
+            throw new InvalidDataException($"Map V1 is truncated: expected at least {expectedLength} bytes for {width}x{height}, got {bytes.Length}.");
         int offset = 54;
         int xor = view.Int16(23);
         Fill(cells, width, height, (cell, x, y) =>
@@ -173,8 +184,9 @@ public static class MapReader
             if (cell.FrontIndex == 102) cell.FrontIndex = 90;
             if (cell.FrontIndex >= 255) cell.FrontIndex = -1;
             cell.Light = bytes[offset + 13];
+            NormalizeBackBits(cell);
             cell.FishingCell = cell.Light is >= 100 and <= 119;
-            offset += 17;
+            offset += 15;
         });
         return new ParsedMap(width, height, cells);
     }
