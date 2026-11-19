@@ -99,6 +99,39 @@ dotnet run --project tools/Crystal.WebAssetCompiler -- \
   --map-libraries
 ```
 
+真实 Jev 客户端素材回归示例（素材根目录不入库）：
+
+```bash
+HASH="$(node -e 'const fs=require("node:fs");console.log(JSON.parse(fs.readFileSync("web-client/dist/client-build.json","utf8")).clientBuildHash)')"
+OUT=".external/jev-client/web-assets/real-$(date -u +%Y%m%d%H%M%S)"
+dotnet run --project tools/Crystal.WebAssetCompiler -- \
+  --client-root .external/jev-client/client/Client \
+  --out "$OUT" \
+  --version "real-$(date -u +%Y%m%d%H%M%S)" \
+  --build-hash "$HASH" \
+  --all-maps \
+  --map-libraries
+```
+
+真实素材校验必须使用 `CRYSTAL_BROWSER_REQUIRE_MAP_LIBRARIES=1`。该模式会等待当前地图引用的全部 `frames.json`、图集 PNG 和遮罩页响应完成，并拒绝 4xx/5xx 或失败请求；仅等待页面出现不足以证明图库已经加载。
+
+```bash
+CRYSTAL_BROWSER_MAP=0100 \
+CRYSTAL_BROWSER_ASSET_MANIFEST_URL=/assets/manifest.json \
+CRYSTAL_BROWSER_REQUIRE_MAP_LIBRARIES=1 \
+CRYSTAL_BROWSER_TIMEOUT_MS=300000 \
+python3 scripts/test-browser-client.py "$PWD" "$OUT"
+```
+
+`CRYSTAL_BROWSER_TIMEOUT_MS` 默认 15 秒；真实大图库可调大。真实 `.lib` 中的 GDI 行/列对齐像素由 `LibraryReader` 按声明尺寸裁剪，不能把填充字节写入图集。
+
+真实账号链路还会暴露两类 legacy 宿主约束：
+
+- 浏览器 `KeepAlive` 固定 5 秒发送一次，低于区服默认 10 秒空闲超时；不要把心跳间隔改回分钟级。
+- `Settings.Load()` 必须以 ZoneServer 当前 `--content-root` 下的 `Configs/Setup.ini` 为准。配置 reader 不能在进程工作目录切换前静态读取，否则超时、版本门禁和其他宿主设置会悄悄回退默认值。
+
+当前已知阻断是 1 GiB 级真实图库哈希/纹理准备期间浏览器主线程可能长时间停顿，压住心跳并导致会话超时。修复前不能把“已进入真实地图”写成“真实移动闭环已通过”；需要把重负载移出主线程或改成可让出事件循环的增量处理，并补长加载会话存活回归。
+
 ## 网关配置
 
 常用环境变量：
@@ -134,7 +167,7 @@ dotnet run --project Tests/ZoneVersionGate
 ./scripts/test-web-version-gate.sh
 ```
 
-`test-browser-client.sh` 会构建 Web 客户端、生成临时地图资源、启动假区服并用 Playwright Chromium 验证桌面、移动横屏和竖屏门禁。需要 Python `aiohttp`、`playwright` 和 Chromium；依赖见 `scripts/requirements-browser-test.txt`。
+`test-browser-client.sh` 会构建 Web 客户端、生成临时地图资源、启动假区服并用 Playwright Chromium 验证桌面、移动横屏和竖屏门禁。需要 Python `aiohttp`、`playwright` 和 Chromium；依赖见 `scripts/requirements-browser-test.txt`。默认 fixture 只验证交互和空图库降级；真实图库回归必须按上面的 `CRYSTAL_BROWSER_REQUIRE_MAP_LIBRARIES=1` 运行。
 
 `test-web-real-maps.sh` 默认读取 `.external/Crystal.Database/Jev/Maps`，编译顶层活跃地图，并用真实 V1、V100 地图各跑一次浏览器冒烟。可用 `CRYSTAL_CLIENT_MAP_ROOT` 指定其他真实地图根目录，用 `CRYSTAL_WEB_REAL_MAP_OUT` 指定产物目录，或 `CRYSTAL_SKIP_WEB_BUILD=1` 跳过重复 Web 构建。缺少 `.lib` 时只产生 `Map library ... placeholder terrain` 告警，这是当前预期；准备 `Client/Data` 后应改用 `--map-libraries` 并消除该告警。
 

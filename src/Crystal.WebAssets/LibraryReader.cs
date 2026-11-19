@@ -117,8 +117,7 @@ public static class LibraryReader
             bool hasMask = (shadow & 0x80) != 0;
             byte[] compressedMain = reader.ReadBytes(length);
             byte[] main = Decompress(compressedMain);
-            if ((long)width * height * 4 != main.Length)
-                throw new InvalidDataException($"Image {i} in {fileName} has an invalid pixel payload.");
+            main = NormalizePixels(main, width, height, fileName, i, "pixel");
             byte[]? mask = null;
             int maskWidth = 0, maskHeight = 0, maskX = 0, maskY = 0;
 
@@ -135,9 +134,7 @@ public static class LibraryReader
                 if (maskWidth <= 0 || maskHeight <= 0 || maskLength <= 0 || maskLength > bytes.Length - stream.Position)
                     throw new InvalidDataException($"Image {i} in {fileName} has an invalid mask payload.");
 
-                mask = Decompress(reader.ReadBytes(maskLength));
-                if ((long)maskWidth * maskHeight * 4 != mask.Length)
-                    throw new InvalidDataException($"Image {i} in {fileName} has an invalid mask pixel payload.");
+                mask = NormalizePixels(Decompress(reader.ReadBytes(maskLength)), maskWidth, maskHeight, fileName, i, "mask pixel");
             }
 
             images.Add(new LibImage
@@ -220,5 +217,22 @@ public static class LibraryReader
         using MemoryStream output = new();
         gzip.CopyTo(output);
         return output.ToArray();
+    }
+
+    private static byte[] NormalizePixels(byte[] pixels, int width, int height, string fileName, int imageIndex, string label)
+    {
+        int stride = width * 4;
+        int paddedStride = ((width + 3) / 4) * 4 * 4;
+        int paddedHeight = ((height + 3) / 4) * 4;
+        long expected = (long)stride * height;
+
+        if (pixels.Length == expected) return pixels;
+        if (pixels.Length != (long)paddedStride * paddedHeight && pixels.Length != (long)paddedStride * height && pixels.Length != (long)stride * paddedHeight)
+            throw new InvalidDataException($"Image {imageIndex} in {fileName} has an invalid {label} payload.");
+
+        byte[] normalized = new byte[expected];
+        for (int row = 0; row < height; row++)
+            Buffer.BlockCopy(pixels, row * paddedStride, normalized, row * stride, stride);
+        return normalized;
     }
 }

@@ -35,7 +35,7 @@ namespace Server
             NPCPreviewPath = Path.Combine(EnvirPath, "Previews", "NPC"),
             Previews = Path.Combine(EnvirPath, "Previews");
 
-        private static readonly InIReader Reader = new InIReader(Path.Combine(ConfigPath, "Setup.ini"));
+        private static InIReader Reader = null;
 
         public static Notice Notice;
 
@@ -387,7 +387,9 @@ namespace Server
         }
 
         public static void Load()
-        {            
+        {
+            Reader = new InIReader(Path.Combine(ConfigPath, "Setup.ini"));
+
             //General
             VersionPath = Reader.ReadString("General", "VersionPath", VersionPath);
             VersionHashValues = Reader.ReadString("General", "VersionHashValues", VersionHashValues);
@@ -679,6 +681,8 @@ namespace Server
 
         public static void Save()
         {
+            Reader ??= new InIReader(Path.Combine(ConfigPath, "Setup.ini"));
+
             //General
             Reader.Write("General", "VersionPath", VersionPath);
             Reader.Write("General", "VersionHashValues", VersionHashValues);

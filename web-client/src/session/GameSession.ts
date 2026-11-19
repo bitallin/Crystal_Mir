@@ -573,7 +573,7 @@ export class GameSession {
       if (this.connection?.isOpen) {
         this.send({ kind: "KeepAlive", time: BigInt(Math.floor(performance.now())) }, true);
       }
-    }, 60_000);
+    }, 5_000);
   }
 
   private clearKeepAlive(): void {

@@ -112,9 +112,10 @@ public static class WebAssetCompilerService
                 mapLibraries[libraryId.ToString()] = $"maplib-{libraryId}";
 
                 if (!request.IncludeMapLibraries) continue;
-                string libraryPath = Path.Combine(request.ClientRoot, "Data", relative.Replace('/', Path.DirectorySeparatorChar) + ".lib");
-                if (!File.Exists(libraryPath))
-                    throw new FileNotFoundException($"Map library {libraryId} is referenced but missing.", libraryPath);
+                string expectedLibraryPath = Path.Combine(request.ClientRoot, "Data", relative.Replace('/', Path.DirectorySeparatorChar) + ".lib");
+                string? libraryPath = ClientAssetPath.ResolveDataFile(request.ClientRoot, relative + ".lib");
+                if (libraryPath is null)
+                    throw new FileNotFoundException($"Map library {libraryId} is referenced but missing.", expectedLibraryPath);
 
                 string libraryIdText = $"maplib-{libraryId}";
                 if (!libraries.ContainsKey(libraryIdText))

@@ -13,9 +13,11 @@ try
     TestLibraryV2AndV3(tempRoot);
     TestMapVersions(tempRoot);
     TestMapSourceDiscovery(tempRoot);
+    TestClientAssetPathResolution(tempRoot);
     TestPngWriter(tempRoot);
     TestHashStability();
     TestMapLibraryCatalog();
+    TestClientMapLibraryCaseResolution(tempRoot, Path.Combine(repositoryRoot, "tests", "fixtures", "content", "Maps", "0.map"));
     TestDeterministicCompile(tempRoot, Path.Combine(repositoryRoot, "tests", "fixtures", "content", "Maps", "0.map"));
     TestMissingBuildHashFails(tempRoot, Path.Combine(repositoryRoot, "tests", "fixtures", "content", "Maps", "0.map"));
     TestMissingMapLibraryFails(tempRoot, Path.Combine(repositoryRoot, "tests", "fixtures", "content", "Maps", "0.map"));
@@ -90,6 +92,31 @@ void TestLibraryV2AndV3(string root)
     Check(v3.Frames.TryGetValue(0, out LibFrameData? frame) && frame.Count == 6 && frame.Reverse && frame.Blend,
         "Synthetic v3 frame table mismatch.");
     Check(v3.Images[0].MaskOffsetX == -1 && v3.Images[0].MaskOffsetY == 2, "Synthetic v3 mask offset mismatch.");
+
+    LibImage padded = MakeImage(0, 5, 1, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    padded = new LibImage
+    {
+        Index = padded.Index,
+        Width = padded.Width,
+        Height = padded.Height,
+        OffsetX = padded.OffsetX,
+        OffsetY = padded.OffsetY,
+        ShadowX = padded.ShadowX,
+        ShadowY = padded.ShadowY,
+        Shadow = padded.Shadow,
+        HasMask = false,
+        MaskWidth = 0,
+        MaskHeight = 0,
+        MaskOffsetX = 0,
+        MaskOffsetY = 0,
+        MainBgra = [.. padded.MainBgra, .. new byte[12]],
+        MaskBgra = null,
+    };
+    string paddedPath = Path.Combine(root, "padded.lib");
+    File.WriteAllBytes(paddedPath, BuildLibrary(2, [padded], null));
+    LibDocument paddedDocument = LibraryReader.Read(paddedPath);
+    Check(paddedDocument.Images[0].MainBgra.SequenceEqual(padded.MainBgra[..20]),
+        "Padded library rows were not trimmed to the image dimensions.");
 
     bool truncatedRejected = false;
     try
@@ -176,6 +203,33 @@ void TestMapSourceDiscovery(string root)
     Check(maps.Any(map => map.Id == "Alpha" && map.FilePath.EndsWith("Alpha.MAP", StringComparison.Ordinal)),
         "Mixed-case uppercase map extension was not discovered.");
     Check(maps.Any(map => map.Id == "beta"), "Lowercase map extension was not discovered.");
+}
+
+void TestClientAssetPathResolution(string root)
+{
+    string clientRoot = Path.Combine(root, "case-client");
+    string libraryDir = Path.Combine(clientRoot, "Data", "Map", "WemadeMir2");
+    Directory.CreateDirectory(libraryDir);
+    File.WriteAllBytes(Path.Combine(libraryDir, "SmTiles.Lib"), [1, 2, 3]);
+    File.WriteAllBytes(Path.Combine(libraryDir, "Objects27.lib"), [4, 5, 6]);
+    File.WriteAllBytes(Path.Combine(libraryDir, "Objects27.Lib"), [7, 8, 9]);
+    Directory.CreateDirectory(Path.Combine(clientRoot, "Map"));
+    File.WriteAllBytes(Path.Combine(clientRoot, "Map", "Alpha.MAP"), []);
+
+    string? resolved = ClientAssetPath.ResolveDataFile(clientRoot, "Map/WemadeMir2/Smtiles.lib");
+    Check(resolved is not null && Path.GetFileName(resolved) == "SmTiles.Lib",
+        "Case-insensitive Data path did not resolve the real library file.");
+    Check(ClientAssetPath.ResolveDataFile(clientRoot, "map/wemademir2/smtiles.LIB") == resolved,
+        "Case-insensitive Data path is not stable across directory and extension casing.");
+    Check(ClientAssetPath.ResolveDataFile(clientRoot, "Map/WemadeMir2/Missing.Lib") is null,
+        "Missing Data path unexpectedly resolved.");
+    Check(ClientAssetPath.ResolveDataFile(clientRoot, "../outside.lib") is null,
+        "Path traversal was accepted by the Data asset resolver.");
+    Check(ClientAssetPath.ResolveMapFile(clientRoot, "alpha.map") is not null,
+        "Case-insensitive Map path did not resolve the real map file.");
+    string? exact = ClientAssetPath.ResolveDataFile(clientRoot, "Map/WemadeMir2/Objects27.lib");
+    Check(exact is not null && Path.GetFileName(exact) == "Objects27.lib",
+        "Exact Data path did not win over a case-only duplicate.");
 }
 
 void TestHashStability()
@@ -346,6 +400,40 @@ void TestMissingMapLibraryFails(string root, string fixtureMap)
         failed = true;
     }
     Check(failed, "Missing map library was silently accepted with IncludeMapLibraries=true.");
+}
+
+void TestClientMapLibraryCaseResolution(string root, string fixtureMap)
+{
+    string clientRoot = Path.Combine(root, "case-map-client");
+    Directory.CreateDirectory(Path.Combine(clientRoot, "Map"));
+    string mapPath = Path.Combine(clientRoot, "Map", "0.map");
+    File.Copy(fixtureMap, mapPath);
+
+    MapDocument document = MapReader.Read(mapPath);
+    byte[] library = BuildLibrary(2, [MakeImage(0, 1, 1, [1, 2, 3, 255])], null);
+    foreach (int libraryId in document.LibraryIds)
+    {
+        string? relative = MapLibraryCatalog.Resolve(libraryId);
+        Check(relative is not null, $"Fixture map references unknown library {libraryId}.");
+        string lowered = string.Join('/', relative!.Split('/').Select(static part => part.ToLowerInvariant())) + ".lib";
+        string path = Path.Combine(clientRoot, "Data", lowered.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, library);
+    }
+
+    WebAssetCompileResult result = WebAssetCompilerService.Compile(new WebAssetCompileRequest
+    {
+        ClientRoot = clientRoot,
+        OutRoot = Path.Combine(root, "out-case-map-lib"),
+        AssetVersion = "test-case-map-lib",
+        ClientBuildHash = "sha256:web-build",
+        Libraries = [],
+        Maps = [new AssetMapSource("0", mapPath)],
+        IncludeMapLibraries = true,
+    });
+    Check(result.Warnings.Count == 0, "Case-insensitive map library compile emitted warnings: " + string.Join(" | ", result.Warnings));
+    Check(result.Manifest.MapLibraries.Count == document.LibraryIds.Count,
+        "Case-insensitive map library compile did not register every map library.");
 }
 
 void TestMissingBuildHashFails(string root, string fixtureMap)

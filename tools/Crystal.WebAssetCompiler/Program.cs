@@ -27,18 +27,22 @@ internal static class Program
         List<AssetLibrarySource> libraries = [];
         foreach (string item in options.Libraries)
         {
-            string path = Path.IsPathRooted(item) ? item : Path.Combine(options.ClientRoot, "Data", item);
-            if (!path.EndsWith(".lib", StringComparison.OrdinalIgnoreCase)) path += ".lib";
-            if (!File.Exists(path)) throw new FileNotFoundException($"Library not found: {path}");
+            string relative = item.EndsWith(".lib", StringComparison.OrdinalIgnoreCase) ? item : item + ".lib";
+            string? path = Path.IsPathRooted(relative)
+                ? (File.Exists(relative) ? relative : null)
+                : ClientAssetPath.ResolveDataFile(options.ClientRoot, relative);
+            if (path is null) throw new FileNotFoundException($"Library not found: {relative}");
             libraries.Add(new AssetLibrarySource(Path.GetFileNameWithoutExtension(path), path));
         }
 
         List<AssetMapSource> maps = [];
         foreach (string item in options.Maps)
         {
-            string path = Path.IsPathRooted(item) ? item : Path.Combine(options.ClientRoot, "Map", item);
-            if (!path.EndsWith(".map", StringComparison.OrdinalIgnoreCase)) path += ".map";
-            if (!File.Exists(path)) throw new FileNotFoundException($"Map not found: {path}");
+            string relative = item.EndsWith(".map", StringComparison.OrdinalIgnoreCase) ? item : item + ".map";
+            string? path = Path.IsPathRooted(relative)
+                ? (File.Exists(relative) ? relative : null)
+                : ClientAssetPath.ResolveMapFile(options.ClientRoot, relative);
+            if (path is null) throw new FileNotFoundException($"Map not found: {relative}");
             maps.Add(new AssetMapSource(Path.GetFileNameWithoutExtension(path), path));
         }
 

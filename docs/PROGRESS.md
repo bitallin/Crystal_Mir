@@ -12,9 +12,9 @@
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照、区服指标和契约边界检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
-| 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
-| 浏览器直玩 | W0 已闭环，W1/W2 部分完成 | 独立 `web-client/`（TypeScript/Vite/PixiJS v8/Preact）、`Crystal.Web.Gateway`、`Crystal.WebAssets`、WebAssetCompiler、协议样本和 Playwright 冒烟已建立；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、背包内物品移动、NPC/商店、角色创建/删除和重连已有实现；Jev 真实 496 张活跃 `.map` 已编译并通过 V1/V100 浏览器冒烟，真实区服 `ClientVersion` 白名单已联调；真实 `.lib`/音效动画、完整真实账号登录选角进图、Safari/真机和性能验收未完成 |
-| Web 资源管线 | 已完成初版，真实地图已回归 | `.lib` v2/v3 与 `.map` v0～v7/v100 解析、PNG 图集/遮罩、32 字节 `cells.bin`、`meta.json`/`manifest.json`、地图库映射、确定性哈希；编译器强制 `--build-hash`，缺失图库或重复 ID 直接失败；Jev 1,698 张真实地图全部解析、496 张活跃地图两次编译字节一致；真实 `.lib` 与音频转码仍未验证/未实现 |
+| 外部资源 | 已完成真实客户端素材准备 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；Jev `Client With Monk` 已解压到 `.external/jev-client/client/Client`，含 2,304 个 `.lib`、624 个音效文件和 479 张可覆盖地图；真实素材和生成物不入库 |
+| 浏览器直玩 | W0 已闭环，W1/W2 部分完成 | 独立 `web-client/`（TypeScript/Vite/PixiJS v8/Preact）、`Crystal.Web.Gateway`、`Crystal.WebAssets`、WebAssetCompiler、协议样本和 Playwright 冒烟已建立；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、背包内物品移动、NPC/商店、角色创建/删除和重连已有实现；真实 479 张地图与 45 个图库已完成确定性编译，真实 V5/V1/V100 地图经严格资源加载断言通过浏览器三上下文冒烟，真实 ZoneServer + Gateway 的 `ClientVersion` 门禁已联调；临时真实账号已通过浏览器完成登录、创建角色和进入 `3` 号真实地图，但大图库加载期间的会话超时仍阻断浏览器移动验收；真实角色/怪物/NPC 动画、门/光照/音效、Safari/真机和性能验收未完成 |
+| Web 资源管线 | 已完成初版，真实图库已回归 | `.lib` v2/v3 与 `.map` v0～v7/v100 解析、PNG 图集/遮罩、32 字节 `cells.bin`、`meta.json`/`manifest.json`、地图库映射、确定性哈希；编译器强制 `--build-hash`，缺失图库或重复 ID 直接失败；Jev 1,698 张真实地图全部解析，真实 479 张地图 + 45 个图库两次编译 manifest 与逐文件字节一致；真实音频转码、角色/怪物/NPC 图库动画仍未实现 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
@@ -39,6 +39,31 @@
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-19（真实账号链路探测、心跳与配置加载修复）
+
+- 范围：在真实 Jev `Server.MirDB`、真实 ZoneServer、真实 Gateway、真实浏览器和真实图库上推进登录/选角/建角/进图/移动闭环；真实素材只落在 `.external/`，不提交生成物。
+- 启动修复：`Settings` 原先在静态初始化时固定打开 `./Configs/Setup.ini`，会早于 ZoneServer 切换 `--content-root`，导致区服配置可能回退默认值。改为 `Load()` 时按当前内容根重新打开配置，`Save()` 在未加载时补建 reader。
+- 心跳修复：浏览器 `KeepAlive` 由 60 秒改为 5 秒，低于 legacy 区服默认 10 秒空闲超时；该修复已通过类型检查、109 项 Web 单测和新构建。
+- 真实链路：用临时内容副本把测试出生点从缺 `WemadeMir3/Snow/Object1c` 的 `0` 号图移到有完整图库的 `3` 号图，未修改源素材或源数据库。临时账号经 Gateway 创建后，浏览器完成登录、创建角色和进入 `3` 号真实地图；该地图使用 26 个真实图库、约 1.1 GiB 资源。
+- 阻断：大图库加载后会话仍以 `Connection timed out` 结束，浏览器移动指令发出但服务端会话已断开。当前判断为图库哈希/纹理准备期间主线程停顿压住 5 秒心跳，或 legacy 超时配置仍存在未定位路径；移动闭环不算通过。
+- 严格回归：用新构建哈希 `sha256:96004c96cfc6bd7b5479da94ed75d32927ccd2a0745aa0462401351263a434e4` 重新编译 `3`、`HKR`、`0100`、`CL00` 与 26 个真实图库，四张地图均通过桌面/移动横屏/竖屏严格资源加载和 fallback toast 拒绝断言。
+- 自动化：`npm run typecheck`、`npm test`（5 个文件、109 项）、`npm run build`、`scripts/test-browser-client.sh`、`scripts/test.sh`（358 项物品安全、39 项内容快照、80 项内容编辑器、Web assets/gateway 等）和 `scripts/check-boundaries.sh` 通过；`git diff --check` 通过。`test.sh` 仍只有 NuGet 漏洞源不可达的既有 `NU1900` 告警。
+- 未验证：真实账号浏览器移动、真实角色/怪物/NPC 动画、门/光照/音效、Safari/真机、帧率和 30 分钟内存。
+- 下一步：把大图库哈希/准备移出主线程或改为可让出事件循环的增量方案，并补充长加载期间的会话存活回归；通过后再继续真实移动、战斗和 NPC 链路。
+
+### 2026-11-19（真实客户端图库全量编译与严格浏览器回归）
+
+- 范围：把浏览器资源验收从真实 `.map` 推进到真实 `Client/Data` 图库，优先完成资源编译、确定性验证和真实地图加载回归；不改动 `Envir`/`Map` 游戏逻辑，不引入客户端权威，不提交真实素材或生成物。
+- 素材：下载 Jev `Client With Monk`（7,543,876,769 字节，SHA256 `9534eb3c…6ae98`）并解压到 `.external/jev-client/client/Client`；`Data/` 约 8.2 GB、2,304 个 `.lib`，`Sound/` 145 MB、624 个文件。按 Jev 活跃地图引用补齐 61 个地图库，最终支持 479 张地图；排除 17 张缺私有/不完整图库的地图，其中 `0`、`2` 缺 `WemadeMir3/Snow/Object1c`（ID `257`），`n0` 缺 `138`。
+- 兼容修复：新增 `ClientAssetPath`，为 `--lib`、`--map` 和地图库解析提供大小写不敏感且在无精确匹配时唯一回退的路径解析，拒绝 `..` 路径穿越；修复 Linux 下 `SmTiles.Lib`/`Smtiles.lib`、`Objects27.Lib`/`Objects27.lib` 等真实文件差异。`LibraryReader` 增加 GDI 行/列对齐像素裁剪，修复真实 `SmTiles.Lib` 第 117 帧 4×1 图像被解压为 64 字节填充数据的问题。
+- 编译：用当前 `clientBuildHash=sha256:83d8e0e…8c10e2` 对 479 张地图执行 `--all-maps --map-libraries`，生成 45 个地图库、1,506 个文件、2,311,541,814 字节（约 2.15 GiB），格式分布 `1:466`、`5:5`、`100:8`，共 20,895,455 格；无图库缺失告警，`manifest.json` SHA256 为 `b14beec1…cb9e6`。`maplib-0` 单库约 451 MB，是当前最大的真实纹理负载。
+- 确定性：用同一 479 张地图、同一 `assetVersion` 和构建哈希重新编译一次，manifest SHA256 相同，`diff -qr` 退出码 0，1,506 个文件逐字节一致。
+- 浏览器：新增 `CRYSTAL_BROWSER_REQUIRE_MAP_LIBRARIES=1` 严格模式，等待当前地图全部 `frames.json`、图集 PNG 和遮罩页响应完成并拒绝失败请求；真实 `HKR`（V5）、`0100`（V1）、`CL00`（V100）均在桌面 `1440×900`、移动横屏 `844×390`、竖屏 `390×844` 三上下文通过，且 `maplib-0` 的 451 MB 负载完成加载。
+- 版本门禁：`scripts/test-web-version-gate.sh` 使用真实 Jev 内容目录启动 ZoneServer 和 Gateway，当前 Web 构建哈希被接受、错误哈希被拒绝，集成通过。
+- 验证：`Tests/WebAssets`、`scripts/test.sh`（358 项物品安全、39 项内容快照、80 项内容编辑器、区服指标/健康/版本、客户端更新、Web assets/gateway 等）、`scripts/check-boundaries.sh`、`npm run typecheck`、`npm test`（5 个文件、109 项）、`npm run build`、`scripts/test-browser-client.sh`、真实资源确定性编译、三张真实地图严格浏览器冒烟和真实区服版本门禁均通过；`git diff --check` 通过。`scripts/test.sh` 仅出现 NuGet 漏洞源不可达的既有网络告警，不影响退出码。
+- 未验证：完整真实账号登录/选角/建角/进图/移动、真实角色/怪物/NPC 图集动画、门/混合图块/光照/音效、Safari/iPhone/Android 真机、帧率和 30 分钟内存；剩余 17 张地图未纳入，不能宣称 496 张活跃地图全量视觉覆盖。
+- 下一步：用真实账号完成登录/选角/建角/进图/移动回归，再补业务图集动画、音效和 W3 设备/性能/内存验收。
 
 ### 2026-11-19（真实地图资源回归与区服 Web 版本门禁）
 
@@ -592,8 +617,8 @@
 | 类型 | 内容 | 影响 | 处理 |
 | --- | --- | --- | --- |
 | 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
-| 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
-| 资源 | 真实 `.lib`/`.map` 和音频未进入 Web 回归；当前只使用合成资产和 fixture | 真实遮罩、地图 V3、纹理内存、音效和视觉正确性未知 | 准备外部素材根目录后跑全量编译、Playwright 地图回归和真机性能采样 |
+| 资源 | 17 张 Jev 地图依赖未覆盖或不完整的私有图库 | 无法宣称 496 张活跃地图全量覆盖；`0`、`2` 缺 `257`，`n0` 缺 `138` | 保留明确排除清单；补齐真实图库后再纳入，不猜测替代文件 |
+| 资源 | 真实地图图库已进入 Web 回归，但角色/怪物/NPC 图库、门/光照和音效仍未接入 | 真实动画、混合图块和音效视觉正确性未知；`maplib-0` 单库约 451 MB，纹理内存仍需真机测量 | 继续补业务图库与动画，再做设备内存/性能采样 |
 | 版本 | Web 构建哈希已支持区服字面量白名单，但尚未在真实测试区服联调 | 开发环境可用；生产门禁不能仅凭单测宣称闭环 | 在测试区服设置 `VersionHashValues`/`CRYSTAL_ZONE_VERSION_HASH_VALUES`，用真实 Web 构建登录进图 |
 | 设备 | 尚无 iPhone/iPad/Android 真机和 Safari 验收 | 触控、WebGL2、DPR、内存和自动播放策略可能暴露问题 | 按 W3 建立设备矩阵和性能/内存记录 |
 | 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
@@ -622,7 +647,7 @@
 8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
 9. 授权、许可证和素材合规不纳入当前研究项目计划；Windows 客户端运行资源仍按外部依赖准备。
 10. 若 ADR 0016 通过评审，按 `docs/architecture/08-vera20k-benchmark-and-refactor.md` 的 P0 先补预会话握手、玩家只读接口、节点目录和版本兼容矩阵。
-11. 浏览器轨道：Jev 真实 `.map` 全量解析、496 张活跃地图确定性编译和 `ClientVersion` 门禁已联调；下一步准备真实 `Client/Data`、`Client/Sound`，执行 `--all-maps --map-libraries`，完成真实账号登录/选角/建角/进图/移动回归。
+11. 浏览器轨道：真实 479 张地图 + 45 个地图库已确定性编译，V5/V1/V100 严格资源加载冒烟和真实 ZoneServer `ClientVersion` 门禁已通过；下一步用真实账号完成登录/选角/建角/进图/移动回归，并补齐剩余 17 张地图的真实图库或明确保持排除。
 12. 补真实角色/怪物/NPC 图集动画、地图门/混合图块/光照和音效，再执行 W3 的 Safari、iPhone、Android、帧率、30 分钟内存和视觉回归。
 
 ## 7. 更新规则

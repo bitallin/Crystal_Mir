@@ -7,6 +7,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -18,6 +19,8 @@ DIST = ROOT / "web-client" / "dist"
 BUILD = json.loads((DIST / "client-build.json").read_text(encoding="utf-8"))
 BUILD_HASH = BUILD["clientBuildHash"]
 MAP_ID = os.environ.get("CRYSTAL_BROWSER_MAP", "0")
+TIMEOUT_MS = int(os.environ.get("CRYSTAL_BROWSER_TIMEOUT_MS", "15000"))
+REQUIRE_MAP_LIBRARIES = os.environ.get("CRYSTAL_BROWSER_REQUIRE_MAP_LIBRARIES") == "1"
 ASSET_MANIFEST_URL = os.environ.get("CRYSTAL_BROWSER_ASSET_MANIFEST_URL", "/assets/dev/manifest.json")
 if not ASSET_MANIFEST_URL.startswith("/assets/"):
     raise SystemExit(f"Asset manifest URL must start with /assets/: {ASSET_MANIFEST_URL}")
@@ -177,13 +180,43 @@ def run_browser(base_url: str) -> None:
             browser.close()
 
 
+def expected_map_assets(base_url: str) -> set:
+    entry = MANIFEST["maps"][MAP_ID]
+    relative = [entry["metaUrl"], entry["cellsUrl"]]
+    for library_index in entry["libraryIds"]:
+        library_id = MANIFEST["mapLibraries"].get(str(library_index))
+        if not library_id:
+            continue
+        library = MANIFEST["libraries"][library_id]
+        relative.extend([library["framesUrl"], *library["pages"], *library["maskPages"]])
+    return {f"{base_url}/assets/{path}" for path in relative}
+
+
+def wait_for_assets(page: Page, expected: set, responses: dict, failures: list) -> None:
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    while True:
+        missing = expected.difference(responses)
+        if not missing:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"map assets did not finish loading; missing {len(missing)} responses")
+        page.wait_for_timeout(100)
+    failed = sorted(url for url in expected if responses[url] >= 400)
+    if failed or failures:
+        raise AssertionError(f"map asset requests failed: {failed + failures}")
+
+
 def enter_game(page: Page, base_url: str, interactions: bool = False) -> Page:
     errors: list[str] = []
+    responses: dict[str, int] = {}
+    failures: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("response", lambda response: responses.__setitem__(response.url, response.status))
+    page.on("requestfailed", lambda request: failures.append(f"{request.url}: {request.failure}"))
     page.goto(base_url + "/game/", wait_until="domcontentloaded")
     try:
-        page.get_by_role("heading", name="登录你的账号").wait_for(timeout=15000)
+        page.get_by_role("heading", name="登录你的账号").wait_for(timeout=TIMEOUT_MS)
     except Exception:
         print(page.url)
         print(page.locator("body").inner_text())
@@ -193,19 +226,28 @@ def enter_game(page: Page, base_url: str, interactions: bool = False) -> Page:
     page.locator('input[name="password"]').fill("smoke-password")
     page.locator('form.stack-form button[type="submit"]').click()
     try:
-        page.get_by_role("heading", name="谁将踏入石门？").wait_for(timeout=15000)
+        page.get_by_role("heading", name="谁将踏入石门？").wait_for(timeout=TIMEOUT_MS)
     except Exception:
         print(page.locator("body").inner_text())
         print("console errors:", errors)
         raise
     page.get_by_role("button", name="进入世界").click()
-    page.locator(".world-host").wait_for(timeout=15000)
+    page.locator(".world-host").wait_for(timeout=TIMEOUT_MS)
     try:
-        page.locator(".player-status").wait_for(timeout=15000)
+        page.locator(".player-status").wait_for(timeout=TIMEOUT_MS)
     except Exception:
         print(page.locator("body").inner_text())
         print("console errors:", errors)
         raise
+    if REQUIRE_MAP_LIBRARIES:
+        expected = expected_map_assets(base_url)
+        if not expected:
+            raise AssertionError(f"map {MAP_ID} does not reference any published map libraries")
+        wait_for_assets(page, expected, responses, failures)
+        page.wait_for_timeout(250)
+        notices = page.locator(".world-toast").all_inner_texts()
+        if any("图库加载失败" in notice or "未发布" in notice for notice in notices):
+            raise AssertionError("map library fallback was reported: " + " | ".join(notices))
     page.wait_for_timeout(500)
     if interactions:
         page.keyboard.press("i")

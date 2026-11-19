@@ -1,6 +1,6 @@
 # 外部资源清单
 
-> 最后更新：2026-11-11
+> 最后更新：2026-11-19
 > 状态：生效
 
 ## 1. 获取方式
@@ -21,6 +21,21 @@
 | Crystal.MapEditor | `https://github.com/Suprcode/Crystal.MapEditor` | `71f653f5a6d48c24246583402bec9b7a0f57c47c` | 33 MB | 未发现明确许可证文件 | 地图编辑和地图格式参考 | `.external/Crystal.MapEditor` |
 
 Crystal.MapEditor 在分发前必须补充许可证确认；当前只作为本地参考和集成对象，不进入发布包。
+
+### 2.1 Jev 客户端素材（本地研究输入）
+
+| 资源 | 地址 | SHA256 | 大小 | 本地路径 |
+| --- | --- | --- | --- | --- |
+| Client With Monk | `https://mirfiles.co.uk/resources/mir2/users/Jev/Mir%202/Client%20With%20Monk.rar` | `9534eb3cfed4b31de986bbff663e7a69bfc97428fe0f12e40bdf1c8f1ff6ae98` | 7,543,876,769 字节 | `.external/jev-client/client-with-monk.rar` |
+
+解压后的客户端根目录为 `.external/jev-client/client/Client`，不提交仓库：
+
+- `Data/` 约 8.2 GB，含 2,304 个 `.lib`，覆盖角色、怪物、NPC、UI、特效和地图图库。
+- `Sound/` 约 145 MB，624 个文件；解压工具报告 `160-8.wav` checksum error，但该文件仍可按 44.1 kHz、16-bit、单声道 WAV 读取，未做音频内容逐字节比对。
+- `Data/Map/` 保留客户端原始地图图库；`Map/` 软链到 `.external/jev-client/supported-maps`。
+- 地图图库由 `src/Crystal.WebAssets/MapLibraryCatalog.cs` 映射；Linux 下新增大小写不敏感解析以兼容 `SmTiles.Lib`/`Smtiles.lib`、`Objects27.Lib`/`Objects27.lib` 等真实文件名。
+
+Jev 活跃地图共 496 张。当前支持 479 张；排除 17 张：`0`、`2`、`DogYoArena2`、`NAMMAN`、`NAMMAN2`、`NAMMAND_1`、`NAMMAND_2`、`bonguk1`～`bonguk5`、`hyunwol2`、`hyunwol3`、`n0`、`ok10`、`zl`。其中 `0`、`2` 缺 `WemadeMir3/Snow/Object1c`（地图库 ID `257`）；`n0` 缺 `138`（`ShandaMir2/Objects19`）；其余依赖 `MapLibraryCatalog` 未覆盖的 Jev 私有高编号图库。`Maps&Tiles.zip` 仅提供 `ShandaMir3/Object1c`，不能替代 Wemade 雪地图库；根目录 `Object1c.Lib` 也不是同一状态路径。缺失图库不得用猜测文件替代；未覆盖地图在运行时明确使用地形占位。
 
 ## 3. Crystal.Database 内容
 
@@ -64,8 +79,9 @@ Crystal.MapEditor 在分发前必须补充许可证确认；当前只作为本�
 
 | 资源 | 用途 | 状态 |
 | --- | --- | --- |
-| 客户端 `Data/`、`Map/`、`Sound/` | 客户端运行、图库、地图、音效 | 未准备 |
-| 客户端 `.lib` 图库 | 物品、怪物、NPC、UI、特效 | 未准备 |
+| 客户端 `Data/`、`Map/`、`Sound/` | 客户端运行、图库、地图、音效 | 已从 Jev 客户端包准备到 `.external/jev-client`，不入库 |
+| 未被 `MapLibraryCatalog` 覆盖的 17 张地图图库 | 地图完整覆盖 | `0`、`2` 缺 `257`，`n0` 缺 `138`，其余为 Jev 私有高编号图库；当前明确排除 |
+| 真实音频转码产物 | 音效播放 | 尚未实现/验证 |
 | 地图编辑器依赖的部件 | 地图编辑 | 已有仓库，未验证构建 |
 | 支付渠道凭证 | 充值 | 后续由部署环境注入，不入库 |
 | 生产域名、TLS、CDN | 发布与补丁 | 后续配置 |
