@@ -53,6 +53,7 @@ start_zone() {
   local status_port
   port="$(pick_port)"
   status_port="$(pick_port)"
+  : >"$log"
   CRYSTAL_ZONE_ID="smoke-$label" \
   CRYSTAL_ZONE_IP=127.0.0.1 \
   CRYSTAL_ZONE_PORT="$port" \

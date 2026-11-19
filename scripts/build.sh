@@ -53,8 +53,25 @@ echo "== Content editor test =="
 echo "== Zone metrics test =="
 "$DOTNET" build Tests/ZoneMetrics/ZoneMetrics.csproj -c "$CONFIGURATION" --nologo
 
+echo "== Zone version gate test =="
+"$DOTNET" build Tests/ZoneVersionGate/ZoneVersionGate.csproj -c "$CONFIGURATION" --nologo
+
 echo "== Client updates test =="
 "$DOTNET" build Tests/ClientUpdates/ClientUpdates.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Web Assets =="
+"$DOTNET" build src/Crystal.WebAssets/Crystal.WebAssets.csproj -c "$CONFIGURATION" --nologo
+"$DOTNET" build tools/Crystal.WebAssetCompiler/Crystal.WebAssetCompiler.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Web Gateway =="
+"$DOTNET" build src/Crystal.Web.Gateway/Crystal.Web.Gateway.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Protocol Samples =="
+"$DOTNET" build tools/Crystal.ProtocolSamples/Crystal.ProtocolSamples.csproj -c "$CONFIGURATION" --nologo
+
+echo "== Web tests =="
+"$DOTNET" build Tests/WebAssets/WebAssets.csproj -c "$CONFIGURATION" --nologo
+"$DOTNET" build Tests/WebGateway/WebGateway.csproj -c "$CONFIGURATION" --nologo
 
 echo "== Control API =="
 "$DOTNET" build src/Crystal.Control.Api/Crystal.Control.Api.csproj -c "$CONFIGURATION" --nologo

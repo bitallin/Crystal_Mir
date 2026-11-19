@@ -6,6 +6,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | `milestones.md` | 里程碑、交付物、验收标准和依赖 |
+| `browser-client.md` | 浏览器客户端 W0～W3、交付物、验收和风险 |
 
 实际执行状态以 `docs/PROGRESS.md` 为准。
 

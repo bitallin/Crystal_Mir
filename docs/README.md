@@ -1,6 +1,6 @@
 # Crystal 通用传奇引擎：技术文档
 
-> 最后更新：2026-11-18
+> 最后更新：2026-11-19
 > 文档状态：生效
 
 ## 1. 文档目标
@@ -19,13 +19,16 @@
 6. `architecture/05-operations.md`：开区、合区、支付、GM、监控和备份。
 7. `architecture/06-security-and-compliance.md`：权限、审计、供应链和许可证边界。
 8. `architecture/07-deployment-and-observability.md`：部署拓扑、环境和可观测性。
-9. `product/feature-matrix.md`：需求能力与当前基础、里程碑的对应关系。
-10. `product/control-web-prototype.md`：后台信息架构、页面清单、版式和关键业务闭环。
-11. `development/`：本地环境、构建测试、迁移实施。
-12. `roadmap/milestones.md`：阶段目标、交付物和验收标准。
-13. `PROGRESS.md`：当前进度、变更记录和阻塞项。
-14. `reference/`：由代码或 schema 生成的参考手册，以及客户端补丁 manifest 契约。
-15. `runbooks/`：生产故障和高压操作手册。
+9. `architecture/08-vera20k-benchmark-and-refactor.md`：VERA20K 架构逆向、Crystal 差距矩阵和重构路线。
+10. `architecture/09-browser-client.md`：浏览器客户端、WebSocket 网关和 Web 资源架构。
+11. `product/feature-matrix.md`：需求能力与当前基础、里程碑的对应关系。
+12. `product/browser-client-requirements.md`：浏览器直玩的范围、设备基线、交互和验收。
+13. `product/control-web-prototype.md`：后台信息架构、页面清单、版式和关键业务闭环。
+14. `development/`：本地环境、构建测试、迁移实施和 Web 客户端开发。
+15. `roadmap/milestones.md`：阶段目标、交付物和验收标准；浏览器客户端见 `roadmap/browser-client.md`。
+16. `PROGRESS.md`：当前进度、变更记录和阻塞项。
+17. `reference/`：由代码或 schema 生成的参考手册，以及客户端补丁和 Web 客户端契约。
+18. `runbooks/`：生产故障和高压操作手册。
 
 ## 3. 文档地图
 
@@ -41,7 +44,9 @@ docs/
 │   ├── 04-hot-update.md              客户端与服务端热更新
 │   ├── 05-operations.md              开区、合区、支付与运营
 │   ├── 06-security-and-compliance.md 安全、审计与许可证
-│   └── 07-deployment-and-observability.md 部署与可观测性
+│   ├── 07-deployment-and-observability.md 部署与可观测性
+│   ├── 08-vera20k-benchmark-and-refactor.md VERA20K 对标与重构建议
+│   └── 09-browser-client.md           浏览器客户端与网关架构
 ├── adr/
 │   ├── README.md                     ADR 规范与索引
 │   ├── 0001-control-plane-data-plane.md
@@ -58,7 +63,10 @@ docs/
 │   ├── 0012-zone-agent-process-level-content-switching.md
 │   ├── 0013-zone-runtime-metrics-file.md
 │   ├── 0014-zone-metric-history-and-health-evaluation.md
-│   └── 0015-client-signed-patch-manifest-and-transactional-update.md
+│   ├── 0015-client-signed-patch-manifest-and-transactional-update.md
+│   ├── 0016-vera20k-benchmark-boundary.md
+│   ├── 0017-browser-client-and-websocket-gateway.md
+│   └── 0018-web-asset-pipeline.md
 ├── development/
 │   ├── README.md                     开发文档索引
 │   ├── 01-local-environment.md       本地环境与外部资源
@@ -67,13 +75,16 @@ docs/
 ├── product/
 │   ├── README.md                     产品文档索引
 │   ├── feature-matrix.md             需求能力矩阵
+│   ├── browser-client-requirements.md 浏览器直玩需求
 │   └── control-web-prototype.md      后台信息架构与高保真原型
 ├── roadmap/
 │   ├── README.md                     路线图索引
-│   └── milestones.md                 里程碑、交付物和验收标准
+│   ├── milestones.md                 里程碑、交付物和验收标准
+│   └── browser-client.md             浏览器客户端路线图
 ├── reference/
 │   ├── README.md                     参考手册索引（schema/包/配置/映射）
-│   └── client-patch-manifest.md      客户端签名 manifest、CLI 与回滚语义
+│   ├── client-patch-manifest.md      客户端签名 manifest、CLI 与回滚语义
+│   └── web-client-contracts.md       Web 客户端网关、资源和协议契约
 └── runbooks/
     ├── README.md                     运行手册索引（故障与高压操作）
     ├── zone-server-linux.md          Ubuntu 区服部署与运行（legacy/发布模式）

@@ -1,6 +1,6 @@
 # 架构文档索引
 
-> 最后更新：2026-11-18
+> 最后更新：2026-11-19
 > 状态：生效
 
 ## 1. 架构目标
@@ -10,12 +10,13 @@
 - 后台可视化制作版本内容。
 - 内容版本化发布、灰度、回滚。
 - 客户端资源和服务端内容热更新。
+- 原生浏览器客户端通过 WebSocket 网关直接游玩，旧 Windows 客户端继续兼容。
 - 多区服开区、合区、支付、GM 和监控。
 - 第三方基于模板快速创建自己的版本并部署。
 
 ## 2. 非目标
 
-- 不在第一阶段重写客户端渲染层。
+- 不重写现有 Windows 客户端渲染层；浏览器客户端是独立实现，不复用 WinForms 控件树或 SlimDX 渲染。
 - 不在第一阶段实现任意 UI 拖拽布局编辑器。
 - 不在第一阶段做多租户计费平台。
 - 不把现有 `Envir`/`Map` 一次性重写为全新引擎。
@@ -46,6 +47,9 @@
 | 区服指标 | ZoneServer 本地采样并原子写文件，Agent 校验后通过心跳上报，不跨 GPL 边界读进程内存 | `adr/0013-zone-runtime-metrics-file.md` |
 | 指标历史与健康 | 心跳幂等写样本，metrics API 返回窗口趋势，健康等级由平台阈值实时计算 | `adr/0014-zone-metric-history-and-health-evaluation.md` |
 | 客户端补丁 | 签名 manifest 门禁、文件级增量、SHA256 校验、事务应用和崩溃恢复，旧 PList 路径保留 | `adr/0015-client-signed-patch-manifest-and-transactional-update.md` |
+| VERA20K 对标 | 保留服务端权威 MMO；借会话边缘、版本协商、命令日志/回放、UGC 和客户端分发边界 | `adr/0016-vera20k-benchmark-boundary.md` |
+| 浏览器客户端 | 独立 TypeScript/PixiJS Web 客户端，经 WebSocket 字节网关复用现有协议；旧客户端并存 | `adr/0017-browser-client-and-websocket-gateway.md` |
+| Web 资源 | `.lib`/`.map` 离线转换为可缓存的图集、地图包和版本化 manifest | `adr/0018-web-asset-pipeline.md` |
 
 ## 5. 文档索引
 
@@ -58,6 +62,8 @@
 | `05-operations.md` | 开区、合区、支付、GM、监控、备份 | 生效 |
 | `06-security-and-compliance.md` | 权限、审计、供应链、脚本沙箱、许可证 | 生效 |
 | `07-deployment-and-observability.md` | 环境、拓扑、容器、日志指标追踪 | 生效 |
+| `08-vera20k-benchmark-and-refactor.md` | VERA20K 公开架构逆向、差距矩阵、目标边界和分阶段重构路线 | 评审中 |
+| `09-browser-client.md` | 浏览器客户端、WebSocket 网关、Web 资源和故障边界 | 生效（W0 闭环，W1/W2 实施中） |
 
 ## 6. 当前实现与目标架构
 

@@ -7,6 +7,7 @@ export DOTNET="${DOTNET:-$HOME/.dotnet/dotnet}"
 cd "$ROOT"
 ./scripts/build.sh
 ./scripts/test.sh
+./scripts/build-web-client.sh
 ./scripts/test-client-updates.sh
 ./scripts/check-boundaries.sh
 ./scripts/inspect-db.sh
@@ -18,13 +19,9 @@ else
   echo "Skipping Zone Server smoke test: .external/Crystal.Database/Jev/Server.MirDB is missing."
 fi
 
-if command -v node >/dev/null 2>&1; then
-  for script in src/Crystal.Control.Web/assets/*.js; do
-    node --check "$script"
-  done
-else
-  echo "Skipping Control Web JavaScript syntax check: node is not installed." >&2
-fi
+for script in src/Crystal.Control.Web/assets/*.js; do
+  node --check "$script"
+done
 
 if [ -n "${CRYSTAL_DATABASE_URL:-}" ] || [ -n "${CRYSTAL_DB_CONNECTION:-}" ]; then
   ./scripts/test-control-api.sh

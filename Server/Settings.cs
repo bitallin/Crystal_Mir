@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Text;
 using Server.MirDatabase;
 using Server.MirObjects;
 using Shared;
@@ -40,6 +41,7 @@ namespace Server
 
         //General
         public static string VersionPath = Path.Combine(".", "Mir2.Exe");
+        public static string VersionHashValues = string.Empty;
         public static bool CheckVersion = true;
         public static List<byte[]> VersionHashes;
         public static string GMPassword = "C#Mir 4.0";
@@ -368,6 +370,9 @@ namespace Server
                             VersionHashes.Add(md5.ComputeHash(stream));
                 }
 
+                foreach (string value in VersionHashValues.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    VersionHashes.Add(Encoding.UTF8.GetBytes(value));
+
             }
             catch (Exception ex)
             {
@@ -375,10 +380,17 @@ namespace Server
             }
         }
 
+        public static void SetVersionHashValues(string values)
+        {
+            VersionHashValues = values ?? string.Empty;
+            LoadVersion();
+        }
+
         public static void Load()
         {            
             //General
             VersionPath = Reader.ReadString("General", "VersionPath", VersionPath);
+            VersionHashValues = Reader.ReadString("General", "VersionHashValues", VersionHashValues);
             CheckVersion = Reader.ReadBoolean("General", "CheckVersion", CheckVersion);
             RelogDelay = Reader.ReadUInt16("General", "RelogDelay", RelogDelay);
             GMPassword = Reader.ReadString("General", "GMPassword", GMPassword);
@@ -669,6 +681,7 @@ namespace Server
         {
             //General
             Reader.Write("General", "VersionPath", VersionPath);
+            Reader.Write("General", "VersionHashValues", VersionHashValues);
             Reader.Write("General", "CheckVersion", CheckVersion);
             Reader.Write("General", "RelogDelay", RelogDelay);
             Reader.Write("General", "Multithreaded", Multithreaded);

@@ -33,3 +33,7 @@ Exports
 Exports/**
 Build
 Build/**
+web-client/node_modules
+web-client/dist
+web-client/.vite
+web-client/coverage

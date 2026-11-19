@@ -457,6 +457,10 @@ internal static class Program
         Settings.ThreadLimit = Math.Max(1, GetInt("CRYSTAL_ZONE_THREADS", Settings.ThreadLimit));
         Settings.SaveDelay = Math.Max(1, GetInt("CRYSTAL_ZONE_SAVE_DELAY_MINUTES", Settings.SaveDelay));
 
+        string? versionHashValues = Environment.GetEnvironmentVariable("CRYSTAL_ZONE_VERSION_HASH_VALUES");
+        if (!string.IsNullOrWhiteSpace(versionHashValues))
+            Settings.SetVersionHashValues(string.Join(',', Settings.VersionHashValues, versionHashValues.Trim()));
+
         if (!System.Net.IPAddress.TryParse(Settings.IPAddress, out _))
             throw new ArgumentException($"CRYSTAL_ZONE_IP is not a valid IP address: {Settings.IPAddress}");
 
@@ -532,6 +536,7 @@ internal static class Program
             "  CRYSTAL_ZONE_HOME, CRYSTAL_ZONE_ID, CRYSTAL_ZONE_IP, CRYSTAL_ZONE_PORT,\n" +
             "  CRYSTAL_ZONE_STATUS_PORT, CRYSTAL_ZONE_MAX_USER, CRYSTAL_ZONE_MAX_IP,\n" +
             "  CRYSTAL_ZONE_THREADS, CRYSTAL_ZONE_SAVE_DELAY_MINUTES,\n" +
+            "  CRYSTAL_ZONE_VERSION_HASH_VALUES,\n" +
             "  CRYSTAL_ZONE_CONTENT_RELEASE, CRYSTAL_ZONE_CONTENT_PUBLIC_KEY, CRYSTAL_ZONE_CONTENT_KEY_ID,\n" +
             "  CRYSTAL_ZONE_READY_FILE, CRYSTAL_ZONE_METRICS_FILE");
     }

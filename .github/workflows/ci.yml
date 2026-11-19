@@ -20,6 +20,12 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web-client/package-lock.json
+
       - name: Restore and build
         run: ./scripts/build.sh
 
@@ -71,6 +77,33 @@ jobs:
 
       - name: Control API integration on PostgreSQL 16
         run: ./scripts/test-control-api.sh
+
+  browser-client:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET: dotnet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web-client/package-lock.json
+
+      - name: Install browser test dependencies
+        run: |
+          python3 -m pip install -r scripts/requirements-browser-test.txt
+          python3 -m playwright install --with-deps chromium
+
+      - name: Browser client smoke test
+        run: ./scripts/test-browser-client.sh
 
   compose-stack:
     runs-on: ubuntu-latest

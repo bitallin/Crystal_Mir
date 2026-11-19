@@ -15,6 +15,7 @@
 | `api-conventions.md` | REST/gRPC 命名、错误码、分页、幂等 | 手工维护 | 生效（M1 初版） |
 | `control-api.md` | Control API 配置、接口、认证边界和限制 | 手工维护 | 生效（M1 认证、账号生命周期与只读初版） |
 | `client-patch-manifest.md` | 客户端签名 manifest、CLI、启动器配置、更新状态和回滚语义 | 手工维护，与 `Crystal.Patcher` 同步 | 生效（M3 垂直切片） |
+| `web-client-contracts.md` | Web 客户端 bootstrap、WebSocket、资源 manifest 和协议编解码契约 | 手工维护，与网关/资源编译器同步 | 生效（W0/W1） |
 | `glossary.md` | 领域术语中英文对照 | 手工维护 | 待编写 |
 | `external-resources.md` | 外部仓库、commit、资源和缺口 | 手工维护 | 生效 |
 | `db-inventory.md` | 标准数据库版本、实体数量和黄金样本 | 检查器生成 | 生效 |

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Crystal.WebAssets.Tests</AssemblyName>
+    <RootNamespace>Crystal.WebAssets.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Crystal.WebAssets/Crystal.WebAssets.csproj" />
+  </ItemGroup>
+</Project>

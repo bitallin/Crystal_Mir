@@ -91,6 +91,7 @@ sudo systemctl restart crystal-zone
 | `CRYSTAL_ZONE_MAX_IP` | 单 IP 最大连接数 |
 | `CRYSTAL_ZONE_THREADS` | 怪物处理线程数 |
 | `CRYSTAL_ZONE_SAVE_DELAY_MINUTES` | 自动保存间隔 |
+| `CRYSTAL_ZONE_VERSION_HASH_VALUES` | 追加到版本白名单的字面量哈希，逗号分隔；Web 构建哈希使用此项 |
 | `CRYSTAL_ZONE_READY_FILE` | ready JSON 路径；Agent 模式使用，legacy 可留空 |
 | `CRYSTAL_ZONE_METRICS_FILE` | 运行时指标 JSON 路径；Agent 模式使用，legacy 可留空 |
 | `CRYSTAL_ZONE_CONTENT_RELEASE` | 可选，已验签发布目录；不设置时使用 legacy `Server.MirDB` |

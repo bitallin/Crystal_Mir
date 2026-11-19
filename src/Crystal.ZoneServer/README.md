@@ -69,8 +69,14 @@ Runtime environment:
 - `CRYSTAL_ZONE_MAX_IP`
 - `CRYSTAL_ZONE_THREADS`
 - `CRYSTAL_ZONE_SAVE_DELAY_MINUTES`
+- `CRYSTAL_ZONE_VERSION_HASH_VALUES`
 - `CRYSTAL_ZONE_READY_FILE`
 - `CRYSTAL_ZONE_METRICS_FILE`
+
+`CRYSTAL_ZONE_VERSION_HASH_VALUES` appends comma-separated literal client version hashes to the
+legacy `VersionPath` MD5 whitelist. The browser client sends its `clientBuildHash` string as UTF-8;
+use the same value here (or `[General] VersionHashValues` in `Configs/Setup.ini`) when
+`CheckVersion=true`.
 
 After the zone is ready, `--metrics-file` writes a versioned JSON document once per second
 with player count, Tick P95, error rate and counters for the last 60 seconds. The file is

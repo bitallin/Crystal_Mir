@@ -263,6 +263,7 @@
 | `string` | `ValuePath` | "./Envir/Values" |
 | `string` | `VampireName` | "VampireSpider" |
 | `List<Byte[]>` | `VersionHashes` | null |
+| `string` | `VersionHashValues` | "" |
 | `string` | `VersionPath` | "./Mir2.Exe" |
 | `Boolean` | `WeddingRingRecall` | true |
 | `string` | `WhiteSnake` | "WhiteSerpent" |

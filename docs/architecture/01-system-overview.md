@@ -50,10 +50,13 @@ flowchart TB
         AGENT[Zone Agent]
         ZONE[Zone Server]
         CLIENT[Client + Launcher]
+        WEB[Browser Client]
         GW --> ZONE
         AGENT --> ZONE
         CLIENT --> GW
+        WEB --> GW
         CLIENT --> CDN
+        WEB --> CDN
     end
 
     API --> PG
@@ -89,6 +92,7 @@ flowchart TB
 | Login/Gateway | 登录、版本校验、区服列表、会话路由、限流 |
 | Client Launcher | 签名校验、增量下载、原子替换、回滚 |
 | Client | 现有 Crystal Windows 客户端，逐步数据驱动化 |
+| Browser Client | PixiJS 世界渲染和响应式 HUD，通过 WSS 字节网关复用现有协议；与旧客户端并存 |
 
 ## 5. 核心流程
 

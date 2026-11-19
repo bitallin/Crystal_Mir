@@ -1,18 +1,20 @@
 # 项目进度台账
 
-> 最后更新：2026-11-18
-> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标、指标历史/健康评估、Control.Web 区服闭环和客户端签名补丁核心已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情、趋势告警与五类命令、签名 manifest、文件级增量、事务应用与回滚）。远端 CI run 15 已全绿；已依次修复 `DOTNET` 命令名解析、Control API 镜像依赖、runner 缺少 `rg` 和 MinIO 镜像下架问题。二进制 delta、灰度/CDN、launcher 自更新、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、Windows 冒烟和 M0 外部阻塞仍未完成；授权、许可证和素材合规按要求本轮跳过
+> 最后更新：2026-11-19
+> 当前阶段：M1、M2 已完成本轮范围；M3 服务端控制闭环、真实运行时指标、指标历史/健康评估、Control.Web 区服闭环和客户端签名补丁核心已完成本轮研究项目范围（Agent 注册/心跳/命令、发布包下载验签、staging、进程级 activate/rollback、ready/指标文件、失败恢复、CLI/systemd、真实区服总览/详情、趋势告警与五类命令、签名 manifest、文件级增量、事务应用与回滚）。浏览器直玩并行轨道已形成 W0 垂直闭环，W1/W2 的客户端、网关、资源管线、HUD 和核心业务链路已落地。远端 CI run 15 已全绿；已依次修复 `DOTNET` 命令名解析、Control API 镜像依赖、runner 缺少 `rg` 和 MinIO 镜像下架问题。二进制 delta、灰度/CDN、launcher 自更新、进程内热切换、玩家状态迁移、外部 staging/systemd 验证、Windows 冒烟、真实素材动画、Safari/真机/性能和 M0 外部阻塞仍未完成；授权、许可证和素材合规按要求本轮跳过
 
 ## 1. 当前状态
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 技术文档体系 | 已完成 | 架构、ADR、开发、路线图、进度台账已建立 |
-| 架构决策 | 已完成初版 | ADR 0001～0015 |
+| 架构决策 | 已完成初版 | ADR 0001～0018（0016 提议中；0017/0018 已接受） |
 | 构建基线 | 已完成 | Linux 安装 .NET 8 SDK；旧服务端/客户端/内容库/API/工具/GameCore/Agent contracts/ZoneAgent 构建成功；安全回归、内容快照、区服指标和契约边界检查通过 |
 | Linux 区服宿主 | 已完成初版 | `Crystal.ZoneServer` 控制台宿主、日志、SIGTERM 优雅退出、端口/线程环境变量覆盖、内容路径大小写与分隔符兼容；legacy Jev 内容加载 463 张地图，签名发布模式加载 463 地图、1,628 物品、555 怪物、375 NPC、154 任务并完成冒烟 |
 | Ubuntu 部署 | 已完成初版 | 自包含 `linux-x64` ZoneServer 发布约 74 MB；提供 legacy `crystal-zone.service`、`crystal-zone-agent.service`、安装/发布脚本和两份运行手册；容器内未执行真实 systemd 安装和开机自启演练 |
 | 外部资源 | 已完成初版 | `Crystal.Database`、`Crystal.MapEditor` 已拉取；客户端 `Data/Map/Sound` 仍缺 |
+| 浏览器直玩 | W0 已闭环，W1/W2 部分完成 | 独立 `web-client/`（TypeScript/Vite/PixiJS v8/Preact）、`Crystal.Web.Gateway`、`Crystal.WebAssets`、WebAssetCompiler、协议样本和 Playwright 冒烟已建立；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、背包内物品移动、NPC/商店、角色创建/删除和重连已有实现；真实素材动画、音效、Safari/真机和性能验收未完成 |
+| Web 资源管线 | 已完成初版 | `.lib` v2/v3 与 `.map` v2/v3 严格解析、PNG 图集/遮罩、32 字节 `cells.bin`、`meta.json`/`manifest.json`、地图库映射、确定性哈希；编译器强制 `--build-hash`，缺失图库或重复 ID 直接失败；客户端校验地图和图库文件哈希后使用 Blob URL；真实素材与音频转码未验证/未实现 |
 | 数据迁移 | 已完成初版 | 二进制导入器、JSONL 快照、PostgreSQL schema、旧二进制导出、快照/PostgreSQL 到旧库重建完成，黄金样本逐字节一致；掉落、配方、NPC 脚本和地图/预览资源元数据可通过 `--content-root` 导入，启动时 Buff 定义始终导入；脚本已有 AST/编译校验，地图资源已解析格式、尺寸、可走/阻挡/门格；其他资源二进制待做 |
 | 内容快照 | 已完成初版 | `Crystal.Content`（MIT）+ 9,793 个核心实体（含 59 个 Buff）+ 可选 `drop`/`recipe`/`script`/`asset` 实体 + 哈希校验 + ECDSA P-256 签名/验签 + 回归测试；测试内容根批次为 9,797 个实体，最终 `contentHash` 为 `1b93509c81d7c4839f009411d46c3e42f3596c9e7bab368cf711d2dd8ec22291` |
 | 参考文档生成 | 已完成初版 | 25 个内容实体、432 个协议包、274 个配置项已生成 |
@@ -37,6 +39,51 @@
 | M6 通用化与生态 | 未开始 | 0% | 长期 |
 
 ## 3. 工作日志
+
+### 2026-11-19（AGENTS 浏览器客户端开发规范，精简版）
+
+- 范围：在浏览器直玩实现基础上，将仓库级 `AGENTS.md` 从详细清单压缩为 52 行执行约束，细节回引 `docs/`，避免规范与文档重复。
+- 改动：保留项目定位与工作流程、控制面/GPL/不可变内容边界、原生 Web 客户端 + 字节网关 + 权威区服路线、服务端权威、协议逐字节测试、资源哈希与懒加载、`clientBuildHash` 一致、安全/性能基线和完成定义；删除可由架构、开发、契约文档承载的实现细节。
+- 验证：`git diff --check` 通过；人工核对 `AGENTS.md` 与 `docs/product/browser-client-requirements.md`、`docs/architecture/09-browser-client.md`、`docs/development/04-browser-client.md`、`docs/reference/web-client-contracts.md`、ADR 0017/0018 的口径一致。
+- 未验证：本次只修改文档，未重新执行构建、浏览器或真机测试；后续实现仍按本台账的浏览器未验证项推进。
+- 下一步：按新规范先用真实 `Client/Data`、`Client/Map`、`Client/Sound` 完成资源编译和真实测试区服版本门禁联调，再补角色/怪物/NPC 动画、门/光照/音效与 W3 设备矩阵。
+
+### 2026-11-19（浏览器直玩：Web 客户端、网关、资源管线与版本门禁）
+
+- 范围：按 `docs/roadmap/browser-client.md` 实施浏览器直玩并行轨道，保留旧 TCP 客户端、旧协议和权威区服；不重写 `Envir`/`Map`，不引入客户端权威或云游戏串流。
+- Web 客户端：新增 `web-client/`，TypeScript + Vite + PixiJS v8 负责地图/实体/摄像机/伤害数字/聊天气泡，Preact + CSS 负责登录、选角、聊天、背包、装备、NPC、商店和响应式 HUD；桌面支持点击寻路/键盘，手机横屏支持虚拟摇杆和动作按钮，竖屏显示旋转门禁。
+- 协议与业务：显式 `PacketCodec` 覆盖登录、选角、进图、移动、攻击、拾取、聊天、物品信息/使用/装备/移除/丢弃/背包移动、NPC 对话/商店、生命/死亡/复活、地图切换和重连；新增 C# 协议样本工具，生成 86 个 fixture，TypeScript 逐字节回放。
+- 网关：新增 `Crystal.Web.Gateway`，ASP.NET Core Minimal API + WebSocket/TCP 字节桥；只接受 `crystal-v1` 子协议和二进制帧，默认拒绝缺失/不匹配 Origin，执行 256 KiB 帧上限、180 帧/秒、4 MiB/秒、256 连接、30 秒空闲关闭、背压和结构化指标；Production 启动时拒绝 `sha256:dev`、`dev` 资源版本和通配 Origin。
+- 资源：新增 `Crystal.WebAssets` 与 `Crystal.WebAssetCompiler`；严格解析 `.lib` v2/v3 和 `.map` v2/v3，生成 PNG 图集/遮罩、`frames.json`、`meta.json`、32 字节/格 `cells.bin`、manifest 和地图库映射；输出使用显式小端长度编码保证确定性。编译器必须接收 Web `clientBuildHash`，缺失图库、重复 sanitized ID 或缺失构建身份直接失败。
+- 版本门禁：Web 构建生成 `dist/client-build.json`；客户端把 `clientBuildHash` 按 UTF-8 写入 `ClientVersion.VersionHash`。区服 `Settings` 保留 `VersionPath` 文件 MD5 白名单，新增 `[General] VersionHashValues` 和 `CRYSTAL_ZONE_VERSION_HASH_VALUES` 字面量白名单；新增 `Tests/ZoneVersionGate` 验证旧 MD5 与新 Web 哈希并存。
+- 构建与部署：新增 `scripts/build-web-client.sh`、`scripts/test-browser-client.sh`、Python Playwright 冒烟和 Chromium CI job；Compose 增加 `web-gateway`/`web-client` profile，提供网关/静态站 Dockerfile、Nginx WSS 反代、安全头和不可变缓存配置；本地 Compose 默认 `Development`，生产显式设置 `CRYSTAL_WEB_ENVIRONMENT=Production`；Docker 构建上下文排除 `web-client/node_modules`、`dist` 和本地缓存。
+- 本地开发：Vite 开发服务器新增 `/assets/` 静态资源中间件，默认从 `../artifacts/web-assets` 提供编译器产物，支持 `CRYSTAL_WEB_ASSET_ROOT` 覆盖；生产仍由 Nginx/CDN 提供，不改变部署边界。
+- 文档：新增/重写 `docs/product/browser-client-requirements.md`、`docs/architecture/09-browser-client.md`、`docs/roadmap/browser-client.md`、`docs/development/04-browser-client.md`、`docs/reference/web-client-contracts.md`、ADR 0017/0018，并同步架构/产品/路线图/参考索引、需求矩阵、里程碑、ZoneServer README、systemd 示例和本台账。
+- 验证：`npm run typecheck`、`npm test`（5 个测试文件、109 项，含图库哈希篡改拒绝和 16 位包长边界）、`npm run build` 通过；构建 hash 为 `sha256:83d8e0e11e9d1adb34fbd332aeaeecc611c111cba0231342ea876e5ebf8c10e2`，应用壳 gzip 约 `0.45 kB HTML + 7.96 kB CSS + 5.54 kB UI JS + 31.34 kB 主 JS + 174.39 kB Pixi JS`。
+- 验证：`./scripts/build.sh`、`./scripts/test.sh`、`./scripts/zone-smoke.sh` 通过；包含 358 项物品安全回归、39 项内容快照、80 项内容编辑器、区服指标/健康、客户端更新、`Tests/WebAssets`、`Tests/WebGateway`、`Tests/ZoneVersionGate`，以及 legacy/签名发布/缺签名/篡改快照/缺地图区服冒烟；区服失败用例日志初始化竞态已修正。`scripts/test-browser-client.sh` 通过桌面 `1440×900`、移动横屏 `844×390` 和竖屏 `390×844` 冒烟；Vite 开发服务器 `/assets/` 产物读取已用临时编译地图验证；`docker compose --profile web config -q` 通过。
+- 未验证：真实 `Client/Data`、`Client/Map`、`Client/Sound` 素材和真实 `.lib` 遮罩/地图 V3 字段；真实区服版本门禁联调；真实角色/怪物/NPC 图集动画、门动画、混合图块、光照和音效；iPhone/Android 真机、iOS Safari 16.4+、Firefox/Safari 矩阵、30 分钟内存和帧率验收。
+- 下一步：用真实素材跑全量资源编译和地图回归；在测试区服配置 Web 构建哈希做真实登录/进图；补角色/怪物/NPC 图集动画、门/光照/音效；再进入真机与性能验收。
+
+### 2026-11-19（容器内控制面部署与控制台启动）
+
+- 范围：在当前工作容器内启动控制台，Web 监听 `0.0.0.0:80`，由宿主机映射到 `8580`；不修改业务代码、协议或数据模型。
+- 部署：使用共享当前容器网络命名空间的 `crystal-pg-local`、`crystal-api-local` 和 `crystal-web-local` 容器；PostgreSQL 监听 `127.0.0.1:5432`，Control API 监听 `127.0.0.1:5080`，Nginx Web 监听 `0.0.0.0:80` 并同源代理 `/api`、`/health`。
+- 内容：复用本地 PostgreSQL 数据卷中的黄金库导入结果，包含 1,628 物品、555 怪物、463 地图等实体；运行配置和发布私钥位于已忽略的 `artifacts/control-stack/`、`artifacts/control-signing/`。
+- 验证：容器内 `http://127.0.0.1/health/ready` 和外层 `http://10.30.0.25:8580/health/ready` 均返回 ready；`admin` 登录成功；控制台首页标题正常。
+- 未验证：生产域名/TLS、systemd 区服、Windows 客户端和外部对象存储；本次仅为容器内联调实例。
+- 下一步：生产化仍按 `docs/architecture/07-deployment-and-observability.md` 接入反向代理/TLS、持久化 PostgreSQL/MinIO、密钥管理和区服 Agent。
+
+### 2026-11-19（VERA20K 架构逆向与 Crystal 对标）
+
+- 范围：对 `https://www.ra20k.com/` 的公开前端、下载通道和 `YuriPlanet/vera20k` 公开仓库做架构级逆向；只做公开 `GET` 观察，不登录、不写入目标站点。
+- 观察：目标站是 `VERA20K 红警2-尤里的复仇联机平台`；`/lobby` 为 Vue 3 + Vite SPA，前端使用 Nakama 兼容 `/v2` 契约和自定义 `/vera/*` 接口；公开节点为 `sh2-vera20k.libisky.com`，节点注册表为 `/nodes.json`。
+- 运行时：目标引擎为 Rust workspace，拆分 `sim`/`render`/`app`/`net`，使用定点数、固定随机流和状态 checksum；在线为 HTTPS lobby + 认证 UDP relay，客户端保留 RTS simulation authority。
+- 交付：目标站地图/Mod 使用 SHA-256 内容寻址、上传/审核/版本/举报/下架；安装包和引擎更新分离，公开下载指针带签名；另有节点健康、公共统计、排位赛季和回放。
+- 结论：不把 Crystal 改成 VERA20K 的客户端权威 lockstep；保留服务端权威 MMO，吸收会话边缘、多维版本门禁、command journal/回放、UGC 供应链、节点目录和 ClientCore 分层。
+- 文档：新增 `docs/architecture/08-vera20k-benchmark-and-refactor.md` 和提议中的 `docs/adr/0016-vera20k-benchmark-boundary.md`，并更新架构索引、ADR 索引和本文档。
+- 验证：公开页面、`/nodes.json`、`/vera/config`、`/vera/ready`、`/vera/stats`、下载 `latest.json` 和公开仓库文档均已读取核对；未执行目标站登录、上传或写入。
+- 未验证：目标站后台技术栈、Nakama 是否为官方部署、审核工作流、反作弊、支付/订阅和容量指标；仓库自述的 30 人/20,000 单位未做性能复现。
+- 下一步：若认可 ADR 0016，先做 P0 预会话握手原型、玩家 config/ready/stats 只读接口、节点目录和版本兼容矩阵；不先改游戏主循环。
 
 ### 2026-11-18（CI runner 兼容性与 S3Mock 替换）
 
@@ -524,6 +571,9 @@
 | 2026-11-18 | 区服运行时指标文件桥接 | `docs/adr/0013-zone-runtime-metrics-file.md` |
 | 2026-11-18 | 区服指标历史与健康评估 | `docs/adr/0014-zone-metric-history-and-health-evaluation.md` |
 | 2026-11-18 | 客户端签名补丁清单与事务更新 | `docs/adr/0015-client-signed-patch-manifest-and-transactional-update.md` |
+| 2026-11-19 | 以 VERA20K 为参照的会话边缘与可验证性边界（提议） | `docs/adr/0016-vera20k-benchmark-boundary.md` |
+| 2026-11-19 | 原生浏览器客户端与 WebSocket 字节网关 | `docs/adr/0017-browser-client-and-websocket-gateway.md` |
+| 2026-11-19 | Web 资源离线编译与版本化 | `docs/adr/0018-web-asset-pipeline.md` |
 
 ## 5. 阻塞与风险
 
@@ -531,6 +581,9 @@
 | --- | --- | --- | --- |
 | 环境 | 当前环境是 Linux，无法运行 Windows 客户端和 WinForms 宿主 | 只能完成交叉构建，不能做客户端运行冒烟 | 准备 Windows 环境或 Windows CI runner |
 | 资源 | 客户端 `Data/Map/Sound` 和 `.lib` 图库缺失 | 无法跑通完整客户端 | 确认合法来源并加入外部资源清单 |
+| 资源 | 真实 `.lib`/`.map` 和音频未进入 Web 回归；当前只使用合成资产和 fixture | 真实遮罩、地图 V3、纹理内存、音效和视觉正确性未知 | 准备外部素材根目录后跑全量编译、Playwright 地图回归和真机性能采样 |
+| 版本 | Web 构建哈希已支持区服字面量白名单，但尚未在真实测试区服联调 | 开发环境可用；生产门禁不能仅凭单测宣称闭环 | 在测试区服设置 `VersionHashValues`/`CRYSTAL_ZONE_VERSION_HASH_VALUES`，用真实 Web 构建登录进图 |
+| 设备 | 尚无 iPhone/iPad/Android 真机和 Safari 验收 | 触控、WebGL2、DPR、内存和自动播放策略可能暴露问题 | 按 W3 建立设备矩阵和性能/内存记录 |
 | 平台 | 客户端和 WinForms 宿主运行依赖 Windows | Linux 已验证区服运行，但客户端登录和进服仍需 Windows | 拆分构建矩阵，Windows runner 做客户端运行验证 |
 | CI | 已解决 | run 15 三个 job 全部通过 | 保留 run 15 日志；后续 CI 变更继续以三个 job 为门禁 |
 | 运行 | 当前环境是 Linux，未执行 Windows 客户端登录/进服和 WinForms 宿主冒烟 | M0 客户端验收仍不能闭环 | 准备 Windows runner 或测试机 |
@@ -556,6 +609,9 @@
 7. 接入 Prometheus/OpenTelemetry 指标汇聚、长期存储和告警；补充 Windows 客户端连接后的非零玩家数与真实错误率验证。
 8. 在 Windows 环境启动 `Client`，连接 Linux 区服完成登录、选角、进服、移动、打怪冒烟测试。
 9. 授权、许可证和素材合规不纳入当前研究项目计划；Windows 客户端运行资源仍按外部依赖准备。
+10. 若 ADR 0016 通过评审，按 `docs/architecture/08-vera20k-benchmark-and-refactor.md` 的 P0 先补预会话握手、玩家只读接口、节点目录和版本兼容矩阵。
+11. 浏览器轨道优先用真实 `Client/Data`、`Client/Map` 跑全量资源编译，在测试区服配置 `clientBuildHash` 完成真实登录/选角/进图/移动回归。
+12. 补真实角色/怪物/NPC 图集动画、地图门/混合图块/光照和音效，再执行 W3 的 Safari、iPhone、Android、帧率、30 分钟内存和视觉回归。
 
 ## 7. 更新规则
 

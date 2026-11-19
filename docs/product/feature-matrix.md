@@ -1,6 +1,6 @@
 # 需求能力矩阵
 
-> 最后更新：2026-11-18
+> 最后更新：2026-11-19
 > 状态：生效
 
 ## 1. 说明
@@ -32,6 +32,7 @@
 | 音效 | 客户端 Sound 库 | 音效绑定、试听、音量/场景配置 | 音效资产、事件映射、预览 | M2 |
 | 玩法/规则 | `Settings` + 代码分支 | 规则 DSL/Lua、按区服覆盖、热更新 | 规则引擎、沙箱、配置版本 | M6 |
 | 客户端热更新 | 新增 MIT `Crystal.Patcher` 和 `Crystal.PatcherTool`：ECDSA P-256 签名 manifest、SHA256 文件级增量、HTTP Range 续传、`.crystal-update` 事务应用、失败恢复和回滚；旧 WinForms Launcher 在配置 `ManifestUrl` 后接入，旧 `PList.gz` 路径保留 | 签名清单、增量、CDN、灰度、回滚 | 二进制 delta、CDN/渠道分发、launcher 自更新、Windows 运行冒烟 | M3（文件级更新闭环完成） |
+| 浏览器直玩 | 已建立独立 TypeScript/PixiJS Web 客户端、Preact HUD、WebSocket 字节网关、`.lib`/`.map` PNG 资源管线、协议样本与 Playwright 冒烟；登录、选角、进图、移动、基础战斗、拾取、聊天、背包/装备、NPC/商店、角色创建/删除和重连已有实现；真实素材动画、Safari/真机、音效和完整性能验收未完成 | 现代桌面/移动浏览器直接进入同一区服，旧客户端并存 | 真实角色/怪物动画、门/光照/音效、真机矩阵、性能与内存验收、完整业务回归 | W0 完成；W1/W2 部分；W3 未开始 |
 | 服务端热重载 | 已支持 ZoneServer 启动期验证签名发布、隔离重建旧库并物化内容；独立 `Crystal.ZoneAgent` 已实现注册、心跳、命令租约、下载验签、staging、进程级 activate/rollback/reload/stop、ready 和失败恢复；Control.Web 已接入真实区服指标、命令历史和五类操作；legacy 二进制库模式保留 | 零停机内容快照切换、失败回滚、玩家状态迁移 | 进程内原子切换、双实例/HA、状态迁移、灰度/CDN 和生产级指标汇聚 | M3（本轮服务端控制与 Web 闭环完成） |
 | 开区 | 手工配置和启动 | 模板化开区、定时、健康门禁 | 区服编排、Agent、监控 | M4 |
 | 合区 | 无 | 预检、ID 映射、冻结、校验、回滚 | 合区引擎、冲突策略、报告 | M4 |

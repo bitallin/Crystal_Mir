@@ -371,6 +371,15 @@ FodyWeavers.xsd
 # Generated content snapshots and local import output
 /artifacts/
 
+# Browser client build and local tool state
+/web-client/node_modules/
+/web-client/dist/
+/web-client/.vite/
+/web-client/coverage/
+/artifacts/web-assets/
+/.hypothesis/
+/core.*
+
 # Content signing private keys and local secret stores
 *-private.pem
 *.private.pem

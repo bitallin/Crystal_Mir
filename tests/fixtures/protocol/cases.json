@@ -1,0 +1,803 @@
+{
+  "schemaVersion": 1,
+  "source": "Shared packet classes",
+  "cases": [
+    {
+      "name": "client.version",
+      "direction": "client",
+      "id": 0,
+      "hex": "10000000080000000123456789abcdef",
+      "bytes": 16,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.keepalive",
+      "direction": "client",
+      "id": 2,
+      "hex": "0c00020040fca99b9a010000",
+      "bytes": 12,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.login",
+      "direction": "client",
+      "id": 5,
+      "hex": "1c0005000a706c617965722ee4b8800c6372797374616c2d70617373",
+      "bytes": 28,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.newCharacter",
+      "direction": "client",
+      "id": 6,
+      "hex": "130006000ce6b58be8af95e8a792e889b20102",
+      "bytes": 19,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.deleteCharacter",
+      "direction": "client",
+      "id": 7,
+      "hex": "0800070003000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.startGame",
+      "direction": "client",
+      "id": 8,
+      "hex": "0800080002000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.logout",
+      "direction": "client",
+      "id": 9,
+      "hex": "04000900",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.turn",
+      "direction": "client",
+      "id": 10,
+      "hex": "05000a0003",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.walk",
+      "direction": "client",
+      "id": 11,
+      "hex": "05000b0006",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.run",
+      "direction": "client",
+      "id": 12,
+      "hex": "05000c0001",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.chat",
+      "direction": "client",
+      "id": 13,
+      "hex": "1a000d0011e4bda0e5a5bdefbc8c4372797374616c2100000000",
+      "bytes": 26,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.moveItem",
+      "direction": "client",
+      "id": 14,
+      "hex": "0d000e00010200000009000000",
+      "bytes": 13,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.attack",
+      "direction": "client",
+      "id": 47,
+      "hex": "06002f000200",
+      "bytes": 6,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.pickup",
+      "direction": "client",
+      "id": 35,
+      "hex": "04002300",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.requestItemInfo",
+      "direction": "client",
+      "id": 39,
+      "hex": "0800270065000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.callNpc",
+      "direction": "client",
+      "id": 50,
+      "hex": "0e0032000403020105406d61696e",
+      "bytes": 14,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.buyItem",
+      "direction": "client",
+      "id": 51,
+      "hex": "0f0033000807060504030201050000",
+      "bytes": 15,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.sellItem",
+      "direction": "client",
+      "id": 52,
+      "hex": "0e00340011223344556677880200",
+      "bytes": 14,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.useItem",
+      "direction": "client",
+      "id": 22,
+      "hex": "0d001600efcdab907856341201",
+      "bytes": 13,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.equipItem",
+      "direction": "client",
+      "id": 18,
+      "hex": "110012000178695a4b3c2d1e0f04000000",
+      "bytes": 17,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.removeItem",
+      "direction": "client",
+      "id": 19,
+      "hex": "110013000278695a4b3c2d1e0f02000000",
+      "bytes": 17,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.dropItem",
+      "direction": "client",
+      "id": 23,
+      "hex": "0f0017001032547698badcfe010000",
+      "bytes": 15,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "client.townRevive",
+      "direction": "client",
+      "id": 68,
+      "hex": "04004400",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.connected",
+      "direction": "server",
+      "id": 0,
+      "hex": "04000000",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.clientVersion",
+      "direction": "server",
+      "id": 1,
+      "hex": "0500010001",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.disconnect",
+      "direction": "server",
+      "id": 2,
+      "hex": "0500020001",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.keepalive",
+      "direction": "server",
+      "id": 3,
+      "hex": "0c00030040fca99b9a010000",
+      "bytes": 12,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.login",
+      "direction": "server",
+      "id": 7,
+      "hex": "0500070004",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.loginBanned",
+      "direction": "server",
+      "id": 8,
+      "hex": "190008000ce4b8b4e697b6e5b081e7a681009412d43846df48",
+      "bytes": 25,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.loginSuccess",
+      "direction": "server",
+      "id": 9,
+      "hex": "36000900020000000000000006e5878ce4ba912a00000000c489102846df480100000006e99d92e5b29a2500010100c489102846df48",
+      "bytes": 54,
+      "compressed": false,
+      "summary": {
+        "characterCount": 2,
+        "firstCharacter": "\u51CC\u4E91"
+      }
+    },
+    {
+      "name": "server.newCharacter",
+      "direction": "server",
+      "id": 10,
+      "hex": "05000a000a",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.newCharacterSuccess",
+      "direction": "server",
+      "id": 11,
+      "hex": "1e000b000200000009e696b0e8a792e889b20100040100c489102846df48",
+      "bytes": 30,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.deleteCharacter",
+      "direction": "server",
+      "id": 12,
+      "hex": "05000c0001",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.deleteCharacterSuccess",
+      "direction": "server",
+      "id": 13,
+      "hex": "08000d0002000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.startGame",
+      "direction": "server",
+      "id": 14,
+      "hex": "09000e000080070000",
+      "bytes": 9,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.startGameBanned",
+      "direction": "server",
+      "id": 15,
+      "hex": "19000f000ce7a681e6ada2e8bf9be585a50084f33af146df48",
+      "bytes": 25,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.startGameDelay",
+      "direction": "server",
+      "id": 16,
+      "hex": "0c001000ee02000000000000",
+      "bytes": 12,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.mapInformation",
+      "direction": "server",
+      "id": 17,
+      "hex": "1f00110007000000013009e6af94e5a587e79c810b000c0002010304002000",
+      "bytes": 31,
+      "compressed": false,
+      "summary": {
+        "mapIndex": 7,
+        "fileName": "0",
+        "title": "\u6BD4\u5947\u7701"
+      }
+    },
+    {
+      "name": "server.newMapInfo",
+      "direction": "server",
+      "id": 18,
+      "hex": "7d0012000700000009e6af94e5a587e79c8140010000f000000009000000010000000800000009e8beb9e7958ce69d9164000000c800000002000000010000000a00000013426f7264657256696c6c6167652f477561726406e5ae88e58dab0700000037000000420000004d0064000103000000bbaa00000300000001",
+      "bytes": 125,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.userInformation",
+      "direction": "server",
+      "id": 21,
+      "hex": "1e011500e9030000d207000006e5878ce4ba9106e8a18ce4bc9a06e68890e59198a0d7ffff00002a000a0000001400000004032c0100007800000015cd5b0700000000b168de3a00000000020000020102000000010100000000000000640000008403e8030300ffffffff01000000000000000000000000000000000000000000ffffffff000000000000010200000000010200000000000000c80000008403e8030100ffffffff01000000000000000000000000000000000000000000ffffffff000000000000881300001900000000000000000000000000000000000000000000010000000ce59fbae69cace58991e69caf010001020102036400c8002c0103012a00fa0000000000000001f4010000000000000000000063000000",
+      "bytes": 286,
+      "compressed": false,
+      "summary": {
+        "name": "\u51CC\u4E91",
+        "level": 42,
+        "inventoryCount": 2
+      }
+    },
+    {
+      "name": "server.userSlotsRefresh",
+      "direction": "server",
+      "id": 22,
+      "hex": "7c00160001020000000103000000000000002c0100008403e8030700ffffffff01000000000000000000000000000000000000000000ffffffff0000000000000102000000010400000000000000900100008403e8030100ffffffff01000000000000000000000000000000000000000000ffffffff000000000000",
+      "bytes": 124,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.userLocation",
+      "direction": "server",
+      "id": 23,
+      "hex": "0d0017001f0000002900000006",
+      "bytes": 13,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectPlayer",
+      "direction": "server",
+      "id": 24,
+      "hex": "560018008913000006e5878ce4ba9106e8a18ce4bc9a06e68890e59198b0d7e8ff00002a000c0000002200000003020405000600070000000000000000ffff0000000000000000000000000000000001000000030000",
+      "bytes": 86,
+      "compressed": false,
+      "summary": {
+        "name": "\u51CC\u4E91",
+        "objectId": 5001
+      }
+    },
+    {
+      "name": "server.objectHero",
+      "direction": "server",
+      "id": 25,
+      "hex": "500019008a13000006e88bb1e99b840000ffffffff020123000d00000023000000000102ffffffff080000000000000000ffff0000000000000000000000000000000000000000000006e5878ce4ba91",
+      "bytes": 80,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectRemove",
+      "direction": "server",
+      "id": 26,
+      "hex": "08001a0089130000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectTurn",
+      "direction": "server",
+      "id": 27,
+      "hex": "11001b00891300000c0000002200000002",
+      "bytes": 17,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectWalk",
+      "direction": "server",
+      "id": 28,
+      "hex": "11001c00891300000d0000002200000002",
+      "bytes": 17,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectRun",
+      "direction": "server",
+      "id": 29,
+      "hex": "11001d00891300000f0000002200000002",
+      "bytes": 17,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.chat",
+      "direction": "server",
+      "id": 30,
+      "hex": "1b001e0015e6aca2e8bf8ee69da5e588b0e6af94e5a587e79c8102",
+      "bytes": 27,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectChat",
+      "direction": "server",
+      "id": 31,
+      "hex": "16001f00891300000ce7bb84e9989fe59097efbc9f00",
+      "bytes": 22,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.moveItem",
+      "direction": "server",
+      "id": 37,
+      "hex": "0e00250001020000000900000001",
+      "bytes": 14,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.newItemInfo",
+      "direction": "server",
+      "id": 32,
+      "hex": "5c0020006500000015e98791e5889be88dafefbc88e5b08fe9878fefbc890d01001f03000100010101650000001e00190000000101000000000000000000000000000118e681a2e5a48de5b091e9878fe7949fe591bde580bce38082",
+      "bytes": 92,
+      "compressed": false,
+      "summary": {
+        "index": 101,
+        "name": "\u91D1\u521B\u836F\uFF08\u5C0F\u91CF\uFF09"
+      }
+    },
+    {
+      "name": "server.objectItem",
+      "direction": "server",
+      "id": 64,
+      "hex": "210040007117000009e98791e5889be88dafffffffff0e00000024000000650001",
+      "bytes": 33,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectGold",
+      "direction": "server",
+      "id": 65,
+      "hex": "1400410072170000fa0000000f00000025000000",
+      "bytes": 20,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectMonster",
+      "direction": "server",
+      "id": 71,
+      "hex": "37004700591b000003e9b8a1ffffffff100000002600000003000600010000000000000000000000000000000000000000000000000000",
+      "bytes": 55,
+      "compressed": false,
+      "summary": {
+        "name": "\u9E21",
+        "image": 3
+      }
+    },
+    {
+      "name": "server.objectNpc",
+      "direction": "server",
+      "id": 92,
+      "hex": "2e005c00411f000006e5ae88e58dab00ffffff4d00ffffffff110000002700000000020000000100000002000000",
+      "bytes": 46,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.npcResponse",
+      "direction": "server",
+      "id": 93,
+      "hex": "20005d0003000000063c6d61696e3e09e6aca2e8bf8ee38082067b406275797d",
+      "bytes": 32,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.npcGoods",
+      "direction": "server",
+      "id": 102,
+      "hex": "350066001f8b080000000000000363646060e06480801666107ec1cccaf01f081819b001900c94b9c09e8101003674215f3f000000",
+      "bytes": 53,
+      "compressed": true,
+      "summary": {
+        "itemCount": 1,
+        "panelType": 0
+      }
+    },
+    {
+      "name": "server.gainedItem",
+      "direction": "server",
+      "id": 66,
+      "hex": "390042000b000000000000004c0400008403e8030200ffffffff01000000000000000000000000000000000000000000ffffffff0000000000",
+      "bytes": 57,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.gainedGold",
+      "direction": "server",
+      "id": 67,
+      "hex": "08004300f4010000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.loseGold",
+      "direction": "server",
+      "id": 68,
+      "hex": "080044001e000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.deleteItem",
+      "direction": "server",
+      "id": 79,
+      "hex": "0e004f000b000000000000000100",
+      "bytes": 14,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.durabilityChanged",
+      "direction": "server",
+      "id": 76,
+      "hex": "0e004c000b000000000000002003",
+      "bytes": 14,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.healthChanged",
+      "direction": "server",
+      "id": 77,
+      "hex": "0c004d00180100005a000000",
+      "bytes": 12,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.damageIndicator",
+      "direction": "server",
+      "id": 75,
+      "hex": "0d004b002500000002591b0000",
+      "bytes": 13,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.struck",
+      "direction": "server",
+      "id": 73,
+      "hex": "08004900591b0000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectStruck",
+      "direction": "server",
+      "id": 74,
+      "hex": "15004a0089130000591b00000c0000002200000004",
+      "bytes": 21,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.death",
+      "direction": "server",
+      "id": 80,
+      "hex": "0d0050000c0000002200000004",
+      "bytes": 13,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectDied",
+      "direction": "server",
+      "id": 81,
+      "hex": "12005100591b000010000000260000000600",
+      "bytes": 18,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.revived",
+      "direction": "server",
+      "id": 136,
+      "hex": "04008800",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectRevived",
+      "direction": "server",
+      "id": 137,
+      "hex": "090089008913000001",
+      "bytes": 9,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.mapChanged",
+      "direction": "server",
+      "id": 98,
+      "hex": "1e0062000700000001300000000000000c00000022000000040000000000",
+      "bytes": 30,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectHide",
+      "direction": "server",
+      "id": 94,
+      "hex": "08005e0089130000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectShow",
+      "direction": "server",
+      "id": 95,
+      "hex": "08005f0089130000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectTeleportOut",
+      "direction": "server",
+      "id": 99,
+      "hex": "090063008913000001",
+      "bytes": 9,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectTeleportIn",
+      "direction": "server",
+      "id": 100,
+      "hex": "090064008913000001",
+      "bytes": 9,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.teleportIn",
+      "direction": "server",
+      "id": 101,
+      "hex": "04006500",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectHealth",
+      "direction": "server",
+      "id": 139,
+      "hex": "0a008b00591b00004000",
+      "bytes": 10,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectMana",
+      "direction": "server",
+      "id": 140,
+      "hex": "09008c00891300004b",
+      "bytes": 9,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.objectLeveled",
+      "direction": "server",
+      "id": 89,
+      "hex": "0800590089130000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.levelChanged",
+      "direction": "server",
+      "id": 87,
+      "hex": "160057002b002a000000000000008403000000000000",
+      "bytes": 22,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.gainExperience",
+      "direction": "server",
+      "id": 85,
+      "hex": "08005500b0040000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.timeOfDay",
+      "direction": "server",
+      "id": 61,
+      "hex": "05003d0003",
+      "bytes": 5,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.logoutSuccess",
+      "direction": "server",
+      "id": 58,
+      "hex": "08003a0000000000",
+      "bytes": 8,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.logoutFailed",
+      "direction": "server",
+      "id": 59,
+      "hex": "04003b00",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    },
+    {
+      "name": "server.returnToLogin",
+      "direction": "server",
+      "id": 60,
+      "hex": "04003c00",
+      "bytes": 4,
+      "compressed": false,
+      "summary": null
+    }
+  ]
+}

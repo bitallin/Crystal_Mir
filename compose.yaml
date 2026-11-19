@@ -77,7 +77,7 @@ services:
       context: .
       dockerfile: deploy/docker/control-api.Dockerfile
     environment:
-      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_ENVIRONMENT: ${CRYSTAL_WEB_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Crystal: Host=postgres;Port=5432;Database=crystal;Username=crystal;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       CRYSTAL_CONTROL_JWT_SIGNING_KEY: ${CRYSTAL_CONTROL_JWT_SIGNING_KEY:?set CRYSTAL_CONTROL_JWT_SIGNING_KEY in .env}
@@ -120,6 +120,40 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    restart: unless-stopped
+
+  web-gateway:
+    profiles: ["web"]
+    image: ${CRYSTAL_WEB_GATEWAY_IMAGE:-crystal/web-gateway:dev}
+    build:
+      context: .
+      dockerfile: deploy/docker/web-gateway.Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      CRYSTAL_WEB_ZONE_ID: default
+      CRYSTAL_WEB_ZONE_TCP: ${CRYSTAL_WEB_ZONE_TCP:-host.docker.internal:7000}
+      CRYSTAL_WEB_ALLOWED_ORIGINS: ${CRYSTAL_WEB_ALLOWED_ORIGINS:-http://localhost:18089}
+      CRYSTAL_WEB_ASSET_VERSION: ${CRYSTAL_WEB_ASSET_VERSION:-dev}
+      CRYSTAL_WEB_ASSET_MANIFEST_URL: /assets/${CRYSTAL_WEB_ASSET_VERSION:-dev}/manifest.json
+      CRYSTAL_WEB_CLIENT_BUILD_HASH: ${CRYSTAL_WEB_CLIENT_BUILD_HASH:-sha256:dev}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${CRYSTAL_COMPOSE_WEB_GATEWAY_PORT:-15080}:5080"
+    restart: unless-stopped
+
+  web-client:
+    profiles: ["web"]
+    image: ${CRYSTAL_WEB_CLIENT_IMAGE:-crystal/web-client:dev}
+    build:
+      context: .
+      dockerfile: deploy/docker/web-client.Dockerfile
+    depends_on:
+      - web-gateway
+    volumes:
+      - ${CRYSTAL_WEB_ASSET_ROOT:-./artifacts/web-assets}:/usr/share/nginx/html/assets:ro
+    ports:
+      - "127.0.0.1:${CRYSTAL_COMPOSE_WEB_CLIENT_PORT:-18089}:80"
     restart: unless-stopped
 
 volumes:
